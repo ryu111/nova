@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = []
 
+[project.scripts]
+# 執行檔名用 ASCII（CLAUDE.md 的 CLI executable 例外）；模組路徑用中文沒問題
+nova = "nova.載體.命令列:主程式"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -19,13 +23,20 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
     "pre-commit>=4.6.2",
+    "pytest-xdist>=3.8.0",
+    "pytest-randomly>=4.1.0",
 ]
 
 # pytest 官方對新專案的建議：測試放在套件外、用 importlib 匯入模式
 # https://docs.pytest.org/en/stable/explanation/goodpractices.html
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 刻意不放 -n：強制平行會毀掉 TDD 內圈（worker 啟動成本吃掉 pre-commit 的秒級預算，
+# 而且 -x 在平行下語義會劣化）。平行只由閘的規則定義開啟，見 src/nova/載體/規則表.py
 addopts = "--import-mode=importlib -ra --strict-markers --strict-config"
+markers = [
+    "serial: 不可與其他測試平行跑（會搶同一份資源，例如檔案系統或巢狀 pytest）",
+]
 
 [tool.ruff]
 line-length = 100

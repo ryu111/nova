@@ -24,7 +24,10 @@ uv run pytest -k 骨架 -x         # 關鍵字篩選，第一個紅就停
 uv run pytest --lf               # 只重跑上次紅的
 uv run ruff check . && uv run ruff format .   # lint 與格式
 uv run mypy                      # 型別（strict）
-uv run pre-commit run --all-files             # 手動跑一次 commit 前的快閘
+
+uv run nova 閘 提交               # commit 前的閘（7 條，約 2 秒，第一個紅就停）
+uv run nova 閘 ci --全部跑完      # CI 跑的那一組（8 條，約 3 秒，一次看到所有紅的）
+uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過閘門
 ```
 
 一律走 `uv run`，不要先 activate venv——忘了 activate 會靜默跑到系統 Python 3.9。
@@ -34,19 +37,25 @@ uv run pre-commit run --all-files             # 手動跑一次 commit 前的快
 先寫會紅的測試 → 看到它紅 → 最少的程式碼讓它綠 → 全綠下重構。
 通則在 `~/.claude/rules/測試.md`，這裡只寫 nova 的接線：
 
-| 階段 | 跑什麼 | 怎麼跑 | 時間 |
+| 階段 | 跑什麼 | 怎麼跑 | 實測 |
 |---|---|---|---|
-| 內圈（寫 code 時） | 手上那幾支 | `uv run pytest -k <關鍵字> -x` | < 5 秒 |
-| commit 前 | ruff check、ruff format、**tests/單元**、**機密防護** | pre-commit hook 自動 | < 10 秒 |
-| PR / push main | **四道閘全部** | GitHub Actions，check 名稱 `gates` | < 10 分鐘 |
+| 內圈（寫 code 時） | 手上那幾支 | `uv run pytest -k <關鍵字> -x` | < 1 秒 |
+| 工具呼叫前 | 禁令指令攔截 | `.claude/settings.json` 的 PreToolUse hook | 30 毫秒 |
+| commit 前 | `nova 閘 提交`（7 條） | pre-commit hook 自動 | 約 2 秒 |
+| commit 訊息 | 繁體中文檢查 | commit-msg hook 自動 | 毫秒 |
+| PR / push main | `nova 閘 ci --全部跑完`（8 條） | GitHub Actions，check 名 `gates` | 約 15 秒 |
 
-- 四道閘 = `ruff check` / `ruff format --check` / `mypy` / `pytest`。定義在
-  `.github/workflows/gates.yml`，本地一次跑完就是 `uv run pre-commit run --all-files`
-  再加 `uv run mypy && uv run pytest`。
+**規則只寫一份**：全部登記在 `src/nova/載體/規則表.py`，pre-commit／CI／agent hook
+三個地方各只有一行呼叫 nova。想加規則就加在規則表，**不要往 YAML／JSON 裡塞邏輯**——
+設定檔裡的程式碼沒辦法測試，等於沒有保證。
+
+**階段就是資源排程**：規則依階段（靜態 → 型別 → 測試）由小到大、一次一條序列跑。
+快的先給回饋，重的後跑，而且不同時吃滿 CPU——資源互搶造成的紅燈是雜訊不是訊號。
+平行只發生在 pytest 內部（`-n auto --dist worksteal`），且 `serial` 標記的測試單獨序列跑。
+
 - **`gates` 這個 job 名稱是 main 保護規則的 required check context，不准改。**
-  改了 = 保護規則指向一個不存在的檢查，PR 會永遠卡住。
-- **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**。
-  要繞過閘門，先修閘門。
+- **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**——
+  現在由 `nova 檢查指令` 機械攔截，不再只是提示詞。要繞過閘門，先修閘門。
 
 ## 機密
 
@@ -99,14 +108,15 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 
 ## 目前狀態
 
-骨架階段：三個子套件只有說明用的 `__init__.py`，還沒有實作。
-測試 18 支，全部在驗證骨架與防護本身（src layout、三層子套件、三層測試目錄、
-設定不散落、規格文件在位、機密不進版控）。`tests/整合/` 還是空的。
+`載體/` 有第一段實作：機械化閘（設計見 [`docs/設計/01-機械化閘.md`](docs/設計/01-機械化閘.md)）。
+`迴圈/` 與 `契約/` 除了 `檢查結果` 之外仍是空的——迴圈是 §10 建置順序的下一階。
 
-已做過的固定負控（證明測試真的會紅，不必重推）：
+已做過的固定負控（證明防護真的會紅，不必重推）：
 
-| 破壞什麼 | 哪支會紅 |
+| 破壞什麼 | 結果 |
 |---|---|
-| `mkdir nova`（破壞 src layout） | `test_採用_src_layout_而非_flat_layout` |
-| 從 `.gitignore` 拿掉 `.env` | `test_git_本人確認會忽略[.env]` |
-| 直接 `git push origin main` | 被 ruleset 擋下（必經 PR） |
+| `mkdir nova`（破壞 src layout） | `test_採用_src_layout_而非_flat_layout` 紅 |
+| 從 `.gitignore` 拿掉 `.env` | `test_git_本人確認會忽略[.env]` 紅 |
+| 直接 `git push origin main` | 被 ruleset 擋下（`Changes must be made through a pull request`） |
+| 測試檔留了簡體字 | `nova 閘` 的 `lang-traditional` 紅，指到檔名行號 |
+| `規則表.py` import 沒排序 | `nova 閘` 的 `ruff-check` 紅，commit 被擋 |

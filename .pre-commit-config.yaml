@@ -1,33 +1,19 @@
-# 快閘：commit 前跑得完的（目標 10 秒內）。
-# 慢的留給 CI：mypy、tests/整合、tests/驗收 其餘部分。
-# 全部用 language: system + uv run，版本只由 uv.lock 決定，不會和 CI 跑到不同版。
+# 這個檔案刻意只有一行邏輯：呼叫 nova。
+# 規則本身全部登記在 src/nova/載體/規則表.py，每條都有測試背書。
+# YAML 裡的 shell 片段沒辦法測試，等於沒有保證（CLAUDE.md 最高原則一）。
 repos:
   - repo: local
     hooks:
-      - id: ruff-check
-        name: 閘一 ruff check
-        entry: uv run ruff check --force-exclude
-        language: system
-        types_or: [python, pyi]
-        require_serial: true
-
-      - id: ruff-format
-        name: 閘二 ruff format
-        entry: uv run ruff format --check --force-exclude
-        language: system
-        types_or: [python, pyi]
-        require_serial: true
-
-      - id: unit-tests
-        name: 單元測試 tests/單元
-        entry: uv run pytest tests/單元 -q
+      - id: nova-gate-commit
+        name: nova 閘 提交
+        entry: uv run --no-sync nova 閘 提交
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
 
-      - id: secret-guard
-        name: 機密不進版控
-        entry: uv run pytest tests/驗收/test_機密不進版控.py -q
+      - id: nova-commit-msg
+        name: nova 檢查提交訊息
+        entry: uv run --no-sync nova 檢查提交訊息
         language: system
-        pass_filenames: false
-        always_run: true
+        stages: [commit-msg]
