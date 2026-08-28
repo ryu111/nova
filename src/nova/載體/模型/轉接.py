@@ -50,8 +50,23 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     return [*參數, 提示]
 
 
+#: codex 只用這兩個型號（使用者裁定）。luna 是常用的，sol 是高階推理。
+codex常用模型 = "gpt-5.6-luna"
+codex高階模型 = "gpt-5.6-sol"
+#: codex **沒有** `--effort` 旗標（實測 `codex exec --help`），推理強度走設定覆寫。
+#: 值要是合法的 TOML，所以字串得再包一層引號。
+codex推理強度 = "max"
+
+
 def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
-    參數 = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]
+    參數 = [
+        "exec",
+        "--json",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "-c",
+        f'model_reasoning_effort="{codex推理強度}"',
+    ]
     if 選項.隔離設定:
         # codex 的隔離旗標不影響認證（auth.json 另外存），所以沒有 claude 那個取捨。
         參數 += ["--ignore-user-config", "--ignore-rules"]
@@ -62,8 +77,7 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         # --approve-for-me 自己就是「用 workspace-write 沙箱自動核准」（help 原文）。
         # 不用 --dangerously-bypass-approvals-and-sandbox——那條連沙箱都拿掉。
         參數 += ["--approve-for-me"]
-    if 選項.模型:
-        參數 += ["--model", 選項.模型]
+    參數 += ["--model", 選項.模型 or codex常用模型]
     return [*參數, 提示]
 
 

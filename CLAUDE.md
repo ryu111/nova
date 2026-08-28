@@ -32,6 +32,7 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門面：一次 import 就能用
 uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
 uv run nova 問 --用 codex,agy "提示"                   # 接力：前一顆失敗換下一顆
+uv run nova 問 --用 codex --模型 gpt-5.6-sol "提示"     # 高階推理（預設是 gpt-5.6-luna）
 uv run nova 工作流 --用 codex --審查用 agy "任務"       # 跑一輪完整 TDD
 uv run pytest -m 真cli                                 # 真的打三家 CLI（燒 token，兩個閘都排除）
 ```
@@ -166,11 +167,16 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
    必須紅在 `test_採用_src_layout_而非_flat_layout`）。
 2. **`docs/AGENT_ARCHITECTURE.md` 是外部規格原文，一個字都不准改。**
    ruff 已用 `extend-exclude = ["docs"]` 擋掉格式化工具。要修正理解寫在別的檔案裡。
-3. **`pyproject.toml` 是唯一設定來源。** 不開 `pytest.ini`、`setup.py`、`setup.cfg`、
+3. **文件宣稱存在的東西必須真的存在。** `tests/驗收/test_文件即事實.py` 會掃 CLAUDE.md
+   與 `docs/設計/*.md`，反引號裡的測試函式名與檔案路徑都要對得上。
+   這是被一次真實失誤逼出來的：一組測試因為寫檔的錨點沒對上而**靜默沒寫進去**，
+   pytest 照樣綠，而 PR 說明已經在宣稱它們存在了。`test-count` 抓不到——
+   它只擋「測試變少」，擋不了「我以為我加了」。
+4. **`pyproject.toml` 是唯一設定來源。** 不開 `pytest.ini`、`setup.py`、`setup.cfg`、
    `.ruff.toml`——`tests/驗收/test_專案骨架.py` 會抓。
-4. **不得以「模型說完成了」當停止條件**，不得建議「換更強的模型」當第一修復，
+5. **不得以「模型說完成了」當停止條件**，不得建議「換更強的模型」當第一修復，
    不得讓同一個模型自寫自評（§8 反模式二、§12）。
-5. **診斷順序：環境 → 回饋 → 流程。** 拿不到檔案／跨 session 掉狀態 → 載體；
+6. **診斷順序：環境 → 回饋 → 流程。** 拿不到檔案／跨 session 掉狀態 → 載體；
    有動作但沒證據就停 → 迴圈；該跑的節點沒跑 → 圖。錯誤紀錄要寫「發生什麼、在哪、
    哪一層擁有修復」，「agent 表現不好」不是可行動的診斷。
 
@@ -196,6 +202,14 @@ uv run nova 問 --用 agy --json "幫我看 X"   # 結構化證據（終局、�
 `tests/整合/test_模型轉接.py::Test把各家載體關到最小` 背書。
 **已知只做到一半**：工具擋住了，各家內建的 system prompt 還沒（實測十來字的提示，
 codex 吃 17341 input token、agy 吃 14515）。
+
+**各家的預設型號**（都經 `--help` 與實跑查證）：
+
+| 家 | 預設 | 高階 | 推理強度怎麼給 |
+|---|---|---|---|
+| codex | `gpt-5.6-luna` | `gpt-5.6-sol` | **沒有 `--effort`**，走 `-c model_reasoning_effort="max"` |
+| agy | `gemini-3.7-flash-high` | — | **包在型號裡**（`agy models` 實測） |
+| claude | 不設 | — | 有 `--effort` 但目前不用 |
 
 **claude 的設定隔離有代價**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，
 但它同時關掉 keychain 與 OAuth——訂閱登入會死。要嘛設 `ANTHROPIC_API_KEY`，
@@ -248,3 +262,5 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 接力在可編輯下遇到結果未知也換腦 | `test_結果未知在可編輯時不准換` 等 2 支紅 |
 | 接力全掛時不留「試過誰」的證據 | `test_全部失敗要留下試過誰的證據` 等 2 支紅 |
 | 逾時預設調回 300 秒 | `test_預設夠寬` 紅 |
+| 文件提到一支不存在的測試 | `test_文件提到的測試都真的存在` 紅 |
+| codex 的 `-c` 值沒包引號（TOML 解析不出來） | `test_codex的推理強度值是合法TOML` 紅 |
