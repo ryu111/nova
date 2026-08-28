@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nova.契約.模型回應 import 回應
-from nova.契約.角色 import 語言模型
+from nova.契約.角色 import 呼叫選項, 權限, 語言模型
 
 _分隔 = "\n\n---\n\n"
 
@@ -34,12 +34,17 @@ class 固定提示角色:
     腦: 語言模型
     模型: str | None = None
     逾時秒: float = 300.0
+    #: 這個角色能動到什麼。測試員與審查員唯讀就夠，只有實作員需要可編輯。
+    權限: 權限 = 權限.唯讀
 
     def 做(self, 提示: str, *, 工作目錄: Path | None = None) -> 回應:
         """做一件事，回結構化證據。"""
         return self.腦.詢問(
             組提示(self.系統提示, 提示),
-            模型=self.模型,
-            工作目錄=工作目錄,
-            逾時秒=self.逾時秒,
+            選項=呼叫選項(
+                模型=self.模型,
+                工作目錄=工作目錄,
+                逾時秒=self.逾時秒,
+                權限=self.權限,
+            ),
         )

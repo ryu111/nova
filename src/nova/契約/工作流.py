@@ -6,6 +6,7 @@
 同 `模型回應`：全部用 `StrEnum`，識別字中文、值 ASCII。
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -83,3 +84,9 @@ class 階段定義:
     期望綠: bool | None
     綠: "階段代碼 | 結束"
     紅: "階段代碼 | 結束"
+
+
+#: 跑一個階段。收軌跡是為了讓角色看得到前面發生什麼（七欄位的 Memory）。
+執行器 = Callable[[階段定義, 任務, tuple[步驟結果, ...]], 步驟結果]
+#: 機械判準：跑完回 (全綠嗎, 證據)。**不是模型**——驗收權不在執行者手上。
+判準 = Callable[[任務], tuple[bool, str]]

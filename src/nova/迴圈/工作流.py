@@ -16,18 +16,22 @@
 所以這支 runner 的測試不必碰任何 LLM 或子程序。
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
 
-from nova.契約.工作流 import 任務, 步驟結果, 種類, 結束, 結束代碼, 階段代碼, 階段定義
+from nova.契約.工作流 import (
+    任務,
+    判準,
+    執行器,
+    步驟結果,
+    種類,
+    結束,
+    結束代碼,
+    階段代碼,
+    階段定義,
+)
 from nova.契約.模型回應 import 終局
 from nova.契約.角色 import 角色
 from nova.迴圈.狀態機 import TDD階段表, 下一步, 查階段
-
-#: 跑一個階段。收軌跡是為了讓角色看得到前面發生什麼（Memory 欄位）。
-執行器 = Callable[[階段定義, 任務, tuple[步驟結果, ...]], 步驟結果]
-#: 機械判準：跑完回 (全綠嗎, 證據)。**不是 LLM**——驗收權不在執行者手上。
-判準 = Callable[[任務], tuple[bool, str]]
 
 預設最多步數 = 12
 

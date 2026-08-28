@@ -107,3 +107,30 @@ def test_不認得的家要當場報錯(假CLI: Path) -> None:
     結果 = _問("不存在的家", 假CLI, "claude_ok.json")
     assert 結果.returncode != 0
     assert "不存在的家" in 結果.stderr
+
+
+class Test工作流的換腦保證:
+    """自己審自己等於沒審——硬規則 4。這條從文件變成機械保證。"""
+
+    def test_審查用不能跟用同一家(self) -> None:
+        結果 = subprocess.run(
+            [str(nova執行檔), "工作流", "--用", "codex", "--審查用", "codex", "任務"],
+            cwd=專案根目錄,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert 結果.returncode == 2
+        assert "換一顆腦" in 結果.stderr
+
+    def test_審查用是必要參數(self) -> None:
+        """省略不會靜默退回同一家——argparse 當場擋。"""
+        結果 = subprocess.run(
+            [str(nova執行檔), "工作流", "--用", "codex", "任務"],
+            cwd=專案根目錄,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert 結果.returncode != 0
+        assert "審查用" in 結果.stderr

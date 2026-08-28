@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from nova.契約.角色 import 呼叫選項, 權限
 from nova.載體.模型.執行 import 跑cli
 from nova.載體.模型.轉接 import 建立, 找執行檔
 
@@ -53,12 +54,14 @@ class Test全鏈路:
     def test_工作目錄真的傳下去(self, 假CLI: Path, tmp_path: Path) -> None:
         別處 = tmp_path / "別處"
         別處.mkdir()
-        答 = 建立("agy", 執行檔=假CLI).詢問("在嗎", 工作目錄=別處, 環境={"假CLI_印工作目錄": "1"})
+        答 = 建立("agy", 執行檔=假CLI).詢問(
+            "在嗎", 選項=呼叫選項(工作目錄=別處), 環境={"假CLI_印工作目錄": "1"}
+        )
         assert 答.失敗代碼 == "unknown", "假 CLI 印的是路徑不是 envelope，本來就該解不動"
 
     def test_逾時會被殺掉並標成timeout(self, 假CLI: Path) -> None:
         答 = 建立("claude", 執行檔=假CLI).詢問(
-            "在嗎", 逾時秒=0.3, 環境=_環境("claude_ok.json", 0, 假CLI_睡="5")
+            "在嗎", 選項=呼叫選項(逾時秒=0.3), 環境=_環境("claude_ok.json", 0, 假CLI_睡="5")
         )
         assert 答.終局 != "success"
         assert 答.失敗代碼 == "timeout"
@@ -76,7 +79,7 @@ class Test把各家載體關到最小:
     """
 
     def test_claude關掉工具與家目錄設定(self) -> None:
-        參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", None)
+        參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
         assert 參數[參數.index("--tools") : 參數.index("--tools") + 2] == ["--tools", ""], (
             "--tools '' 才會關掉全部內建工具（claude --help 原文：Use \"\" to disable all tools）"
         )
@@ -87,22 +90,22 @@ class Test把各家載體關到最小:
         ]
 
     def test_codex唯讀且不讀使用者設定(self) -> None:
-        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", None)
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
         assert 參數[0] == "exec", "codex 的非互動是子指令不是旗標"
         for 要有 in ("--sandbox", "read-only", "--ignore-user-config", "--ephemeral", "--json"):
             assert 要有 in 參數, f"少了 {要有}"
 
     def test_agy用plan模式(self) -> None:
-        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", None)
+        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
         assert 參數[參數.index("--mode") : 參數.index("--mode") + 2] == ["--mode", "plan"]
 
     def test_提示一律併進參數不靠stdin(self) -> None:
         """agy 1.1.22 實測不讀 stdin，所以三家一律走參數——最小公倍數。"""
         for 家 in ("claude", "codex", "agy"):
-            assert "我的提示" in 建立(家, 執行檔=Path("/x")).組參數("我的提示", None)
+            assert "我的提示" in 建立(家, 執行檔=Path("/x")).組參數("我的提示", None, 權限.唯讀)
 
     def test_模型是漏出的不翻譯(self) -> None:
-        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", "gpt-5-codex")
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", "gpt-5-codex", 權限.唯讀)
         assert "gpt-5-codex" in 參數, "模型字串原樣傳下去，各家命名空間不交集，翻譯只會翻錯"
 
 

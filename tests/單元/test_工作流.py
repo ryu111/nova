@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from nova.契約.工作流 import 任務, 步驟結果, 種類, 結束代碼, 階段代碼, 階段定義
+from nova.契約.工作流 import 任務, 執行器, 步驟結果, 種類, 結束代碼, 階段代碼, 階段定義
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
-from nova.迴圈.工作流 import 建TDD執行器, 執行器, 跑工作流
+from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 
 一件事 = 任務(描述="讓 X 變成 Y", 工作目錄=Path("/不存在但沒人會碰"))
 
