@@ -6,7 +6,9 @@
 
 from pathlib import Path
 
-from nova.載體.規則表 import 建規則表
+import pytest
+
+from nova.載體.規則表 import 平行度, 建規則表
 from nova.載體.閘 import 型別, 測試, 規則, 閘點清單, 靜態
 
 
@@ -89,3 +91,27 @@ def test_兩個閘都排除真cli() -> None:
     assert 帶標記的, "找不到帶 -m 的 pytest 規則"
     for 行 in 帶標記的:
         assert "not 真cli" in 行, f"這條 pytest 規則沒排除真cli：{行.strip()}"
+
+
+class Test平行度:
+    """平行測試不吃滿核心——競爭造成的紅燈是雜訊不是訊號。"""
+
+    @pytest.mark.parametrize(("核心", "預期"), [(16, 12), (8, 6), (4, 3), (2, 1), (1, 1)])
+    def test_用四分之三的核心(self, 核心: int, 預期: int) -> None:
+        assert 平行度(核心) == 預期
+
+    def test_再少也至少一個(self) -> None:
+        """`-n 0` 會讓 pytest-xdist 報錯，不能算出 0。"""
+        assert 平行度(1) >= 1
+
+    def test_不會吃滿(self) -> None:
+        for 核心 in (2, 4, 8, 16, 32, 64):
+            assert 平行度(核心) < 核心, f"{核心} 核算出來吃滿了"
+
+    def test_規則表用的是算出來的數字不是auto(self) -> None:
+        """`-n auto` 會吃滿——改回去這支要紅。"""
+        原始碼 = (Path(__file__).resolve().parents[2] / "src/nova/載體/規則表.py").read_text(
+            encoding="utf-8"
+        )
+        assert '"auto"' not in 原始碼, "-n auto 會吃滿核心"
+        assert "平行度()" in 原始碼
