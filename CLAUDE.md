@@ -29,6 +29,7 @@ uv run nova 閘 提交               # commit 前的閘（7 條，約 2 秒，�
 uv run nova 閘 ci --全部跑完      # CI 跑的那一組（8 條，約 3 秒，一次看到所有紅的）
 uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過閘門
 
+python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門面：一次 import 就能用
 uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
 uv run nova 工作流 --用 codex --審查用 agy "任務"       # 跑一輪完整 TDD
 uv run pytest -m 真cli                                 # 真的打三家 CLI（燒 token，兩個閘都排除）
@@ -237,3 +238,5 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 讓驗證階段改由角色做（自寫自評） | `test_判準階段的步驟結果帶紅綠模型階段不帶` 等 4 支紅 |
 | 某條閘忘了排除 `真cli` 標記 | `test_兩個閘都排除真cli` 紅 |
 | 讓 `--審查用` 可以跟 `--用` 同一家 | `test_審查用不能跟用同一家` 紅 |
+| `派工` 讓兩家共用同一個 `執行檔` | `test_執行檔不准誤用到審查那家` 紅 |
+| 門面多匯出一個名字 | `test_門面很小` 紅 |

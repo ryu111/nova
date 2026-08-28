@@ -117,7 +117,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    <text x="500" y="382" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="700">只有一件事變了：ctx 歸誰。你的座位、你打的字、回你話的介面，都一樣。</text>
   </svg>
   <div style="text-align:center;margin-top:14px">
-    <button id="展開鈕" onclick="切細節()">展開細節圖（37 格・現在做到哪）</button>
+    <button id="展開鈕" onclick="切細節()">展開細節圖（38 格・現在做到哪）</button>
   </div>
 </div>
 <div id="細節區" style="display:none"><svg id="圖"></svg></div></div>
@@ -638,6 +638,21 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
     "tests/驗收/test_真cli契約.py"
    ],
    "註": "抓到三個假 CLI 抓不到的 bug——墊片證明的是轉遞形狀，不是可達性"
+  },
+  {
+   "id": "門面",
+   "標": "門面（公開 API）",
+   "副": "import nova → 問／派工",
+   "x": 824,
+   "y": 1090,
+   "w": 190,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/__init__.py"
+   ],
+   "註": "這是 nova 自己派工做出來的——codex 寫、機械判準驗、agy 審、人驗收"
   }
  ],
  "連線": [
@@ -794,6 +809,11 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
   },
   {
    "從": "流CLI",
+   "到": "工作流",
+   "型": "流"
+  },
+  {
+   "從": "門面",
    "到": "工作流",
    "型": "流"
   }
@@ -977,7 +997,7 @@ function 複製(){
 function 切細節(){
   const 區 = document.getElementById("細節區"), 開 = 區.style.display === "none";
   區.style.display = 開 ? "block" : "none";
-  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（37 格・現在做到哪）";
+  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（38 格・現在做到哪）";
   if(開) 畫();
 }
 建側欄(); 套預設("全部");
