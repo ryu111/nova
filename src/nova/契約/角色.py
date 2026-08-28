@@ -47,14 +47,20 @@ class 呼叫選項:
     逾時秒: float = 預設逾時秒
     #: 預設最嚴的那一邊——忘了設不會變成放行。
     權限: 權限 = 權限.唯讀
+    #: 續接哪一段對話——填上一次 `回應.對話識別碼`。None ＝ 開一段新的。
+    #: 這是「持久對話」的機制：記住 sid，下一輪帶回去。
+    續接: str | None = None
+    #: 要不要把這段對話留在磁碟上。**不留就續接不到。**
+    #: 只有 codex 需要（它預設 `--ephemeral` 不落地）；agy 與 claude 一律會留。
+    保留對話: bool = False
     #: 要不要把使用者家目錄的設定擋在外面。
     #:
     #: 預設 True，因為 nova 的行為該由 nova 決定——讀了 `~/.claude/CLAUDE.md`，
     #: nova[claude] 就會跟 nova[codex] 行為不同，「換腦但行為一樣」當場破功。
     #:
-    #: **代價（實測）**：claude 的 `--bare` 連 keychain 與 OAuth 都不讀，
-    #: 訂閱登入會變成「Not logged in」。要嘛設 `ANTHROPIC_API_KEY`，
-    #: 要嘛把這個關掉（改用 `--restricted`：設定檔照樣隔離，但 CLAUDE.md 仍會被讀）。
+    #: claude 走 `--setting-sources ""`（實測：設定檔與 CLAUDE.md 都讀不到，
+    #: **而且訂閱登入照樣能用**）。不要用 `--bare`——那條連 keychain 與 OAuth
+    #: 都不讀，訂閱使用者會直接變成「Not logged in」。
     隔離設定: bool = True
 
 

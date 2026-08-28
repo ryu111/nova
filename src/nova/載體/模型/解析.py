@@ -15,6 +15,12 @@ from typing import Any
 
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 
+#: JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐原始字元
+#: （實測 agy 的 `response` 欄位偶爾夾了未跳脫的控制字元，嚴格模式當場解不動）。
+#: 解不動的下場是 fail-closed 回「結果未知」——那比寬鬆解析危險得多。
+_寬鬆解析 = json.JSONDecoder(strict=False)
+
+
 _模型關鍵詞 = (
     "unrecognized_model",
     "invalid model",
@@ -44,7 +50,7 @@ def _逐行json(文字: str) -> list[dict[str, Any]]:
         if not 乾淨.startswith("{"):
             continue
         try:
-            解出 = json.loads(乾淨)
+            解出 = _寬鬆解析.decode(乾淨)
         except json.JSONDecodeError:
             continue
         if isinstance(解出, dict):
@@ -179,7 +185,7 @@ def _agy的信封(標準輸出: str) -> tuple[dict[str, Any] | None, list[dict[s
     整份 = 標準輸出.strip()
     if 整份.startswith("{"):
         try:
-            解出 = json.loads(整份)
+            解出 = _寬鬆解析.decode(整份)
         except json.JSONDecodeError:
             解出 = None
         if isinstance(解出, dict) and "status" in 解出:

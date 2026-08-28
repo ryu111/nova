@@ -104,10 +104,11 @@ def _摘要(家: str, 答: 回應) -> str:
     量 = f"{用.輸入token}→{用.輸出token} token"
     if 用.成本美金 is not None:
         量 += f" · US${用.成本美金:.4f}"
+    對話 = f" · sid {答.對話識別碼}" if 答.對話識別碼 else ""
     if 答.終局 is 終局.成功:
-        return f"[{家}] 完成 · {量}"
+        return f"[{家}] 完成 · {量}{對話}"
     如何 = "確定失敗" if 答.終局 is 終局.確定失敗 else "結果未知（不准自動重跑）"
-    return f"[{家}] {如何} {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}"
+    return f"[{家}] {如何} {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}{對話}"
 
 
 def _子命令_問(參數: argparse.Namespace) -> int:
@@ -134,6 +135,8 @@ def _子命令_問(參數: argparse.Namespace) -> int:
             逾時秒=參數.逾時,
             權限=權限.可編輯 if 參數.可編輯 else 權限.唯讀,
             隔離設定=not 參數.不隔離設定,
+            續接=參數.續接,
+            保留對話=參數.保留對話 or bool(參數.續接),
         ),
     )
     if 參數.json:
@@ -259,6 +262,12 @@ def 建剖析器() -> argparse.ArgumentParser:
     問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
     問剖析.add_argument(
         "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
+    )
+    問剖析.add_argument("--續接", default=None, help="接回某段對話（給上一次輸出的 對話識別碼）")
+    問剖析.add_argument(
+        "--保留對話",
+        action="store_true",
+        help="把這段對話留在磁碟上，之後才續接得到（codex 預設不留）",
     )
     問剖析.add_argument(
         "--不隔離設定",

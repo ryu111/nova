@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from nova.契約.模型回應 import 終局
 from nova.契約.角色 import 呼叫選項, 權限
 from nova.載體.模型.執行 import 跑cli
+from nova.載體.模型.解析 import 解析agy
 from nova.載體.模型.轉接 import (
     agy預設模型,
     codex常用模型,
@@ -113,7 +115,10 @@ class Test把各家載體關到最小:
         assert 參數[參數.index("--tools") : 參數.index("--tools") + 2] == ["--tools", ""], (
             "--tools '' 才會關掉全部內建工具（claude --help 原文：Use \"\" to disable all tools）"
         )
-        assert "--bare" in 參數, "--bare 才會跳過 hooks、auto-memory 與 CLAUDE.md 自動探索"
+        assert 參數[參數.index("--setting-sources") : 參數.index("--setting-sources") + 2] == [
+            "--setting-sources",
+            "",
+        ], "設定隔離走 --setting-sources，不要換回 --bare（那條連 keychain 都不讀）"
         assert 參數[參數.index("--system-prompt") : 參數.index("--system-prompt") + 2] == [
             "--system-prompt",
             "",
@@ -205,12 +210,20 @@ class Test隔離設定是漏出的:
     def test_預設隔離(self) -> None:
         assert 呼叫選項().隔離設定 is True
 
-    def test_claude隔離用bare不隔離用restricted(self) -> None:
-        """`--bare` 連 keychain 都不讀（訂閱登入會死），所以要有退路。"""
+    def test_claude用setting_sources隔離而不是bare(self) -> None:
+        """實測：`--setting-sources ""` 讓 CLAUDE.md 讀不到，**而且訂閱登入照樣能用**。
+
+        `--bare` 也能隔離，但它連 keychain 與 OAuth 都不讀——訂閱使用者會直接
+        變成「Not logged in」。兩條都能隔離時，要選不會弄壞認證的那條。
+        """
         隔離 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         不隔離 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(隔離設定=False))
-        assert "--bare" in 隔離 and "--restricted" not in 隔離
-        assert "--restricted" in 不隔離 and "--bare" not in 不隔離
+        assert 隔離[隔離.index("--setting-sources") : 隔離.index("--setting-sources") + 2] == [
+            "--setting-sources",
+            "",
+        ]
+        assert "--bare" not in 隔離, "--bare 會弄壞訂閱登入"
+        assert "--setting-sources" not in 不隔離
 
     def test_codex隔離才擋使用者設定(self) -> None:
         隔離 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
@@ -264,3 +277,68 @@ class Testclaude的變長參數:
                 f"--tools 的值後面必須接一個選項終結變長參數，實際是 {工具值後面!r}"
             )
             assert 參數[-1] == "我的提示"
+
+
+class Test持久對話:
+    """記住 sid ＋ 下一輪帶回去，就能跟同一段對話繼續講。"""
+
+    def test_預設不續接(self) -> None:
+        assert 呼叫選項().續接 is None
+
+    def test_claude用resume(self) -> None:
+        參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(續接="某個id"))
+        assert 參數[參數.index("--resume") : 參數.index("--resume") + 2] == ["--resume", "某個id"]
+
+    def test_agy用conversation(self) -> None:
+        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(續接="某個id"))
+        assert 參數[參數.index("--conversation") : 參數.index("--conversation") + 2] == [
+            "--conversation",
+            "某個id",
+        ]
+
+    def test_codex用resume子指令(self) -> None:
+        """codex 的續接是**子指令**不是旗標，而且 id 是位置參數。"""
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(續接="某個id"))
+        assert 參數[:2] == ["exec", "resume"]
+        assert 參數[-2:] == ["某個id", "提示"]
+
+    def test_codex續接時不准給sandbox或核准旗標(self) -> None:
+        """實測：`exec resume` 不吃這兩條，給了 exit 2。權限沿用原 session。"""
+        for 可以做什麼 in 權限:
+            參數 = 建立("codex", 執行檔=Path("/x")).組參數(
+                "提示", 呼叫選項(續接="某個id", 權限=可以做什麼)
+            )
+            assert "--sandbox" not in 參數
+            assert "--approve-for-me" not in 參數
+
+    def test_codex續接時不准ephemeral(self) -> None:
+        """`--ephemeral` 不落地，續接完就再也接不下去。"""
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(續接="某個id"))
+        assert "--ephemeral" not in 參數
+
+    def test_codex不保留對話時才ephemeral(self) -> None:
+        """預設不留檔（省磁碟）；要之後續接就得先 保留對話=True。"""
+        不留 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        要留 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(保留對話=True))
+        assert "--ephemeral" in 不留
+        assert "--ephemeral" not in 要留
+
+    def test_三家的續接旗標都不會吞掉提示(self) -> None:
+        """`--resume [value]` 這種可選值旗標放錯位置會把提示吃掉。"""
+        for 家 in ("claude", "codex", "agy"):
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("我的提示", 呼叫選項(續接="某個id"))
+            assert 參數[-1] == "我的提示", f"{家} 的提示被吞掉了"
+
+
+class Test解析要容忍控制字元:
+    """真實工具會吐未跳脫的控制字元，嚴格模式當場解不動 → fail-closed 成結果未知。"""
+
+    def test_response裡有原始換行也解得動(self) -> None:
+        壞掉的 = (
+            '{"conversation_id":"x","status":"SUCCESS",'
+            '"response":"第一行\\n第二行",'
+            '"usage":{"input_tokens":1,"output_tokens":1}}'
+        )
+        答 = 解析agy(壞掉的, 0)
+        assert 答.終局 is 終局.成功, "嚴格 JSON 解析會把這個變成『結果未知』"
+        assert "第二行" in 答.文字

@@ -118,16 +118,22 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 |---|---|---|---|
 | 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan` |
 | 可編輯 | `--tools Read,Write,... --permission-mode acceptEdits` | `--approve-for-me`（**不能同時給 `--sandbox`**） | `--mode accept-edits` |
-| 隔離設定 | `--bare` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
+| 隔離設定 | `--setting-sources ""` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
+| 續接對話 | `--resume <id>` | `exec resume <id>`（**子指令**，不吃 `--sandbox`） | `--conversation <id>` |
+| 對話落地 | 一律留 | 預設 `--ephemeral` 不留，**要續接得先關掉** | 一律留 |
 | 預設型號 | 不設 | `gpt-5.6-luna`（高階 `gpt-5.6-sol`） | `gemini-3.7-flash-high` |
 | 推理強度 | 有 `--effort`，目前不用 | **沒有旗標**，走 `-c model_reasoning_effort="max"` | **包在型號裡** |
 | 不隔離 | `--restricted`（設定檔照樣隔離，CLAUDE.md 仍被讀） | 只留 `--ephemeral` | — |
 
-**claude 的取捨是真的，不是我們的 bug**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，
-但它同時關掉 keychain 與 OAuth。訂閱使用者只能二選一：
-設 `ANTHROPIC_API_KEY`，或接受 CLAUDE.md 會被讀進去。
-`test_claude在設定隔離下會認證失敗而且說得出原因` 把這個限制釘住——
-**那支測試紅了是好消息**，代表限制消失了。
+**原本以為的 claude 取捨已經解除。** 一度認為 `--bare` 是唯一能關掉 CLAUDE.md
+自動探索的旗標，而它會連 keychain 與 OAuth 一起關掉（訂閱登入變成「Not logged in」）。
+
+實測後找到 `--setting-sources ""`：**設定檔與 CLAUDE.md 都讀不到，而且訂閱登入照樣能用**。
+所以 `隔離設定=True` 走這一條，**不要換回 `--bare`**。
+`test_claude隔離設定之後讀不到CLAUDE_md` 同時守兩件事：真的讀不到、而且認證沒被弄壞。
+
+教訓：一個限制寫進文件之後，要標清楚它是**查證過的事實**還是**當下沒找到更好的做法**。
+這一條是後者，而它撐了不到一天。
 
 | 差異性質 | 處理 | 例子 |
 |---|---|---|
@@ -173,10 +179,43 @@ fail-closed 回 `unknown`**，不是靜默成功。
 | codex 的 `--sandbox` 與 `--approve-for-me` **互斥**，一起給 exit 2 | 墊片不會抱怨旗標組合 |
 | claude 的 `--tools <tools...>` 是**變長參數**，會把後面的提示吞掉 | 墊片不解析參數 |
 | claude 的 `--bare` 連 **keychain 與 OAuth 都不讀**，訂閱登入會死 | 墊片不需要認證 |
+| `codex exec resume` **不吃** `--sandbox` 與 `--approve-for-me`，給了 exit 2 | 墊片不檢查子指令的旗標集合 |
+| agy 的 JSON 偶爾夾**未跳脫的控制字元**，嚴格解析當場失敗 | 錄下來的樣本剛好沒有 |
 
 **墊片證明的是轉遞形狀，不是可達性。** 這句話在這裡有三個實例。
 
 實錄是 record/replay 的 record 階段，錄於 2026-08-29，來源見 `tests/整合/實錄/README.md`。
+
+## 持久對話：記住 sid ＋ 下一輪帶回去
+
+```bash
+uv run nova 問 --用 codex --保留對話 "記住：暗號是芭樂"
+# → [codex] 完成 · … · sid 01a04aa2-…
+uv run nova 問 --用 codex --續接 01a04aa2-… "暗號是什麼"
+```
+
+三家各有各的講法，介面吸收成一個 `續接` 欄位：
+
+| | claude | codex | agy |
+|---|---|---|---|
+| 續接 | `--resume <id>` | `exec resume <id>`（**子指令**） | `--conversation <id>` |
+| 落地 | 一律留 | 預設 `--ephemeral` 不留 | 一律留 |
+
+**codex 有兩個坑，都是真跑才會知道的**：
+
+1. `exec resume` **不吃** `--sandbox` 與 `--approve-for-me`（給了 exit 2）——權限沿用原 session。
+2. `--ephemeral` 不落地，續接完就再也接不下去。所以續接時一律不加。
+
+`保留對話` 預設 `False`（省磁碟）；`續接` 有值時自動視為要留。
+
+## 解析要容忍未跳脫的控制字元
+
+JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐原始字元——
+實測 agy 的 `response` 欄位偶爾夾了未跳脫的控制字元，`json.loads` 嚴格模式當場解不動。
+
+解不動的下場是 fail-closed 回**結果未知**，而結果未知在可編輯模式下**不准重試**——
+一個顯示層的小瑕疵會變成整條工作流停擺。所以解析器改用
+`json.JSONDecoder(strict=False)`：寬鬆解析的風險遠小於誤判成結果未知。
 
 ## 已知缺口
 

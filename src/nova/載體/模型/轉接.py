@@ -39,7 +39,13 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     """
     # --bare 連 keychain／OAuth 都不讀（訂閱登入會死）；--restricted 只隔離設定檔，
     # CLAUDE.md 仍會被讀。兩害相權由呼叫端決定，不由這裡決定。
-    參數 = ["--print", "--output-format", "json", "--bare" if 選項.隔離設定 else "--restricted"]
+    參數 = ["--print", "--output-format", "json"]
+    if 選項.隔離設定:
+        # 實測：`--setting-sources ""` 讓設定檔與 CLAUDE.md 都讀不到，而且訂閱登入照樣能用。
+        # **不要換回 `--bare`**——那條連 keychain 與 OAuth 都不讀，訂閱使用者會直接掛掉。
+        參數 += ["--setting-sources", ""]
+    if 選項.續接:
+        參數 += ["--resume", 選項.續接]
     if 選項.權限 is 權限.唯讀:
         參數 += ["--tools", ""]  # help 原文：Use "" to disable all tools
     else:
@@ -58,27 +64,31 @@ codex高階模型 = "gpt-5.6-sol"
 codex推理強度 = "max"
 
 
-def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
-    參數 = [
-        "exec",
-        "--json",
-        "--ephemeral",
-        "--skip-git-repo-check",
-        "-c",
-        f'model_reasoning_effort="{codex推理強度}"',
-    ]
+def _codex共通參數(選項: 呼叫選項) -> list[str]:
+    """`exec` 與 `exec resume` 都吃的那幾條。"""
+    參數 = ["--json", "--skip-git-repo-check", "-c", f'model_reasoning_effort="{codex推理強度}"']
     if 選項.隔離設定:
         # codex 的隔離旗標不影響認證（auth.json 另外存），所以沒有 claude 那個取捨。
         參數 += ["--ignore-user-config", "--ignore-rules"]
+    return [*參數, "--model", 選項.模型 or codex常用模型]
+
+
+def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
+    共通 = _codex共通參數(選項)
+    if 選項.續接:
+        # 實測：`exec resume` **不吃** `--sandbox` 與 `--approve-for-me`（給了 exit 2），
+        # 權限沿用原 session。也不加 `--ephemeral`——續接完還要能再續接。
+        return ["exec", "resume", *共通, 選項.續接, 提示]
+    if not 選項.保留對話:
+        共通 += ["--ephemeral"]  # 不落地就續接不到
     if 選項.權限 is 權限.唯讀:
-        參數 += ["--sandbox", "read-only"]
+        共通 += ["--sandbox", "read-only"]
     else:
         # 實測：`--sandbox` 與 `--approve-for-me` **互斥**，一起給會 exit 2。
         # --approve-for-me 自己就是「用 workspace-write 沙箱自動核准」（help 原文）。
         # 不用 --dangerously-bypass-approvals-and-sandbox——那條連沙箱都拿掉。
-        參數 += ["--approve-for-me"]
-    參數 += ["--model", 選項.模型 or codex常用模型]
-    return [*參數, 提示]
+        共通 += ["--approve-for-me"]
+    return ["exec", *共通, 提示]
 
 
 #: agy 的推理強度包在型號裡（`agy models` 實測），不是另一個旗標。
@@ -90,6 +100,9 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
     參數 = ["--output-format", "json", "--mode", 模式]
     參數 += ["--model", 選項.模型 or agy預設模型]
+    if 選項.續接:
+        參數 += ["--conversation", 選項.續接]
+    # agy 一律會留對話，沒有 --ephemeral 這種東西，所以 保留對話 對它是 no-op。
     # --print 吃的是旗標值，不是位置參數（Go flag 風格）。
     return [*參數, "--print", 提示]
 
@@ -195,10 +208,7 @@ def _補上診斷(答: 回應, 標準錯誤: str) -> 回應:
 
 #: 認證失敗時的家別提示。錯誤訊息只說「沒登入」，不會說是哪個旗標害的。
 _認證提示 = {
-    "claude": (
-        "\n（nova 提示：--bare 連 keychain 與 OAuth 都不讀。"
-        "設 ANTHROPIC_API_KEY，或用 --不隔離設定 改走 --restricted。）"
-    ),
+    "claude": "\n（nova 提示：claude 沒登入。跑 `claude` 登入，或設 ANTHROPIC_API_KEY。）",
 }
 
 
