@@ -1,0 +1,40 @@
+[project]
+name = "nova"
+version = "0.1.0"
+description = "宿主反轉架構：nova = harness engineering[loop engineering[llm]]"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nova"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+# pytest 官方對新專案的建議：測試放在套件外、用 importlib 匯入模式
+# https://docs.pytest.org/en/stable/explanation/goodpractices.html
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib -ra --strict-markers --strict-config"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+# docs/ 放的是外部規格原文，一個字都不准被格式化工具改寫
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+files = ["src", "tests"]
+strict = true
