@@ -37,6 +37,15 @@ class 呼叫選項:
     逾時秒: float = 300.0
     #: 預設最嚴的那一邊——忘了設不會變成放行。
     權限: 權限 = 權限.唯讀
+    #: 要不要把使用者家目錄的設定擋在外面。
+    #:
+    #: 預設 True，因為 nova 的行為該由 nova 決定——讀了 `~/.claude/CLAUDE.md`，
+    #: nova[claude] 就會跟 nova[codex] 行為不同，「換腦但行為一樣」當場破功。
+    #:
+    #: **代價（實測）**：claude 的 `--bare` 連 keychain 與 OAuth 都不讀，
+    #: 訂閱登入會變成「Not logged in」。要嘛設 `ANTHROPIC_API_KEY`，
+    #: 要嘛把這個關掉（改用 `--restricted`：設定檔照樣隔離，但 CLAUDE.md 仍會被讀）。
+    隔離設定: bool = True
 
 
 #: 全部走預設的那一組。凍結的資料類別當預設值是安全的（不可變，不會被共用改壞）。

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from nova.契約.角色 import 呼叫選項, 權限
+from nova.契約.角色 import 呼叫選項
 from nova.載體.模型.執行 import 跑cli
 from nova.載體.模型.轉接 import 建立, 找執行檔
 
@@ -20,6 +20,9 @@ from nova.載體.模型.轉接 import 建立, 找執行檔
 import os, sys, time, pathlib
 if os.environ.get("假CLI_睡"):
     time.sleep(float(os.environ["假CLI_睡"]))
+if os.environ.get("假CLI_只吐stderr"):
+    sys.stderr.write(os.environ["假CLI_只吐stderr"])
+    sys.exit(int(os.environ.get("假CLI_結束碼", "2")))
 if os.environ.get("假CLI_印工作目錄"):
     print(pathlib.Path.cwd()); sys.exit(0)
 sys.stdout.write(pathlib.Path(os.environ["假CLI_實錄"]).read_text(encoding="utf-8"))
@@ -66,6 +69,24 @@ class Test全鏈路:
         assert 答.終局 != "success"
         assert 答.失敗代碼 == "timeout"
 
+    def test_失敗又沒話說時要把stderr當證據(self, 假CLI: Path) -> None:
+        """診斷丟掉比結論丟掉更難查——它看起來完全正常。
+
+        真實案例：codex 的 `--sandbox` 與 `--approve-for-me` 互斥，exit 2，
+        stdout 全空、錯誤訊息全在 stderr。不補的話使用者只看得到
+        「確定失敗 usage」，看不到是哪個旗標錯了。
+        """
+        答 = 建立("codex", 執行檔=假CLI).詢問(
+            "在嗎", 環境={"假CLI_只吐stderr": "error: 旗標互斥\n", "假CLI_結束碼": "2"}
+        )
+        assert 答.失敗代碼 == "usage"
+        assert "旗標互斥" in 答.文字, "stderr 沒被當成證據，使用者查不到真因"
+
+    def test_成功時不會把stderr混進文字(self, 假CLI: Path) -> None:
+        """stderr 只在「失敗又沒話說」時才補——不然會汙染模型真正說的話。"""
+        答 = 建立("claude", 執行檔=假CLI).詢問("在嗎", 環境=_環境("claude_ok.json"))
+        assert 答.文字 == "ok"
+
     def test_執行檔不存在要當場炸(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             建立("claude", 執行檔=tmp_path / "根本沒有").詢問("在嗎")
@@ -79,7 +100,7 @@ class Test把各家載體關到最小:
     """
 
     def test_claude關掉工具與家目錄設定(self) -> None:
-        參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
+        參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         assert 參數[參數.index("--tools") : 參數.index("--tools") + 2] == ["--tools", ""], (
             "--tools '' 才會關掉全部內建工具（claude --help 原文：Use \"\" to disable all tools）"
         )
@@ -90,22 +111,22 @@ class Test把各家載體關到最小:
         ]
 
     def test_codex唯讀且不讀使用者設定(self) -> None:
-        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         assert 參數[0] == "exec", "codex 的非互動是子指令不是旗標"
         for 要有 in ("--sandbox", "read-only", "--ignore-user-config", "--ephemeral", "--json"):
             assert 要有 in 參數, f"少了 {要有}"
 
     def test_agy用plan模式(self) -> None:
-        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", None, 權限.唯讀)
+        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         assert 參數[參數.index("--mode") : 參數.index("--mode") + 2] == ["--mode", "plan"]
 
     def test_提示一律併進參數不靠stdin(self) -> None:
         """agy 1.1.22 實測不讀 stdin，所以三家一律走參數——最小公倍數。"""
         for 家 in ("claude", "codex", "agy"):
-            assert "我的提示" in 建立(家, 執行檔=Path("/x")).組參數("我的提示", None, 權限.唯讀)
+            assert "我的提示" in 建立(家, 執行檔=Path("/x")).組參數("我的提示", 呼叫選項())
 
     def test_模型是漏出的不翻譯(self) -> None:
-        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", "gpt-5-codex", 權限.唯讀)
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(模型="gpt-5-codex"))
         assert "gpt-5-codex" in 參數, "模型字串原樣傳下去，各家命名空間不交集，翻譯只會翻錯"
 
 

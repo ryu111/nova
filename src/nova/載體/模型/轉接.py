@@ -10,11 +10,11 @@ system prompt），讓「換腦但行為一樣」成立。哪幾條旗標做這�
 
 import shutil
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局, 終局判定
 from nova.契約.角色 import 呼叫選項, 權限, 預設選項
 from nova.載體.模型.執行 import 執行逾時, 跑cli
 from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
@@ -22,7 +22,7 @@ from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 家族 = Literal["claude", "codex", "agy"]
 預設候選目錄 = (Path.home() / ".local" / "bin",)
 
-組參數型 = Callable[[str, str | None, 權限], list[str]]
+組參數型 = Callable[[str, 呼叫選項], list[str]]
 解析型 = Callable[[str, int], 回應]
 
 
@@ -30,44 +30,52 @@ from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 _claude可編輯工具 = "Read,Write,Edit,Bash,Grep,Glob"
 
 
-def _claude組參數(提示: str, 模型: str | None, 可以做什麼: 權限) -> list[str]:
-    # --bare 跳過 hooks／auto-memory／CLAUDE.md 自動探索；--system-prompt "" 拿掉自帶人格。
-    # 兩條都經 `claude --help` 查證。
-    參數 = ["--print", "--output-format", "json", "--bare", "--system-prompt", ""]
-    if 可以做什麼 is 權限.唯讀:
+def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
+    """--bare 跳過 hooks／auto-memory／CLAUDE.md 自動探索；--system-prompt "" 拿掉自帶人格。
+
+    **`--tools` 是變長參數（`<tools...>`），不能放在提示前面的最後一個位置**——
+    它會把提示一起吞掉，claude 就會抱怨「沒有 prompt」。實測踩過一次。
+    所以後面一定要接一個真正的選項把它終結掉，這裡是 `--system-prompt`。
+    """
+    # --bare 連 keychain／OAuth 都不讀（訂閱登入會死）；--restricted 只隔離設定檔，
+    # CLAUDE.md 仍會被讀。兩害相權由呼叫端決定，不由這裡決定。
+    參數 = ["--print", "--output-format", "json", "--bare" if 選項.隔離設定 else "--restricted"]
+    if 選項.權限 is 權限.唯讀:
         參數 += ["--tools", ""]  # help 原文：Use "" to disable all tools
     else:
         參數 += ["--tools", _claude可編輯工具, "--permission-mode", "acceptEdits"]
-    if 模型:
-        參數 += ["--model", 模型]
+    參數 += ["--system-prompt", ""]  # 順便終結上面的變長參數，不要調換順序
+    if 選項.模型:
+        參數 += ["--model", 選項.模型]
     return [*參數, 提示]
 
 
-def _codex組參數(提示: str, 模型: str | None, 可以做什麼: 權限) -> list[str]:
-    參數 = [
-        "exec",
-        "--json",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--ephemeral",
-        "--skip-git-repo-check",
-    ]
-    if 可以做什麼 is 權限.唯讀:
+def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
+    參數 = ["exec", "--json", "--ephemeral", "--skip-git-repo-check"]
+    if 選項.隔離設定:
+        # codex 的隔離旗標不影響認證（auth.json 另外存），所以沒有 claude 那個取捨。
+        參數 += ["--ignore-user-config", "--ignore-rules"]
+    if 選項.權限 is 權限.唯讀:
         參數 += ["--sandbox", "read-only"]
     else:
-        # help 原文：--approve-for-me 用 workspace-write sandbox 自動核准。
+        # 實測：`--sandbox` 與 `--approve-for-me` **互斥**，一起給會 exit 2。
+        # --approve-for-me 自己就是「用 workspace-write 沙箱自動核准」（help 原文）。
         # 不用 --dangerously-bypass-approvals-and-sandbox——那條連沙箱都拿掉。
-        參數 += ["--sandbox", "workspace-write", "--approve-for-me"]
-    if 模型:
-        參數 += ["--model", 模型]
+        參數 += ["--approve-for-me"]
+    if 選項.模型:
+        參數 += ["--model", 選項.模型]
     return [*參數, 提示]
 
 
-def _agy組參數(提示: str, 模型: str | None, 可以做什麼: 權限) -> list[str]:
-    模式 = "plan" if 可以做什麼 is 權限.唯讀 else "accept-edits"
+#: agy 的推理強度包在型號裡（`agy models` 實測），不是另一個旗標。
+agy預設模型 = "gemini-3.7-flash-high"
+
+
+def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
+    # agy 查不到設定隔離的旗標（見設計文件 02 缺口），所以 隔離設定 對它是 no-op。
+    模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
     參數 = ["--output-format", "json", "--mode", 模式]
-    if 模型:
-        參數 += ["--model", 模型]
+    參數 += ["--model", 選項.模型 or agy預設模型]
     # --print 吃的是旗標值，不是位置參數（Go flag 風格）。
     return [*參數, "--print", 提示]
 
@@ -124,7 +132,7 @@ class 命令列模型:
         try:
             結果 = 跑cli(
                 self.執行檔,
-                self.組參數(提示, 選項.模型, 選項.權限),
+                self.組參數(提示, 選項),
                 工作目錄=選項.工作目錄,
                 逾時秒=選項.逾時秒,
                 環境=環境,
@@ -139,7 +147,8 @@ class 命令列模型:
                 對話識別碼=None,
                 用量=用量(輸入token=0, 輸出token=0),
             )
-        return self.解析(結果.標準輸出, 結果.結束碼)
+        答 = _補上診斷(self.解析(結果.標準輸出, 結果.結束碼), 結果.標準錯誤)
+        return _補上認證提示(答, self.名稱, 選項)
 
 
 def 建立(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
@@ -150,3 +159,42 @@ def 建立(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
         raise ValueError(訊息)
     組, 析 = _規格[家]
     return 命令列模型(名稱=家, 執行檔=執行檔 or 找執行檔(家), 組參數=組, 解析=析)
+
+
+_診斷上限 = 2000
+
+
+def _補上診斷(答: 回應, 標準錯誤: str) -> 回應:
+    """失敗而且沒話可說時，把 stderr 當證據。
+
+    不補的話，`usage`（旗標給錯）這種失敗會回一個**空字串**——
+    使用者只看得到「確定失敗 usage」，看不到是哪個旗標錯了。
+    診斷丟掉比結論丟掉更難查，因為它看起來完全正常。
+    """
+    if 答.終局 is 終局.成功 or 答.文字.strip():
+        return 答
+    診斷 = 標準錯誤.strip()
+    if not 診斷:
+        return 答
+    return replace(答, 文字=診斷[:_診斷上限])
+
+
+#: 認證失敗時的家別提示。錯誤訊息只說「沒登入」，不會說是哪個旗標害的。
+_認證提示 = {
+    "claude": (
+        "\n（nova 提示：--bare 連 keychain 與 OAuth 都不讀。"
+        "設 ANTHROPIC_API_KEY，或用 --不隔離設定 改走 --restricted。）"
+    ),
+}
+
+
+def _補上認證提示(答: 回應, 家: str, 選項: 呼叫選項) -> 回應:
+    """認證失敗時說清楚是哪個隔離旗標造成的。
+
+    「Not logged in」這句話本身沒有指向真因——使用者明明登入了。
+    診斷丟掉比結論丟掉更難查。
+    """
+    if 答.失敗代碼 is not 失敗代碼.認證 or not 選項.隔離設定:
+        return 答
+    提示 = _認證提示.get(家)
+    return replace(答, 文字=答.文字 + 提示) if 提示 else 答

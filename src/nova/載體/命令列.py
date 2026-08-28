@@ -131,6 +131,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
             工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
             逾時秒=參數.逾時,
             權限=權限.可編輯 if 參數.可編輯 else 權限.唯讀,
+            隔離設定=not 參數.不隔離設定,
         ),
     )
     if 參數.json:
@@ -160,6 +161,8 @@ def _邊跑邊印(內層: 執行器) -> 執行器:
         結果 = 內層(定義, 任, 軌跡)
         記號 = {None: "·", True: "綠", False: "紅"}[結果.判準綠]
         print(f"  {記號} {結果.終局.value}", file=sys.stderr, flush=True)
+        if 結果.終局 is not 終局.成功 and 結果.證據:
+            print(f"    {結果.證據.splitlines()[0][:160]}", file=sys.stderr, flush=True)
         return 結果
 
     return 執行一步
@@ -236,6 +239,11 @@ def 建剖析器() -> argparse.ArgumentParser:
     問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
     問剖析.add_argument(
         "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
+    )
+    問剖析.add_argument(
+        "--不隔離設定",
+        action="store_true",
+        help="讓它讀使用者家目錄的設定。claude 的 --bare 連 keychain 都不讀，訂閱登入要靠這個",
     )
     問剖析.set_defaults(執行=_子命令_問)
 
