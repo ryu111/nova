@@ -28,6 +28,10 @@ uv run mypy                      # 型別（strict）
 uv run nova 閘 提交               # commit 前的閘（7 條，約 2 秒，第一個紅就停）
 uv run nova 閘 ci --全部跑完      # CI 跑的那一組（8 條，約 3 秒，一次看到所有紅的）
 uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過閘門
+
+uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
+uv run nova 工作流 --用 codex --審查用 agy "任務"       # 跑一輪完整 TDD
+uv run pytest -m 真cli                                 # 真的打三家 CLI（燒 token，兩個閘都排除）
 ```
 
 一律走 `uv run`，不要先 activate venv——忘了 activate 會靜默跑到系統 Python 3.9。
@@ -189,6 +193,14 @@ uv run nova 問 --用 agy --json "幫我看 X"   # 結構化證據（終局、�
 **已知只做到一半**：工具擋住了，各家內建的 system prompt 還沒（實測十來字的提示，
 codex 吃 17341 input token、agy 吃 14515）。
 
+**claude 的設定隔離有代價**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，
+但它同時關掉 keychain 與 OAuth——訂閱登入會死。要嘛設 `ANTHROPIC_API_KEY`，
+要嘛用 `--不隔離設定`（改走 `--restricted`，設定檔照樣隔離但 CLAUDE.md 仍被讀）。
+
+**真 CLI 測試不能省**（`pytest -m 真cli`）。它抓到三個假 CLI 抓不到的 bug：
+codex 的 `--sandbox` 與 `--approve-for-me` 互斥、claude 的 `--tools` 是變長參數會吞掉提示、
+claude 的 `--bare` 不讀 keychain。**墊片證明的是轉遞形狀，不是可達性。**
+
 3. **角色與工作流骨架**（設計見 [`docs/設計/03-角色與工作流.md`](docs/設計/03-角色與工作流.md)）——
    `迴圈/` 開工了，這是 §10 建置順序的第 2 階。
 
@@ -223,3 +235,5 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 把 `驗證紅` 的期望改成綠 | 狀態機與工作流共 9 支紅 |
 | 把 `跑工作流` 的步數上限拿掉 | `test_來回不停會撞到步數上限` **掛住跑不完**（證明沒有 stop rule 就是成本漏洞） |
 | 讓驗證階段改由角色做（自寫自評） | `test_判準階段的步驟結果帶紅綠模型階段不帶` 等 4 支紅 |
+| 某條閘忘了排除 `真cli` 標記 | `test_兩個閘都排除真cli` 紅 |
+| 讓 `--審查用` 可以跟 `--用` 同一家 | `test_審查用不能跟用同一家` 紅 |

@@ -105,6 +105,28 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 ## 不對稱能力怎麼處理（三選一，不是三取一）
 
+### 權限與設定隔離：兩個刻意漏出的 policy
+
+| 選項 | 預設 | 為什麼漏出 |
+|---|---|---|
+| `權限`（唯讀／可編輯） | **唯讀** | 藏起來就是幫使用者做風險決策。預設最嚴——忘了設不會變成放行 |
+| `隔離設定`（要不要擋家目錄設定） | **True** | 讀了 `~/.claude/CLAUDE.md`，nova[claude] 就跟 nova[codex] 行為不同 |
+
+各家的落地（全部對著 `--help` 查證，而且 `-m 真cli` 真跑過）：
+
+| | claude | codex | agy |
+|---|---|---|---|
+| 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan` |
+| 可編輯 | `--tools Read,Write,... --permission-mode acceptEdits` | `--approve-for-me`（**不能同時給 `--sandbox`**） | `--mode accept-edits` |
+| 隔離設定 | `--bare` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
+| 不隔離 | `--restricted`（設定檔照樣隔離，CLAUDE.md 仍被讀） | 只留 `--ephemeral` | — |
+
+**claude 的取捨是真的，不是我們的 bug**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，
+但它同時關掉 keychain 與 OAuth。訂閱使用者只能二選一：
+設 `ANTHROPIC_API_KEY`，或接受 CLAUDE.md 會被讀進去。
+`test_claude在設定隔離下會認證失敗而且說得出原因` 把這個限制釘住——
+**那支測試紅了是好消息**，代表限制消失了。
+
 | 差異性質 | 處理 | 例子 |
 |---|---|---|
 | 能用最小公倍數抹平 | **介面吸收** | cwd 一律走 `subprocess(cwd=)`；context 一律併進提示字串（agy 1.1.22 實測不讀 stdin） |
@@ -140,7 +162,17 @@ fail-closed 回 `unknown`**，不是靜默成功。
 |---|---|---|
 | 單元 | 純函式解析器直接餵 `tests/整合/實錄/` 的真實 envelope | 毫秒 |
 | 整合 | 假 CLI 腳本 + 明確二進位路徑，測 cwd／逾時／結束碼／env 全鏈路 | 秒 |
-| 驗收（真 CLI） | 打真實 CLI，只斷言 envelope 形狀不斷言模型講什麼 | **不進 CI，見下** |
+| 驗收（真 CLI） | `pytest -m 真cli`：打真實 CLI，只斷言 envelope 形狀 | **不進 CI，手動跑** |
+
+**真 CLI 那層不能省，實測抓到三個假 CLI 抓不到的 bug：**
+
+| bug | 為什麼假 CLI 抓不到 |
+|---|---|
+| codex 的 `--sandbox` 與 `--approve-for-me` **互斥**，一起給 exit 2 | 墊片不會抱怨旗標組合 |
+| claude 的 `--tools <tools...>` 是**變長參數**，會把後面的提示吞掉 | 墊片不解析參數 |
+| claude 的 `--bare` 連 **keychain 與 OAuth 都不讀**，訂閱登入會死 | 墊片不需要認證 |
+
+**墊片證明的是轉遞形狀，不是可達性。** 這句話在這裡有三個實例。
 
 實錄是 record/replay 的 record 階段，錄於 2026-08-29，來源見 `tests/整合/實錄/README.md`。
 

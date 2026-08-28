@@ -117,7 +117,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    <text x="500" y="382" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="700">只有一件事變了：ctx 歸誰。你的座位、你打的字、回你話的介面，都一樣。</text>
   </svg>
   <div style="text-align:center;margin-top:14px">
-    <button id="展開鈕" onclick="切細節()">展開細節圖（34 格・現在做到哪）</button>
+    <button id="展開鈕" onclick="切細節()">展開細節圖（37 格・現在做到哪）</button>
   </div>
 </div>
 <div id="細節區" style="display:none"><svg id="圖"></svg></div></div>
@@ -593,6 +593,51 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
     "src/nova/迴圈/工作流.py"
    ],
    "註": "執行一步 是參數不是內建（依賴反轉），所以測試零 LLM、零 token"
+  },
+  {
+   "id": "判準",
+   "標": "機械判準",
+   "副": "跑指令看退出碼・不是模型",
+   "x": 80,
+   "y": 1090,
+   "w": 220,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/判準.py"
+   ],
+   "註": "驗收權不在執行者手上——判準只認退出碼，模型講什麼都不算數"
+  },
+  {
+   "id": "流CLI",
+   "標": "nova 工作流",
+   "副": "--用 codex --審查用 agy",
+   "x": 318,
+   "y": 1090,
+   "w": 240,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/命令列.py"
+   ],
+   "註": "--審查用 是必要參數而且不能跟 --用 同家——自己審自己等於沒審"
+  },
+  {
+   "id": "真cli",
+   "標": "真 CLI 契約測試",
+   "副": "pytest -m 真cli・不進 CI",
+   "x": 576,
+   "y": 1090,
+   "w": 230,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "tests/驗收/test_真cli契約.py"
+   ],
+   "註": "抓到三個假 CLI 抓不到的 bug——墊片證明的是轉遞形狀，不是可達性"
   }
  ],
  "連線": [
@@ -741,6 +786,16 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "從": "狀態機",
    "到": "工作流",
    "型": "流"
+  },
+  {
+   "從": "工作流",
+   "到": "判準",
+   "型": "呼叫"
+  },
+  {
+   "從": "流CLI",
+   "到": "工作流",
+   "型": "流"
   }
  ]
 }
@@ -804,7 +859,7 @@ function 邊(n){ return {左:n.x, 右:n.x+n.w, 上:n.y, 下:n.y+n.h, 中x:n.x+n.
 
 function 畫(){
   const svg = document.getElementById("圖");
-  const 寬 = 1240, 高 = 1100;
+  const 寬 = 1240, 高 = 1190;
   svg.setAttribute("viewBox", `0 0 ${寬} ${高}`);
   svg.setAttribute("width", 寬*態.倍); svg.setAttribute("height", 高*態.倍);
   document.getElementById("倍率").textContent = Math.round(態.倍*100)+"%";
@@ -922,7 +977,7 @@ function 複製(){
 function 切細節(){
   const 區 = document.getElementById("細節區"), 開 = 區.style.display === "none";
   區.style.display = 開 ? "block" : "none";
-  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（34 格・現在做到哪）";
+  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（37 格・現在做到哪）";
   if(開) 畫();
 }
 建側欄(); 套預設("全部");

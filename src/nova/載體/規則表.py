@@ -118,7 +118,15 @@ def 建規則表(根目錄: Path) -> list[規則]:
             閘點=frozenset({"ci"}),
             負責層="載體",
             檢查=_外部指令(
-                根目錄, "pytest", "-m", "not serial", "-n", "auto", "--dist", "worksteal", "-q"
+                根目錄,
+                "pytest",
+                "-m",
+                "not serial and not 真cli",
+                "-n",
+                "auto",
+                "--dist",
+                "worksteal",
+                "-q",
             ),
             階段=測試,
         ),
@@ -127,7 +135,9 @@ def 建規則表(根目錄: Path) -> list[規則]:
             名稱="序列測試（會搶資源、不可平行）",
             閘點=frozenset({"ci"}),
             負責層="載體",
-            檢查=_外部指令(根目錄, "pytest", "-m", "serial", "-q", "-p", "no:randomly"),
+            檢查=_外部指令(
+                根目錄, "pytest", "-m", "serial and not 真cli", "-q", "-p", "no:randomly"
+            ),
             階段=測試,
         ),
     ]

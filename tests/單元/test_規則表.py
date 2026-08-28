@@ -68,3 +68,24 @@ def test_三條新規則都上了() -> None:
 def test_涵蓋宣告不能指向自己() -> None:
     for 條 in _規則表():
         assert 條.涵蓋於 != 條.代碼, f"{條.代碼} 宣告自己涵蓋自己，等於沒宣告"
+
+
+def test_兩個閘都排除真cli() -> None:
+    """真 CLI 測試會燒 token、需要認證——不准溜進任何一個閘。
+
+    忘了排除的話 CI 會在沒有認證的機器上紅，而且是紅在跟改動無關的地方。
+    """
+    根目錄 = Path(__file__).resolve().parents[2]
+    for 條 in 建規則表(根目錄):
+        if not 條.代碼.startswith("pytest"):
+            continue
+        指令 = getattr(條.檢查, "__closure__", None)
+        assert 指令 is not None, f"{條.代碼} 不是包出來的外部指令，這支測試要改寫"
+    原始碼 = (根目錄 / "src" / "nova" / "載體" / "規則表.py").read_text(encoding="utf-8")
+    pytest行 = [
+        行 for 行 in 原始碼.splitlines() if '"pytest"' in 行 or "pytest" in 行 and '"-m"' in 行
+    ]
+    帶標記的 = [行 for 行 in pytest行 if '"-m"' in 行]
+    assert 帶標記的, "找不到帶 -m 的 pytest 規則"
+    for 行 in 帶標記的:
+        assert "not 真cli" in 行, f"這條 pytest 規則沒排除真cli：{行.strip()}"

@@ -8,7 +8,7 @@ import dataclasses
 from pathlib import Path
 
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
-from nova.契約.角色 import 角色, 語言模型
+from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型, 預設選項
 from nova.載體.模型.轉接 import 建立
 from nova.載體.角色 import 固定提示角色, 組提示
 
@@ -17,19 +17,13 @@ class 假腦:
     名稱 = "假腦"
 
     def __init__(self) -> None:
-        """記下收到的提示，好驗證系統提示真的被併進去了。"""
+        """記下收到的提示與選項，好驗證系統提示與權限真的被傳下去。"""
         self.收到: list[str] = []
+        self.選項們: list[呼叫選項] = []
 
-    def 詢問(
-        self,
-        提示: str,
-        *,
-        模型: str | None = None,
-        工作目錄: Path | None = None,
-        逾時秒: float = 300.0,
-    ) -> 回應:
-        del 模型, 工作目錄, 逾時秒
+    def 詢問(self, 提示: str, *, 選項: 呼叫選項 = 預設選項) -> 回應:
         self.收到.append(提示)
+        self.選項們.append(選項)
         return 回應(
             文字="好",
             終局=終局.成功,
@@ -63,6 +57,13 @@ class Test固定提示角色:
         角.做("再來一次")
         assert len(腦.收到) == 2
         assert all("你只寫會紅的測試" in 提示 for 提示 in 腦.收到)
+
+    def test_預設唯讀只有指定過才可編輯(self) -> None:
+        """忘了設權限不會變成放行——最嚴的那一邊當預設。"""
+        腦 = 假腦()
+        固定提示角色(名稱="測試員", 系統提示="x", 腦=腦).做("任務")
+        固定提示角色(名稱="實作員", 系統提示="x", 腦=腦, 權限=權限.可編輯).做("任務")
+        assert [選.權限 for 選 in 腦.選項們] == [權限.唯讀, 權限.可編輯]
 
     def test_是角色協定的實作(self) -> None:
         角 = 固定提示角色(名稱="測試員", 系統提示="x", 腦=假腦())
