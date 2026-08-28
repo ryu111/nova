@@ -53,6 +53,9 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 快的先給回饋，重的後跑，而且不同時吃滿 CPU——資源互搶造成的紅燈是雜訊不是訊號。
 平行只發生在 pytest 內部（`-n auto --dist worksteal`），且 `serial` 標記的測試單獨序列跑。
 
+**兩個已知缺口**（細節見設計文件）：`test-count` 在 CI 上空轉（HEAD == 工作區），
+squash 合併的 commit 訊息繞過 commit-msg hook。兩條都**只有本地加速器、沒有伺服器端保證**。
+
 - **`gates` 這個 job 名稱是 main 保護規則的 required check context，不准改。**
 - **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**——
   現在由 `nova 檢查指令` 機械攔截，不再只是提示詞。要繞過閘門，先修閘門。
