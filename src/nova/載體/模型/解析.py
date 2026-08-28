@@ -11,9 +11,10 @@
 """
 
 import json
+from dataclasses import replace
 from typing import Any
 
-from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局, 終局判定
 
 #: JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐原始字元
 #: （實測 agy 的 `response` 欄位偶爾夾了未跳脫的控制字元，嚴格模式當場解不動）。
@@ -100,7 +101,7 @@ def _壞掉(結束碼: int, 訊息: str, 原始: list[dict[str, Any]]) -> 回應
     )
 
 
-def 解析claude(標準輸出: str, 結束碼: int) -> 回應:
+def _解析claude(標準輸出: str, 結束碼: int) -> 回應:
     """`claude -p --output-format json` 的輸出。"""
     候選 = [物件 for 物件 in _逐行json(標準輸出) if 物件.get("type") == "result"]
     if not 候選:
@@ -153,7 +154,7 @@ def _codex的錯誤訊息(事件們: list[dict[str, Any]]) -> str:
     return "\n".join(片段)
 
 
-def 解析codex(標準輸出: str, 結束碼: int) -> 回應:
+def _解析codex(標準輸出: str, 結束碼: int) -> 回應:
     """`codex exec --json` 的 JSONL 事件流。"""
     事件們 = _逐行json(標準輸出)
     完成 = [事件 for 事件 in 事件們 if 事件.get("type") == "turn.completed"]
@@ -195,7 +196,7 @@ def _agy的信封(標準輸出: str) -> tuple[dict[str, Any] | None, list[dict[s
     return (末筆 if isinstance(末筆, dict) else None), 物件們
 
 
-def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
+def _解析agy(標準輸出: str, 結束碼: int) -> 回應:
     """`agy -p --output-format json`（單一物件）或 `stream-json`（NDJSON）。"""
     信封, 原始 = _agy的信封(標準輸出)
     if 信封 is None:
@@ -218,3 +219,39 @@ def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
         結構化輸出=信封.get("structured_output"),
         原始輸出=tuple(原始),
     )
+
+
+def _成功但沒話說算未知(答: 回應) -> 回應:
+    """CLI 說成功、卻一個字都沒回，那不是成功，是不知道發生什麼事。
+
+    實測（agy 的 `generate_image`）：模型呼叫工具、工具 `state: ERROR`，
+    而 envelope 仍然是 `status: SUCCESS`、`error: null`、`response: ""`。
+    診斷被整個吞掉，只剩一個空字串。
+
+    這種情況只能是**結果未知**：工具動過了，做到哪不知道。
+    當成功會讓上游以為事情辦完了；當確定失敗又會讓接力去重做副作用。
+    三值就是為了這一格。
+    """
+    if 答.終局 is not 終局.成功 or 答.文字.strip():
+        return 答
+    return replace(
+        答,
+        終局=終局.結果未知,
+        失敗代碼=失敗代碼.未知,
+        文字="CLI 回報成功但一個字都沒說——工具可能失敗了而錯誤被吞掉",
+    )
+
+
+def 解析claude(標準輸出: str, 結束碼: int) -> 回應:
+    """`claude -p --output-format json` 的輸出。"""
+    return _成功但沒話說算未知(_解析claude(標準輸出, 結束碼))
+
+
+def 解析codex(標準輸出: str, 結束碼: int) -> 回應:
+    """`codex exec --json` 的 JSONL 事件流。"""
+    return _成功但沒話說算未知(_解析codex(標準輸出, 結束碼))
+
+
+def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
+    """`agy -p --output-format json`（單一物件）或 `stream-json`（NDJSON）。"""
+    return _成功但沒話說算未知(_解析agy(標準輸出, 結束碼))

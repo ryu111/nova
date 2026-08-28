@@ -109,7 +109,7 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 | 選項 | 預設 | 為什麼漏出 |
 |---|---|---|
-| `權限`（唯讀／可編輯） | **唯讀** | 藏起來就是幫使用者做風險決策。預設最嚴——忘了設不會變成放行 |
+| `權限`（唯讀／可編輯／全開） | **唯讀** | 藏起來就是幫使用者做風險決策。預設最嚴——忘了設不會變成放行 |
 | `隔離設定`（要不要擋家目錄設定） | **True** | 讀了 `~/.claude/CLAUDE.md`，nova[claude] 就跟 nova[codex] 行為不同 |
 
 各家的落地（全部對著 `--help` 查證，而且 `-m 真cli` 真跑過）：
@@ -118,6 +118,8 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 |---|---|---|---|
 | 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan` |
 | 可編輯 | `--tools Read,Write,... --permission-mode acceptEdits` | `--approve-for-me`（**不能同時給 `--sandbox`**） | `--mode accept-edits` |
+| 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
+| 生圖 | ❌ 沒有 | ❌ 沒有 | 有 `generate_image` 工具，但 **headless 下不可用且會假回報成功**（見下節） |
 | 隔離設定 | `--setting-sources ""` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
 | 續接對話 | `--resume <id>` | `exec resume <id>`（**子指令**，不吃 `--sandbox`） | `--conversation <id>` |
 | 對話落地 | 一律留 | 預設 `--ephemeral` 不留，**要續接得先關掉** | 一律留 |
@@ -216,6 +218,57 @@ JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐
 解不動的下場是 fail-closed 回**結果未知**，而結果未知在可編輯模式下**不准重試**——
 一個顯示層的小瑕疵會變成整條工作流停擺。所以解析器改用
 `json.JSONDecoder(strict=False)`：寬鬆解析的風險遠小於誤判成結果未知。
+
+## 權限的第三級：全開
+
+原本只有唯讀／可編輯兩級，而三家 CLI 都各有一條「跳過權限檢查並關掉沙箱」的路。
+一律禁掉看起來安全，實際上會逼人繞過介面自己拼指令——那更糟，因為繞過去的那條路
+沒有任何測試背書。所以把它收進介面，但**收成一個不可能誤觸的等級**：
+
+| | claude | codex | agy |
+|---|---|---|---|
+| 全開 | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
+
+三條防線，各有一支測試守著：
+
+| 保證 | 測試 |
+|---|---|
+| 唯讀與可編輯**絕對不會**冒出危險旗標 | `test_危險旗標只准出現在全開` |
+| 三家都真的有一條全開的路（不是假的） | `test_全開才有危險旗標` |
+| 忘了設不會變成全開 | `test_全開不是預設` |
+| codex `exec resume` 不吃這條（權限沿用原 session） | `test_codex續接時不准出現危險旗標` |
+
+`呼叫選項.權限` 預設值是 `權限.唯讀`，門面與 CLI 各自的 `_挑權限()` 在
+`全開` 與 `可編輯` 都沒給時回唯讀——**最嚴的那一邊當預設**，這一條在三處都成立。
+
+## 成功但沒話說＝結果未知
+
+實測 agy 的 `generate_image`（headless、`-p` 模式）：
+
+```
+tool  generate_image  ACTIVE
+tool  generate_image  ERROR
+RESULT  status= SUCCESS | response= '' | error= None
+--- 檔案 --- （空的，find 全機也找不到任何新圖檔）
+```
+
+工具自己 `ERROR`，而 envelope 仍然是 `status: SUCCESS`、`error: null`、`response: ""`。
+**診斷被整個吞掉，只剩一個空字串。** 照原本的解析器，這會回 `終局.成功`，
+上游於是以為圖生好了。
+
+`_成功但沒話說算未知` 把這種回應降成**結果未知**：
+
+- 當成功 → 上游以為事情辦完了（實際什麼都沒發生，或發生了一半）。
+- 當確定失敗 → 接力會去換下一顆重做，而副作用可能已經產生。
+- 結果未知 → 停下來讓人看。三值就是為了這一格。
+
+三支解析器 `解析claude`／`解析codex`／`解析agy` 都是
+`_成功但沒話說算未知(_解析X(...))` 的薄包裝——**同一條規則寫一次**，
+不必在三個地方各記一次。負控：把 `_成功但沒話說算未知` 改成直接 `return 答`，
+`Test成功但沒話說` 的四支立刻紅（已跑過）。
+
+**結論寫進能力表：agy 的生圖在 headless 模式不可用。** 不是「還沒試出正確用法」，
+是它會假回報成功——這比不能用更危險，所以要標在表上。
 
 ## 已知缺口
 

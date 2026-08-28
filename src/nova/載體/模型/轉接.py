@@ -48,8 +48,10 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         參數 += ["--resume", 選項.續接]
     if 選項.權限 is 權限.唯讀:
         參數 += ["--tools", ""]  # help 原文：Use "" to disable all tools
-    else:
+    elif 選項.權限 is 權限.可編輯:
         參數 += ["--tools", _claude可編輯工具, "--permission-mode", "acceptEdits"]
+    else:
+        參數 += ["--tools", _claude可編輯工具, "--dangerously-skip-permissions"]
     參數 += ["--system-prompt", ""]  # 順便終結上面的變長參數，不要調換順序
     if 選項.模型:
         參數 += ["--model", 選項.模型]
@@ -83,11 +85,13 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         共通 += ["--ephemeral"]  # 不落地就續接不到
     if 選項.權限 is 權限.唯讀:
         共通 += ["--sandbox", "read-only"]
-    else:
+    elif 選項.權限 is 權限.可編輯:
         # 實測：`--sandbox` 與 `--approve-for-me` **互斥**，一起給會 exit 2。
         # --approve-for-me 自己就是「用 workspace-write 沙箱自動核准」（help 原文）。
-        # 不用 --dangerously-bypass-approvals-and-sandbox——那條連沙箱都拿掉。
         共通 += ["--approve-for-me"]
+    else:
+        # 全開才用這條——它連沙箱都拿掉。
+        共通 += ["--dangerously-bypass-approvals-and-sandbox"]
     return ["exec", *共通, 提示]
 
 
@@ -99,6 +103,8 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     # agy 查不到設定隔離的旗標（見設計文件 02 缺口），所以 隔離設定 對它是 no-op。
     模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
     參數 = ["--output-format", "json", "--mode", 模式]
+    if 選項.權限 is 權限.全開:
+        參數 += ["--dangerously-skip-permissions"]
     參數 += ["--model", 選項.模型 or agy預設模型]
     if 選項.續接:
         參數 += ["--conversation", 選項.續接]

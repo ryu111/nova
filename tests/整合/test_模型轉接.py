@@ -192,16 +192,45 @@ class Test權限是漏出的:
         可寫 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
         assert 可寫[可寫.index("--mode") : 可寫.index("--mode") + 2] == ["--mode", "accept-edits"]
 
-    def test_三家都不准用最危險的旗標(self) -> None:
+    def test_危險旗標只准出現在全開(self) -> None:
+        """需求變了：不再是「一律不准」，而是「只准在明講全開時出現」。
+
+        全開有正當用途（跑在已經被隔離的環境裡），一律禁掉只會逼人繞過介面
+        自己拼指令——那更糟。但它每多開一級，「模型能對這台機器做什麼」
+        就少一層攔截，所以必須是明講的、而且不可能誤觸的。
+        """
         危險 = (
             "--dangerously-skip-permissions",
             "--dangerously-bypass-approvals-and-sandbox",
             "--dangerously-bypass-hook-trust",
         )
         for 家 in ("claude", "codex", "agy"):
-            for 可以做什麼 in 權限:
+            for 可以做什麼 in (權限.唯讀, 權限.可編輯):
                 參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=可以做什麼))
                 assert not (set(危險) & set(參數)), f"{家} 在 {可以做什麼} 用了危險旗標"
+
+    def test_全開才有危險旗標(self) -> None:
+        """三家都要真的有一條全開的路，不然這一級是假的。"""
+        對應: tuple[tuple[家族, str], ...] = (
+            ("claude", "--dangerously-skip-permissions"),
+            ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+            ("agy", "--dangerously-skip-permissions"),
+        )
+        for 家, 旗標 in 對應:
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.全開))
+            assert 旗標 in 參數, f"{家} 的全開沒有真的全開"
+
+    def test_全開不是預設(self) -> None:
+        """忘了設不會變成全開——最嚴的那一邊當預設。"""
+        assert 呼叫選項().權限 is 權限.唯讀
+        assert 權限.全開 is not 呼叫選項().權限
+
+    def test_codex續接時不准出現危險旗標(self) -> None:
+        """`exec resume` 不吃這些，而且權限本來就沿用原 session。"""
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數(
+            "提示", 呼叫選項(續接="某個id", 權限=權限.全開)
+        )
+        assert "--dangerously-bypass-approvals-and-sandbox" not in 參數
 
 
 class Test隔離設定是漏出的:

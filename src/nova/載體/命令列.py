@@ -133,7 +133,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
             模型=參數.模型,
             工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
             逾時秒=參數.逾時,
-            權限=權限.可編輯 if 參數.可編輯 else 權限.唯讀,
+            權限=_挑權限(參數),
             隔離設定=not 參數.不隔離設定,
             續接=參數.續接,
             保留對話=參數.保留對話 or bool(參數.續接),
@@ -147,6 +147,13 @@ def _子命令_問(參數: argparse.Namespace) -> int:
         print(答.文字)
     print(_摘要(參數.用, 答), file=sys.stderr)
     return _終局的退出碼[答.終局]
+
+
+def _挑權限(參數: argparse.Namespace) -> 權限:
+    """全開蓋過可編輯。兩個都沒給就是唯讀——忘了設不會變成放行。"""
+    if 參數.全開:
+        return 權限.全開
+    return 權限.可編輯 if 參數.可編輯 else 權限.唯讀
 
 
 def _建腦(來源: str, 執行檔: Path | None) -> 語言模型:
@@ -262,6 +269,11 @@ def 建剖析器() -> argparse.ArgumentParser:
     問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
     問剖析.add_argument(
         "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
+    )
+    問剖析.add_argument(
+        "--全開",
+        action="store_true",
+        help="跳過權限檢查並關掉沙箱。只在已經被隔離的環境裡用",
     )
     問剖析.add_argument("--續接", default=None, help="接回某段對話（給上一次輸出的 對話識別碼）")
     問剖析.add_argument(
