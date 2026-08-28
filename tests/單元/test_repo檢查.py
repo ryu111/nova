@@ -105,3 +105,31 @@ class Test測試數:
         舊.unlink()
         (迷你repo / "tests" / "test_搬過來.py").write_text(內容, encoding="utf-8")
         assert 檢查測試數(迷你repo)[0] is True
+
+    def test_整支測試檔被git_rm掉要擋(self, 迷你repo: Path) -> None:
+        """`git rm` 會把檔案從 index 拿掉，基準若走工作區的追蹤清單就會漏掉它——靜默全綠。"""
+        subprocess.run(
+            ["git", "rm", "-q", "tests/test_甲.py"], cwd=迷你repo, check=True, capture_output=True
+        )
+        通過, 證據 = 檢查測試數(迷你repo)
+        assert 通過 is False, "整支測試檔被刪掉還放行＝防護是假的"
+        assert "2" in 證據 and "0" in 證據
+
+    def test_可以指定基準ref(self, 迷你repo: Path) -> None:
+        """CI 上 HEAD == 工作區，前後永遠相等；要跟 base branch 比才抓得到。"""
+        subprocess.run(["git", "switch", "-q", "-c", "支線"], cwd=迷你repo, check=True)
+        (迷你repo / "tests" / "test_甲.py").write_text(一支測試, encoding="utf-8")
+        for 指令 in (["git", "add", "-A"], ["git", "commit", "-q", "-m", "刪一支"]):
+            subprocess.run(指令, cwd=迷你repo, check=True, capture_output=True)
+
+        空轉 = "跟 HEAD 比：已經 commit 了所以前後相等——這就是 CI 上的空轉"
+        assert 檢查測試數(迷你repo)[0] is True, 空轉
+        通過, 證據 = 檢查測試數(迷你repo, 基準="main")
+        assert 通過 is False, "跟 base branch 比就該紅"
+        assert "2" in 證據 and "1" in 證據
+
+    def test_基準ref不存在要fail_closed(self, 迷你repo: Path) -> None:
+        """抓不到基準時退回「跟自己比」等於重新挖出同一個洞——要當場紅。"""
+        通過, 證據 = 檢查測試數(迷你repo, 基準="origin/根本沒有這個分支")
+        assert 通過 is False
+        assert "origin/根本沒有這個分支" in 證據

@@ -25,6 +25,8 @@ dev = [
     "pre-commit>=4.6.2",
     "pytest-xdist>=3.8.0",
     "pytest-randomly>=4.1.0",
+    "pyyaml>=6.0.3",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 # pytest 官方對新專案的建議：測試放在套件外、用 importlib 匯入模式

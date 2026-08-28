@@ -53,8 +53,12 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 快的先給回饋，重的後跑，而且不同時吃滿 CPU——資源互搶造成的紅燈是雜訊不是訊號。
 平行只發生在 pytest 內部（`-n auto --dist worksteal`），且 `serial` 標記的測試單獨序列跑。
 
-**兩個已知缺口**（細節見設計文件）：`test-count` 在 CI 上空轉（HEAD == 工作區），
-squash 合併的 commit 訊息繞過 commit-msg hook。兩條都**只有本地加速器、沒有伺服器端保證**。
+`test-count` 的基準由環境變數 `NOVA_TEST_COUNT_BASE` 決定：本地比 `HEAD`，
+CI 比 `origin/main`（CI checkout 之後工作區就是 HEAD，不換基準會整條空轉）。
+抓不到基準時 fail-closed 當場紅。
+
+**還沒補的缺口**：squash 合併的 commit 訊息繞過 commit-msg hook（訊息由 GitHub 從 PR
+標題組出來），**只有本地加速器、沒有伺服器端保證**。
 
 - **`gates` 這個 job 名稱是 main 保護規則的 required check context，不准改。**
 - **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**——
@@ -142,3 +146,6 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 | 測試檔留了簡體字 | `nova 閘` 的 `lang-traditional` 紅，指到檔名行號 |
 | `規則表.py` import 沒排序 | `nova 閘` 的 `ruff-check` 紅，commit 被擋 |
 | 寫一個分支複雜度 9 的函式 | `ruff-check` 紅在 `C901 too complex (9 > 8)` |
+| `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
+| gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
+| gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |

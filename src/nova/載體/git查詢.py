@@ -34,7 +34,23 @@ def 會被忽略(根目錄: Path, 路徑: str) -> bool:
     return 跑git(根目錄, "check-ignore", "-q", 路徑).returncode == 0
 
 
-def 讀取HEAD版本(根目錄: Path, 路徑: str) -> str | None:
-    """讀 HEAD 上那一版的檔案內容；HEAD 沒有這個檔就回 None。"""
-    結果 = 跑git(根目錄, "show", f"HEAD:{路徑}")
+def 讀取版本(根目錄: Path, 路徑: str, *, ref: str = "HEAD") -> str | None:
+    """讀某個 ref 上那一版的檔案內容；那一版沒有這個檔就回 None。"""
+    結果 = 跑git(根目錄, "show", f"{ref}:{路徑}")
     return 結果.stdout if 結果.returncode == 0 else None
+
+
+def ref存在(根目錄: Path, ref: str) -> bool:
+    """這個 ref 指得到一個 commit 嗎？抓不到基準時要當場紅，不能默默退回跟自己比。"""
+    return 跑git(根目錄, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}").returncode == 0
+
+
+def ref裡的檔案(根目錄: Path, ref: str) -> list[str]:
+    r"""某個 ref 上的檔案清單。
+
+    跟 `追蹤中的檔案` 的差別很關鍵：那個看的是**工作區的 index**，
+    所以 `git rm` 掉的檔案不會出現——拿它當基準會漏算被刪掉的東西（靜默全綠）。
+    基準一律走這支。`-z` 的理由同 `追蹤中的檔案`。
+    """
+    結果 = 跑git(根目錄, "ls-tree", "-r", "--name-only", "-z", ref)
+    return [路徑 for 路徑 in 結果.stdout.split("\0") if 路徑]
