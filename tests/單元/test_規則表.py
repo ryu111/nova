@@ -59,7 +59,7 @@ def test_四道閘都在ci裡() -> None:
 
 
 def test_三條新規則都上了() -> None:
-    表 = 建規則表(Path("."))
+    表 = 建規則表(Path.cwd())
     代碼 = {條.代碼 for 條 in 表}
     for 必要 in ("lang-traditional", "no-secrets", "test-count"):
         assert 必要 in 代碼, f"缺少 {必要}"

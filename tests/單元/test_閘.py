@@ -38,7 +38,8 @@ def test_規則爆炸算紅不算過() -> None:
     """fail-closed：檢查自己壞掉時不准放行，否則保證會靜默消失。"""
 
     def 會爆的檢查() -> tuple[bool, str]:
-        raise RuntimeError("檢查自己壞了")
+        訊息 = "檢查自己壞了"
+        raise RuntimeError(訊息)
 
     規則表 = [
         規則(

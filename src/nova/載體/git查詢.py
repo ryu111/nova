@@ -20,7 +20,7 @@ def 跑git(根目錄: Path, *參數: str) -> subprocess.CompletedProcess[str]:
 
 
 def 追蹤中的檔案(根目錄: Path) -> list[str]:
-    """git 追蹤中的檔案清單。用它當掃描範圍就不必自己維護 .venv／快取的排除表。
+    r"""git 追蹤中的檔案清單。用它當掃描範圍就不必自己維護 .venv／快取的排除表。
 
     一定要用 `-z`：git 預設會把非 ASCII 檔名轉義成 `"src/\\347\\224\\262.py"`，
     這個 repo 全是中文檔名，不加 -z 會整個掃描範圍變成空的（靜默全綠，最危險的失敗）。

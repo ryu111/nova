@@ -59,7 +59,8 @@ def 跑閘(
     """
     if 閘點 not in 閘點清單:
         可用 = "、".join(sorted(閘點清單))
-        raise ValueError(f"未知的閘點：{閘點}（可用：{可用}）")
+        訊息 = f"未知的閘點：{閘點}（可用：{可用}）"
+        raise ValueError(訊息)
 
     適用 = [條 for 條 in 規則表 if 閘點 in 條.閘點]
     適用.sort(key=lambda 條: 條.階段)
