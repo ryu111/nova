@@ -57,6 +57,24 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 - **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**——
   現在由 `nova 檢查指令` 機械攔截，不再只是提示詞。要繞過閘門，先修閘門。
 
+## 程式風格與嚴謹性
+
+通則在 `~/.claude/rules/軟體工程.md`（YAGNI 決定何時抽象、SOLID 決定抽象長什麼樣、
+三次法則、組合優先於繼承、多型用 Protocol）。這裡只寫 nova 的機械化部分：
+
+| 判準 | 由誰擋 | 門檻 |
+|---|---|---|
+| 分支複雜度（KISS） | ruff `C901` | `max-complexity = 8` |
+| 參數／分支／語句過多（SRP） | ruff `PLR0913` / `PLR0912` / `PLR0915` | 預設 |
+| 死程式碼、註解掉的程式碼、未用參數 | ruff `F` / `ARG` / `ERA` | 一律紅 |
+| 布林參數陷阱 | ruff `FBT` | 布林要具名傳 |
+| 里氏替換、介面隔離 | `mypy strict` | 簽章不相容當場紅 |
+| 例外訊息、docstring、路徑用法 | ruff `EM` / `D` / `PTH` | 一律紅 |
+
+**`pyproject.toml` 裡停用 `N`、`PLC2401`、`RUF001-003`、`D400/D415/D403` 的註解不要刪。**
+那幾組內建「識別字只能是英文、標點只能是半形」的假設，和本專案的繁體中文命名衝突——
+開著會產生 266 條噪音把 8 條真問題淹掉。這是實測數字，不是猜的。
+
 ## 機密
 
 repo 是 **public**——洩漏一次就是永久的，GitHub 的快取與別人的 clone 收不回來。
@@ -120,3 +138,4 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 | 直接 `git push origin main` | 被 ruleset 擋下（`Changes must be made through a pull request`） |
 | 測試檔留了簡體字 | `nova 閘` 的 `lang-traditional` 紅，指到檔名行號 |
 | `規則表.py` import 沒排序 | `nova 閘` 的 `ruff-check` 紅，commit 被擋 |
+| 寫一個分支複雜度 9 的函式 | `ruff-check` 紅在 `C901 too complex (9 > 8)` |

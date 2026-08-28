@@ -45,7 +45,39 @@ src = ["src", "tests"]
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+# KISS／SRP／YAGNI 能機械化的部分：複雜度、參數數量、分支數、死程式碼、未用參數。
+select = [
+    "E", "F", "W", "I", "B", "UP", "SIM", "C4", "C90", "PL", "ARG", "RET",
+    "ERA", "TID", "PTH", "D", "ANN", "S", "A", "ISC", "T20", "TRY", "PERF",
+    "PIE", "SLF", "DTZ", "EM", "G", "LOG", "RSE", "FURB",
+]
+ignore = [
+    # 以下四組內建「識別字只能是英文、標點只能是半形」的假設，
+    # 與 CLAUDE.md 的繁體中文命名規則直接衝突。不要「修好」它們。
+    "N",                                  # pep8-naming：中文函式／類別名一律報錯
+    "PLC2401", "PLC2403",                 # 非 ASCII 識別字
+    "RUF001", "RUF002", "RUF003",         # 把全形標點當可疑字元
+    # 中文句號是「。」不是「.」，D400／D415 的判準不適用
+    "D203", "D213", "D400", "D415",
+    "D403",                               # 首字大寫是英文慣例，中文 docstring 不適用
+    "ISC001",                             # 與 formatter 衝突
+]
+
+[tool.ruff.lint.mccabe]
+# KISS 的機械化門檻：一個函式的分支複雜度上限。超過就該拆。
+max-complexity = 8
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# CLI 的職責就是把結果印給人看，print 是它的介面而不是遺留的除錯碼。
+"src/nova/載體/命令列.py" = ["T201"]
+# 測試裡 assert 是介面本身；魔術數字是測資；docstring 由測試名稱承擔。
+"tests/**" = [
+    "S101", "D100", "D101", "D102", "D103", "D104",
+    "FBT001", "FBT002", "FBT003", "PLR2004", "ANN401", "SLF001", "S603", "S607",
+]
 
 [tool.mypy]
 files = ["src", "tests"]

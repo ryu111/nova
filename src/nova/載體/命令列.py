@@ -85,6 +85,7 @@ def _子命令_檢查提交訊息(參數: argparse.Namespace) -> int:
 
 
 def 建剖析器() -> argparse.ArgumentParser:
+    """建出 nova 的參數剖析器。抽出來是為了讓測試能不啟動程序就檢查介面。"""
     剖析器 = argparse.ArgumentParser(prog="nova", description="nova：把規則降到載體層執行")
     剖析器.add_argument("--根目錄", default=".", help="要檢查的 repo 根目錄")
     子 = 剖析器.add_subparsers(dest="子命令", required=True)
@@ -109,6 +110,7 @@ def 建剖析器() -> argparse.ArgumentParser:
 
 
 def 主程式(argv: list[str] | None = None) -> int:
+    """進入點。回傳退出碼：0 放行、1 閘紅、2 阻擋。"""
     參數 = 建剖析器().parse_args(argv)
     執行 = 參數.執行
     return int(執行(參數))
