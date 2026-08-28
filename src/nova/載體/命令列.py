@@ -7,11 +7,14 @@ pre-commit、CI、agent 的 hook 全部呼叫這裡的同一支程式，所以�
 """
 
 import argparse
+import dataclasses
 import json
 import sys
 from pathlib import Path
 
+from nova.契約.模型回應 import 回應
 from nova.契約.檢查結果 import 檢查結果
+from nova.載體.模型.轉接 import 建立
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.語言 import 找非繁體字
@@ -84,6 +87,49 @@ def _子命令_檢查提交訊息(參數: argparse.Namespace) -> int:
     return 閘紅
 
 
+def _摘要(家: str, 答: 回應) -> str:
+    """一行給人看的結果。放 stderr，stdout 留給模型講的話，才能直接 pipe。"""
+    用 = 答.用量
+    量 = f"{用.輸入token}→{用.輸出token} token"
+    if 用.成本美金 is not None:
+        量 += f" · US${用.成本美金:.4f}"
+    if 答.執行成功:
+        return f"[{家}] 完成 · {量}"
+    return f"[{家}] 失敗 {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}"
+
+
+def _子命令_問(參數: argparse.Namespace) -> int:
+    """把一件事委派給別家 LLM CLI。
+
+    這是統一介面的第一個真實呼叫端——用 codex／agy 接手工作，
+    分擔 Claude 的壓力與使用額度。
+    """
+    try:
+        模型 = 建立(參數.用, 執行檔=Path(參數.執行檔) if 參數.執行檔 else None)
+    except (ValueError, FileNotFoundError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    提示 = " ".join(參數.提示) if 參數.提示 else sys.stdin.read()
+    if not 提示.strip():
+        print("沒有提示可以問（用參數給，或從 stdin 餵）", file=sys.stderr)
+        return 阻擋
+
+    答 = 模型.詢問(
+        提示,
+        模型=參數.模型,
+        工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
+        逾時秒=參數.逾時,
+    )
+    if 參數.json:
+        # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
+        證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
+        print(json.dumps(證據, ensure_ascii=False, indent=2))
+    else:
+        print(答.文字)
+    print(_摘要(參數.用, 答), file=sys.stderr)
+    return 放行 if 答.執行成功 else 閘紅
+
+
 def 建剖析器() -> argparse.ArgumentParser:
     """建出 nova 的參數剖析器。抽出來是為了讓測試能不啟動程序就檢查介面。"""
     剖析器 = argparse.ArgumentParser(prog="nova", description="nova：把規則降到載體層執行")
@@ -105,6 +151,16 @@ def 建剖析器() -> argparse.ArgumentParser:
     訊息剖析 = 子.add_parser("檢查提交訊息", help="檢查 commit 訊息是不是繁體中文")
     訊息剖析.add_argument("檔案", help="commit 訊息檔（git 會傳 .git/COMMIT_EDITMSG）")
     訊息剖析.set_defaults(執行=_子命令_檢查提交訊息)
+
+    問剖析 = 子.add_parser("問", help="把一件事委派給別家 LLM CLI（分擔額度）")
+    問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
+    問剖析.add_argument("--用", required=True, help="哪一家：claude、codex、agy")
+    問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
+    問剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
+    問剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
+    問剖析.add_argument("--逾時", type=float, default=300.0, help="幾秒沒回應就殺掉")
+    問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
+    問剖析.set_defaults(執行=_子命令_問)
 
     return 剖析器
 

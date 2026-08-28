@@ -133,8 +133,25 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 
 ## 目前狀態
 
-`載體/` 有第一段實作：機械化閘（設計見 [`docs/設計/01-機械化閘.md`](docs/設計/01-機械化閘.md)）。
-`迴圈/` 與 `契約/` 除了 `檢查結果` 之外仍是空的——迴圈是 §10 建置順序的下一階。
+`載體/` 有兩段實作：
+
+1. **機械化閘**（設計見 [`docs/設計/01-機械化閘.md`](docs/設計/01-機械化閘.md)）
+2. **統一 LLM CLI 介面**（設計見 [`docs/設計/02-統一LLM介面.md`](docs/設計/02-統一LLM介面.md)）——
+   `nova 問 --用 codex|agy|claude "提示"`，三家同形。立即用途是**委派工作、分擔 Claude 額度**。
+
+```bash
+uv run nova 問 --用 codex "幫我看 X"        # stdout 只有模型講的話，可以直接 pipe
+uv run nova 問 --用 agy --json "幫我看 X"   # 結構化證據（失敗代碼、token、成本）
+```
+
+介面的設計基準是**本地模型**（只有腦），不是 Claude（腦 + 一整套自帶載體）。
+各家自帶的工具、session、家目錄設定一律關掉——依賴它們會讓 nova 的行為變成
+「這次剛好用了哪一家的行為」。哪幾條旗標做這件事由
+`tests/整合/test_模型轉接.py::Test把各家載體關到最小` 背書。
+**已知只做到一半**：工具擋住了，各家內建的 system prompt 還沒（實測十來字的提示，
+codex 吃 17341 input token、agy 吃 14515）。
+
+`迴圈/` 仍是空的——§10 建置順序的下一階。
 
 已做過的固定負控（證明防護真的會紅，不必重推）：
 
@@ -149,3 +166,4 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 | `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
 | gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
 | gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |
+| 解析 claude 時改看 `subtype` 而非 `is_error` | `test_模型不存在_不准看subtype` 紅（實錄裡失敗案例的 `subtype` 也是 `"success"`） |
