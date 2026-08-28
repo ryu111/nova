@@ -22,7 +22,14 @@ jobs:
       - name: 安裝相依（鎖檔為準）
         run: uv sync --locked
 
+      # actions/checkout 預設 fetch-depth: 1，沒有 origin/main 可以比。
+      # test-count 要跟 base branch 比，不然 CI 上工作區 == HEAD，整條規則空轉。
+      - name: 抓 base branch 當測試數基準
+        run: git fetch --no-tags --depth=1 origin main
+
       # 只有一行：規則全部登記在 src/nova/載體/規則表.py，每條都有測試背書。
       # --全部跑完 讓 CI 一次回報所有紅的，不要修一條推一次。
       - name: nova 閘 ci
         run: uv run nova 閘 ci --全部跑完
+        env:
+          NOVA_TEST_COUNT_BASE: origin/main

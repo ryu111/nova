@@ -5,15 +5,26 @@
 那些地方的程式碼沒辦法測試，等於沒有保證。
 """
 
+import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
 from nova.載體.語言 import 檢查繁體中文
 from nova.載體.閘 import 型別, 測試, 規則, 靜態
+
+# CI 要跟 base branch 比，本機 commit 前跟 HEAD 比。用環境變數傳遞，
+# 讓 .github/workflows/gates.yml 只放一個常數字串、不放判斷邏輯（薄轉接、厚 nova）。
+# 變數名用 ASCII：CLAUDE.md 的 shell 變數名例外。
+基準環境變數 = "NOVA_TEST_COUNT_BASE"
+
+
+def 決定基準(環境: Mapping[str, str]) -> str:
+    """測試數要跟哪個 ref 比。環境當參數收進來，測試才不必去動真的 os.environ。"""
+    return 環境.get(基準環境變數, "HEAD")
 
 
 def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str]]:
@@ -65,7 +76,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
             名稱="測試數不准減少",
             閘點=全部,
             負責層="載體",
-            檢查=lambda: 檢查測試數(根目錄),
+            檢查=lambda: 檢查測試數(根目錄, 基準=決定基準(os.environ)),
             階段=靜態,
         ),
         規則(
