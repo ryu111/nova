@@ -12,6 +12,10 @@ CLAUDE.md 的「一律繁體中文」是提示詞——模型會忘，換模型�
 小清單。天花板是 Big5 沒收的罕用繁體字會被誤判；真的遇到就用 `允許標記` 放行那一行。
 """
 
+from pathlib import Path
+
+from nova.載體.git查詢 import 追蹤中的檔案
+
 # 含此標記的行整行不檢查——引用非繁體原文、或用到罕用字時的逃生門。
 允許標記 = "nova:允許非繁體"
 
@@ -51,3 +55,18 @@ def 找非繁體字(文字: str) -> list[tuple[int, str, str]]:
             continue
         命中.extend((行號, 字, 整行) for 字 in 整行 if 是非繁體字(字))
     return 命中
+
+
+def 檢查繁體中文(根目錄: Path) -> tuple[bool, str]:
+    """掃 git 追蹤中的原始碼與文件，回傳 (放行, 證據)。
+
+    範圍用 git ls-files 決定——不必自己維護 .venv／快取的排除表。
+    """
+    問題: list[str] = []
+    for 相對 in 追蹤中的檔案(根目錄):
+        路徑 = 根目錄 / 相對
+        if 路徑.suffix not in 掃描副檔名 or not 路徑.is_file():
+            continue
+        for 行號, 字, 整行 in 找非繁體字(路徑.read_text(encoding="utf-8")):
+            問題.append(f"{相對}:{行號} 出現「{字}」 → {整行.strip()[:60]}")
+    return (not 問題), "\n".join(問題)
