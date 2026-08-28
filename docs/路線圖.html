@@ -117,7 +117,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    <text x="500" y="382" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="700">只有一件事變了：ctx 歸誰。你的座位、你打的字、回你話的介面，都一樣。</text>
   </svg>
   <div style="text-align:center;margin-top:14px">
-    <button id="展開鈕" onclick="切細節()">展開細節圖（31 格・現在做到哪）</button>
+    <button id="展開鈕" onclick="切細節()">展開細節圖（34 格・現在做到哪）</button>
   </div>
 </div>
 <div id="細節區" style="display:none"><svg id="圖"></svg></div></div>
@@ -548,6 +548,51 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "層": "落盤",
    "態": "無",
    "檔": []
+  },
+  {
+   "id": "角色",
+   "標": "角色（IAgent）",
+   "副": "固定系統提示＋可換的腦",
+   "x": 80,
+   "y": 1010,
+   "w": 210,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/契約/角色.py",
+    "src/nova/載體/角色.py"
+   ]
+  },
+  {
+   "id": "狀態機",
+   "標": "狀態機（純函式轉移表）",
+   "副": "測試→驗證紅→實作→驗證綠→審查",
+   "x": 308,
+   "y": 1010,
+   "w": 280,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/迴圈/狀態機.py"
+   ],
+   "註": "不是圖層——單一路徑加兩條回頭邊，屬迴圈的 action policy + stop rule"
+  },
+  {
+   "id": "工作流",
+   "標": "工作流 runner",
+   "副": "七欄位・stop rule 是最多步數",
+   "x": 606,
+   "y": 1010,
+   "w": 230,
+   "h": 46,
+   "層": "迴圈",
+   "態": "好",
+   "檔": [
+    "src/nova/迴圈/工作流.py"
+   ],
+   "註": "執行一步 是參數不是內建（依賴反轉），所以測試零 LLM、零 token"
   }
  ],
  "連線": [
@@ -681,6 +726,21 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "從": "閘",
    "到": "檢查",
    "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "角色",
+   "型": "呼叫"
+  },
+  {
+   "從": "角色",
+   "到": "工作流",
+   "型": "流"
+  },
+  {
+   "從": "狀態機",
+   "到": "工作流",
+   "型": "流"
   }
  ]
 }
@@ -702,13 +762,14 @@ const 層清單 = [
   {鍵:"h",    名:"h 的實作（claude/codex/agy 平級）"},
   {鍵:"契約", 名:"契約（跨層 schema）"},
   {鍵:"落盤", 名:"落盤（你隨時能 cat）"},
+  {鍵:"迴圈", 名:"迴圈：角色與工作流（骨架）"},
 ];
 
 const 預設 = {
-  "全部":       {層:["閘","觸發","核","h","契約","落盤"], 態:["好","半","無"]},
-  "現在有的":   {層:["閘","觸發","核","h","契約","落盤"], 態:["好"]},
-  "還沒做的":   {層:["閘","觸發","核","h","契約","落盤"], 態:["半","無"]},
-  "下一階：迴圈":{層:["核","契約","落盤"],                 態:["好","半","無"]},
+  "全部":       {層:["閘","觸發","核","h","契約","落盤","迴圈"], 態:["好","半","無"]},
+  "現在有的":   {層:["閘","觸發","核","h","契約","落盤","迴圈"], 態:["好"]},
+  "還沒做的":   {層:["閘","觸發","核","h","契約","落盤","迴圈"], 態:["半","無"]},
+  "下一階：迴圈":{層:["核","契約","落盤","迴圈"],           態:["好","半","無"]},
   "已完成的殼": {層:["閘","契約"],                         態:["好","半","無"]},
 };
 
@@ -743,7 +804,7 @@ function 邊(n){ return {左:n.x, 右:n.x+n.w, 上:n.y, 下:n.y+n.h, 中x:n.x+n.
 
 function 畫(){
   const svg = document.getElementById("圖");
-  const 寬 = 1240, 高 = 990;
+  const 寬 = 1240, 高 = 1100;
   svg.setAttribute("viewBox", `0 0 ${寬} ${高}`);
   svg.setAttribute("width", 寬*態.倍); svg.setAttribute("height", 高*態.倍);
   document.getElementById("倍率").textContent = Math.round(態.倍*100)+"%";
@@ -861,7 +922,7 @@ function 複製(){
 function 切細節(){
   const 區 = document.getElementById("細節區"), 開 = 區.style.display === "none";
   區.style.display = 開 ? "block" : "none";
-  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（31 格・現在做到哪）";
+  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（34 格・現在做到哪）";
   if(開) 畫();
 }
 建側欄(); 套預設("全部");

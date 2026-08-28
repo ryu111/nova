@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from nova.契約.模型回應 import 回應, 用量, 終局判定
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 from nova.載體.模型.執行 import 執行逾時, 跑cli
 from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 
@@ -117,8 +117,8 @@ class 命令列模型:
             # 逾時是**結果未知**不是確定失敗——子程序被殺時工作可能已經做了一半。
             return 回應(
                 文字="",
-                終局=終局判定("timeout"),
-                失敗代碼="timeout",
+                終局=終局判定(失敗代碼.逾時),
+                失敗代碼=失敗代碼.逾時,
                 原始結束碼=-1,
                 對話識別碼=None,
                 用量=用量(輸入token=0, 輸出token=0),

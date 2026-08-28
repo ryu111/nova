@@ -3,63 +3,67 @@
 規格 §4.3：跨層傳遞一律 schema 化。自由段落會逼下游重建上游語意，
 多階段之後歧義累積會改變結論——所以錯誤分類在這一層做完一次，不往下游丟原始訊息。
 
+用 `StrEnum` 不用 `Literal`＋常數表：**識別字中文、值 ASCII**。
+一個來源就沒有漂移問題（常數表與型別標註分兩處寫，遲早對不上），
+而且能直接 `for 代碼 in 失敗代碼` 迭代，窮舉性測試才寫得出來。
+
 設計決定見 `docs/設計/02-統一LLM介面.md`。
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 
-# 失敗代碼要跨程序流動（CLI 輸出、日誌、CI），用 ASCII——CLAUDE.md 的 failure code 例外。
-全部失敗代碼 = (
-    "none",  # 沒有失敗
-    "auth",  # 認證失敗
-    "model-not-found",  # 指定的模型不存在
-    "usage",  # 用法錯誤：旗標錯、參數錯
-    "timeout",  # 逾時，由 nova 這邊殺掉
-    "interrupted",  # 被中斷
-    "upstream",  # 上游錯誤：429、5xx
-    "unknown",  # 解析不出來。**這是 fail-closed 的落點**，不是「大概沒事」
-)
-失敗代碼 = Literal[
-    "none",
-    "auth",
-    "model-not-found",
-    "usage",
-    "timeout",
-    "interrupted",
-    "upstream",
-    "unknown",
-]
 
-# 終局是 at-most-once 的地基：**結果未知 ≠ 確定失敗**。
-# 殺掉子程序時工作可能已經做了一半，把它當確定失敗，重試就會把可能做過的事再做一次。
-全部終局 = ("success", "failed", "unknown")
-終局 = Literal["success", "failed", "unknown"]
+class 失敗代碼(StrEnum):
+    """為什麼沒跑成。值用 ASCII——要跨程序流動（CLI 輸出、日誌、CI）。"""
+
+    無 = "none"
+    認證 = "auth"
+    模型不存在 = "model-not-found"
+    用法錯誤 = "usage"
+    逾時 = "timeout"
+    被中斷 = "interrupted"
+    上游 = "upstream"
+    未知 = "unknown"
+
+
+class 終局(StrEnum):
+    """at-most-once 的地基：**結果未知 ≠ 確定失敗**。
+
+    殺掉子程序時工作可能已經做了一半。把它當確定失敗，重試就會把可能做過的事
+    再做一次。布林壓不住這個區別，所以是三值。
+    """
+
+    成功 = "success"
+    確定失敗 = "failed"
+    結果未知 = "unknown"
+
 
 # 分界線是「請求出門了沒」——出門了就可能已經產生副作用。
 # 寫成表不是寫成 if 鏈：加一個失敗代碼＝加一列，不是回來改判斷（開放封閉）。
-# `全部失敗代碼` 的每一個都必須在這裡有一列，由 test_每個失敗代碼都要有明確的終局 背書。
-_終局表: dict[str, 終局] = {
-    "none": "success",
-    "auth": "failed",  # 認證就被擋，沒出門
-    "model-not-found": "failed",  # 模型不存在，沒出門
-    "usage": "failed",  # 旗標錯，CLI 自己就退了
-    "upstream": "unknown",  # 429／5xx：出門了，對面做了什麼不知道
-    "timeout": "unknown",  # 被我們殺掉，可能做了一半
-    "interrupted": "unknown",  # 同上
-    "unknown": "unknown",  # 解析不出來，最保守的那一格
+# 每個 `失敗代碼` 都必須在這裡有一列，由 test_每個失敗代碼都要有明確的終局 背書。
+_終局表: dict[失敗代碼, 終局] = {
+    失敗代碼.無: 終局.成功,
+    失敗代碼.認證: 終局.確定失敗,  # 認證就被擋，沒出門
+    失敗代碼.模型不存在: 終局.確定失敗,  # 模型不存在，沒出門
+    失敗代碼.用法錯誤: 終局.確定失敗,  # 旗標錯，CLI 自己就退了
+    失敗代碼.上游: 終局.結果未知,  # 429／5xx：出門了，對面做了什麼不知道
+    失敗代碼.逾時: 終局.結果未知,  # 被我們殺掉，可能做了一半
+    失敗代碼.被中斷: 終局.結果未知,  # 同上
+    失敗代碼.未知: 終局.結果未知,  # 解析不出來，最保守的那一格
 }
 
 
 def 終局判定(代碼: 失敗代碼) -> 終局:
     """這個失敗可不可以重試？
 
-    表裡沒有的代碼一律當 `unknown`——fail-closed。猜「大概可以重試」會重做副作用。
+    表裡沒有的代碼一律當結果未知——fail-closed。猜「大概可以重試」會重做副作用。
 
-    從簡：`upstream` 把 429（確定沒做）和 5xx（可能做了）壓在一起，所以連 429 都
-    不准重試。要放寬就把 `upstream` 拆成兩個代碼，等真的有重試迴圈嫌它太保守再拆。
+    從簡：`上游` 把 429（確定沒做）和 5xx（可能做了）壓在一起，所以連 429 都
+    不准重試。要放寬就把 `上游` 拆成兩個代碼，等真的有重試迴圈嫌它太保守再拆。
     """
-    return _終局表.get(代碼, "unknown")
+    return _終局表.get(代碼, 終局.結果未知)
 
 
 @dataclass(frozen=True, slots=True)

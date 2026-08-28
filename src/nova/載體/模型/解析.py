@@ -54,12 +54,12 @@ def _逐行json(文字: str) -> list[dict[str, Any]]:
 
 def _由http狀態分類(狀態: int) -> 失敗代碼:
     if 狀態 in (_未授權, _禁止):
-        return "auth"
+        return 失敗代碼.認證
     if 狀態 == _找不到:
-        return "model-not-found"
+        return 失敗代碼.模型不存在
     if 狀態 == _太多請求 or 狀態 >= _伺服器錯誤起點:
-        return "upstream"
-    return "unknown"
+        return 失敗代碼.上游
+    return 失敗代碼.未知
 
 
 def _分類(結束碼: int, http狀態: int | None, 訊息: str) -> 失敗代碼:
@@ -69,15 +69,15 @@ def _分類(結束碼: int, http狀態: int | None, 訊息: str) -> 失敗代碼
     「自由段落逼下游重建上游語意」。
     """
     if 結束碼 == _旗標用錯的結束碼:
-        return "usage"
+        return 失敗代碼.用法錯誤
     低 = 訊息.lower()
     if any(詞 in 低 for 詞 in _模型關鍵詞):
-        return "model-not-found"
+        return 失敗代碼.模型不存在
     if any(詞 in 低 for 詞 in _認證關鍵詞):
-        return "auth"
+        return 失敗代碼.認證
     if http狀態 is not None:
         return _由http狀態分類(http狀態)
-    return "unknown"
+    return 失敗代碼.未知
 
 
 def _壞掉(結束碼: int, 訊息: str, 原始: list[dict[str, Any]]) -> 回應:
@@ -103,7 +103,7 @@ def 解析claude(標準輸出: str, 結束碼: int) -> 回應:
     文字 = str(信封.get("result") or "")
     # `subtype` 在失敗時仍然是 "success"（見實錄 claude_bad.txt）——只看 is_error。
     順利 = not bool(信封.get("is_error", True)) and 結束碼 == 0
-    代碼 = "none" if 順利 else _分類(結束碼, 信封.get("api_error_status"), 文字)
+    代碼 = 失敗代碼.無 if 順利 else _分類(結束碼, 信封.get("api_error_status"), 文字)
     用了: dict[str, Any] = 信封.get("usage") or {}
     return 回應(
         文字=文字,
@@ -154,7 +154,7 @@ def 解析codex(標準輸出: str, 結束碼: int) -> 回應:
     if not 事件們 or not (完成 or any(事.get("type") == "turn.failed" for 事 in 事件們)):
         return _壞掉(結束碼, _codex的錯誤訊息(事件們) or 標準輸出, 事件們)
     順利 = bool(完成) and 結束碼 == 0
-    代碼 = "none" if 順利 else _分類(結束碼, None, _codex的錯誤訊息(事件們))
+    代碼 = 失敗代碼.無 if 順利 else _分類(結束碼, None, _codex的錯誤訊息(事件們))
     用了: dict[str, Any] = (完成[-1].get("usage") if 完成 else {}) or {}
     開場 = next((事 for 事 in 事件們 if 事.get("type") == "thread.started"), {})
     return 回應(
@@ -195,7 +195,7 @@ def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
     if 信封 is None:
         return _壞掉(結束碼, 標準輸出, 原始)
     順利 = 信封.get("status") == "SUCCESS" and 結束碼 == 0
-    代碼 = "none" if 順利 else _分類(結束碼, None, str(信封.get("error") or ""))
+    代碼 = 失敗代碼.無 if 順利 else _分類(結束碼, None, str(信封.get("error") or ""))
     用了: dict[str, Any] = 信封.get("usage") or {}
     return 回應(
         文字=str(信封.get("response") or ""),
