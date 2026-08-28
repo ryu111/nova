@@ -13,7 +13,7 @@
 import json
 from typing import Any
 
-from nova.契約.模型回應 import 回應, 失敗代碼, 用量
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 
 _模型關鍵詞 = (
     "unrecognized_model",
@@ -82,10 +82,11 @@ def _分類(結束碼: int, http狀態: int | None, 訊息: str) -> 失敗代碼
 
 def _壞掉(結束碼: int, 訊息: str, 原始: list[dict[str, Any]]) -> 回應:
     """解不出 envelope。**這是 fail-closed 的落點**，不是「大概沒事」。"""
+    代碼 = _分類(結束碼, None, 訊息)
     return 回應(
         文字="",
-        執行成功=False,
-        失敗代碼=_分類(結束碼, None, 訊息),
+        終局=終局判定(代碼),
+        失敗代碼=代碼,
         原始結束碼=結束碼,
         對話識別碼=None,
         用量=用量(輸入token=0, 輸出token=0),
@@ -101,12 +102,13 @@ def 解析claude(標準輸出: str, 結束碼: int) -> 回應:
     信封 = 候選[-1]
     文字 = str(信封.get("result") or "")
     # `subtype` 在失敗時仍然是 "success"（見實錄 claude_bad.txt）——只看 is_error。
-    成功 = not bool(信封.get("is_error", True)) and 結束碼 == 0
+    順利 = not bool(信封.get("is_error", True)) and 結束碼 == 0
+    代碼 = "none" if 順利 else _分類(結束碼, 信封.get("api_error_status"), 文字)
     用了: dict[str, Any] = 信封.get("usage") or {}
     return 回應(
         文字=文字,
-        執行成功=成功,
-        失敗代碼="none" if 成功 else _分類(結束碼, 信封.get("api_error_status"), 文字),
+        終局=終局判定(代碼),
+        失敗代碼=代碼,
         原始結束碼=結束碼,
         對話識別碼=信封.get("session_id"),
         用量=用量(
@@ -151,13 +153,14 @@ def 解析codex(標準輸出: str, 結束碼: int) -> 回應:
     完成 = [事件 for 事件 in 事件們 if 事件.get("type") == "turn.completed"]
     if not 事件們 or not (完成 or any(事.get("type") == "turn.failed" for 事 in 事件們)):
         return _壞掉(結束碼, _codex的錯誤訊息(事件們) or 標準輸出, 事件們)
-    成功 = bool(完成) and 結束碼 == 0
+    順利 = bool(完成) and 結束碼 == 0
+    代碼 = "none" if 順利 else _分類(結束碼, None, _codex的錯誤訊息(事件們))
     用了: dict[str, Any] = (完成[-1].get("usage") if 完成 else {}) or {}
     開場 = next((事 for 事 in 事件們 if 事.get("type") == "thread.started"), {})
     return 回應(
         文字=_codex的文字(事件們),
-        執行成功=成功,
-        失敗代碼="none" if 成功 else _分類(結束碼, None, _codex的錯誤訊息(事件們)),
+        終局=終局判定(代碼),
+        失敗代碼=代碼,
         原始結束碼=結束碼,
         對話識別碼=開場.get("thread_id"),
         用量=用量(
@@ -191,12 +194,13 @@ def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
     信封, 原始 = _agy的信封(標準輸出)
     if 信封 is None:
         return _壞掉(結束碼, 標準輸出, 原始)
-    成功 = 信封.get("status") == "SUCCESS" and 結束碼 == 0
+    順利 = 信封.get("status") == "SUCCESS" and 結束碼 == 0
+    代碼 = "none" if 順利 else _分類(結束碼, None, str(信封.get("error") or ""))
     用了: dict[str, Any] = 信封.get("usage") or {}
     return 回應(
         文字=str(信封.get("response") or ""),
-        執行成功=成功,
-        失敗代碼="none" if 成功 else _分類(結束碼, None, str(信封.get("error") or "")),
+        終局=終局判定(代碼),
+        失敗代碼=代碼,
         原始結束碼=結束碼,
         對話識別碼=信封.get("conversation_id") or None,
         用量=用量(

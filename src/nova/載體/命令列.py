@@ -3,7 +3,7 @@
 pre-commit、CI、agent 的 hook 全部呼叫這裡的同一支程式，所以換模型、換工具，
 受到的約束完全一樣。設定檔裡只准放一行呼叫，不准塞邏輯——設定檔沒辦法測試。
 
-退出碼：0 放行、1 閘紅、2 阻擋（agent hook 的約定）。
+退出碼：0 放行／成功、1 閘紅／確定失敗、2 阻擋（agent hook 的約定）、3 結果未知。
 """
 
 import argparse
@@ -21,6 +21,9 @@ from nova.載體.語言 import 找非繁體字
 from nova.載體.閘 import 跑閘
 
 放行, 閘紅, 阻擋 = 0, 1, 2
+# 結果未知要跟確定失敗分開，腳本才知道「這個不准重跑」。
+未知 = 3
+_終局的退出碼 = {"success": 放行, "failed": 閘紅, "unknown": 未知}
 
 
 def _印結果(結果表: list[檢查結果]) -> int:
@@ -93,9 +96,10 @@ def _摘要(家: str, 答: 回應) -> str:
     量 = f"{用.輸入token}→{用.輸出token} token"
     if 用.成本美金 is not None:
         量 += f" · US${用.成本美金:.4f}"
-    if 答.執行成功:
+    if 答.終局 == "success":
         return f"[{家}] 完成 · {量}"
-    return f"[{家}] 失敗 {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}"
+    如何 = "確定失敗" if 答.終局 == "failed" else "結果未知（不准自動重跑）"
+    return f"[{家}] {如何} {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}"
 
 
 def _子命令_問(參數: argparse.Namespace) -> int:
@@ -127,7 +131,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     else:
         print(答.文字)
     print(_摘要(參數.用, 答), file=sys.stderr)
-    return 放行 if 答.執行成功 else 閘紅
+    return _終局的退出碼[答.終局]
 
 
 def 建剖析器() -> argparse.ArgumentParser:
@@ -166,7 +170,7 @@ def 建剖析器() -> argparse.ArgumentParser:
 
 
 def 主程式(argv: list[str] | None = None) -> int:
-    """進入點。回傳退出碼：0 放行、1 閘紅、2 阻擋。"""
+    """進入點。回傳退出碼：0 放行、1 閘紅／確定失敗、2 阻擋、3 結果未知。"""
     參數 = 建剖析器().parse_args(argv)
     執行 = 參數.執行
     return int(執行(參數))

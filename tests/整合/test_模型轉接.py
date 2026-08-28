@@ -41,12 +41,12 @@ def _環境(實錄檔: str, 結束碼: int = 0, **其他: str) -> dict[str, str]
 class Test全鏈路:
     def test_成功(self, 假CLI: Path) -> None:
         答 = 建立("claude", 執行檔=假CLI).詢問("在嗎", 環境=_環境("claude_ok.json"))
-        assert 答.執行成功 is True
+        assert 答.終局 == "success"
         assert 答.文字 == "ok"
 
     def test_失敗被分類(self, 假CLI: Path) -> None:
         答 = 建立("codex", 執行檔=假CLI).詢問("在嗎", 環境=_環境("codex_bad.txt", 1))
-        assert 答.執行成功 is False
+        assert 答.終局 != "success"
         assert 答.失敗代碼 == "model-not-found"
         assert 答.原始結束碼 == 1
 
@@ -60,7 +60,7 @@ class Test全鏈路:
         答 = 建立("claude", 執行檔=假CLI).詢問(
             "在嗎", 逾時秒=0.3, 環境=_環境("claude_ok.json", 0, 假CLI_睡="5")
         )
-        assert 答.執行成功 is False
+        assert 答.終局 != "success"
         assert 答.失敗代碼 == "timeout"
 
     def test_執行檔不存在要當場炸(self, tmp_path: Path) -> None:
