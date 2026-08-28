@@ -117,7 +117,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    <text x="500" y="382" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="700">只有一件事變了：ctx 歸誰。你的座位、你打的字、回你話的介面，都一樣。</text>
   </svg>
   <div style="text-align:center;margin-top:14px">
-    <button id="展開鈕" onclick="切細節()">展開細節圖（38 格・現在做到哪）</button>
+    <button id="展開鈕" onclick="切細節()">展開細節圖（39 格・現在做到哪）</button>
   </div>
 </div>
 <div id="細節區" style="display:none"><svg id="圖"></svg></div></div>
@@ -476,7 +476,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "契約：模型回應",
    "副": "契約/模型回應.py",
    "x": 80,
-   "y": 790,
+   "y": 838,
    "w": 200,
    "h": 46,
    "層": "契約",
@@ -490,7 +490,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "契約：檢查結果",
    "副": "契約/檢查結果.py",
    "x": 298,
-   "y": 790,
+   "y": 838,
    "w": 200,
    "h": 46,
    "層": "契約",
@@ -504,7 +504,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "契約：終局三值",
    "副": "at-most-once 的地基",
    "x": 516,
-   "y": 790,
+   "y": 838,
    "w": 200,
    "h": 46,
    "層": "契約",
@@ -518,7 +518,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "journal/*.jsonl",
    "副": "事件流・可 tail -f",
    "x": 80,
-   "y": 900,
+   "y": 948,
    "w": 200,
    "h": 46,
    "層": "落盤",
@@ -530,7 +530,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "狀態檔＋失敗簿",
    "副": "需要你的事都在這",
    "x": 298,
-   "y": 900,
+   "y": 948,
    "w": 200,
    "h": 46,
    "層": "落盤",
@@ -542,7 +542,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "已處理/ 歸檔",
    "副": "成果帳本",
    "x": 516,
-   "y": 900,
+   "y": 948,
    "w": 180,
    "h": 46,
    "層": "落盤",
@@ -554,7 +554,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "角色（IAgent）",
    "副": "固定系統提示＋可換的腦",
    "x": 80,
-   "y": 1010,
+   "y": 1058,
    "w": 210,
    "h": 46,
    "層": "迴圈",
@@ -569,7 +569,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "狀態機（純函式轉移表）",
    "副": "測試→驗證紅→實作→驗證綠→審查",
    "x": 308,
-   "y": 1010,
+   "y": 1058,
    "w": 280,
    "h": 46,
    "層": "迴圈",
@@ -584,7 +584,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "工作流 runner",
    "副": "七欄位・stop rule 是最多步數",
    "x": 606,
-   "y": 1010,
+   "y": 1058,
    "w": 230,
    "h": 46,
    "層": "迴圈",
@@ -599,7 +599,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "機械判準",
    "副": "跑指令看退出碼・不是模型",
    "x": 80,
-   "y": 1090,
+   "y": 1138,
    "w": 220,
    "h": 46,
    "層": "迴圈",
@@ -614,7 +614,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "nova 工作流",
    "副": "--用 codex --審查用 agy",
    "x": 318,
-   "y": 1090,
+   "y": 1138,
    "w": 240,
    "h": 46,
    "層": "迴圈",
@@ -629,7 +629,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "真 CLI 契約測試",
    "副": "pytest -m 真cli・不進 CI",
    "x": 576,
-   "y": 1090,
+   "y": 1138,
    "w": 230,
    "h": 46,
    "層": "迴圈",
@@ -644,7 +644,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "標": "門面（公開 API）",
    "副": "import nova → 問／派工",
    "x": 824,
-   "y": 1090,
+   "y": 1138,
    "w": 190,
    "h": 46,
    "層": "迴圈",
@@ -653,6 +653,21 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
     "src/nova/__init__.py"
    ],
    "註": "這是 nova 自己派工做出來的——codex 寫、機械判準驗、agy 審、人驗收"
+  },
+  {
+   "id": "接力",
+   "標": "接力腦 [llm, llm, llm]",
+   "副": "前一顆失敗換下一顆",
+   "x": 694,
+   "y": 730,
+   "w": 230,
+   "h": 46,
+   "層": "h",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/模型/接力.py"
+   ],
+   "註": "能不能換下一顆要看權限：唯讀沒有副作用可以換；可編輯遇到結果未知一律停（at-most-once）"
   }
  ],
  "連線": [
@@ -816,6 +831,11 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "從": "門面",
    "到": "工作流",
    "型": "流"
+  },
+  {
+   "從": "接力",
+   "到": "回應",
+   "型": "流"
   }
  ]
 }
@@ -879,7 +899,7 @@ function 邊(n){ return {左:n.x, 右:n.x+n.w, 上:n.y, 下:n.y+n.h, 中x:n.x+n.
 
 function 畫(){
   const svg = document.getElementById("圖");
-  const 寬 = 1240, 高 = 1190;
+  const 寬 = 1240, 高 = 1240;
   svg.setAttribute("viewBox", `0 0 ${寬} ${高}`);
   svg.setAttribute("width", 寬*態.倍); svg.setAttribute("height", 高*態.倍);
   document.getElementById("倍率").textContent = Math.round(態.倍*100)+"%";
@@ -895,8 +915,8 @@ function 畫(){
     {鍵:"閘", x:20, y:30, w:1180, h:104, 標:"殼 A ── 對「寫 code 的 agent」而言，這已經是殼", 色:"#4ADE80"},
     {鍵:"觸發",x:20, y:200, w:990, h:100, 標:"事件源 ── 四種事件都收斂成同一個函式呼叫", 色:"#F87171"},
     {鍵:"核", x:20, y:330, w:990, h:280, 標:"殼 B：執行核 ── 對「被委派的 LLM」而言，這才是殼（大部分還沒建）", 色:"#C084FC"},
-    {鍵:"h",  x:20, y:640, w:990, h:104, 標:"h 的實作 ── claude／codex／agy 平級，都只是 h 的一種", 色:"#60A5FA"},
-    {鍵:"契約",x:20, y:758, w:990, h:104, 標:"契約 ── 跨層一律 schema 化", 色:"#FBBF24"},
+    {鍵:"h",  x:20, y:640, w:990, h:150, 標:"h 的實作 ── claude／codex／agy 平級；一串 h 也是一個 h（接力）", 色:"#60A5FA"},
+    {鍵:"契約",x:20, y:806, w:990, h:104, 標:"契約 ── 跨層一律 schema 化", 色:"#FBBF24"},
     {鍵:"落盤",x:20, y:868, w:990, h:104, 標:"落盤 ── 你隨時能 cat 的檔案", 色:"#9B938B"},
   ];
   區.forEach(z=>{
@@ -997,7 +1017,7 @@ function 複製(){
 function 切細節(){
   const 區 = document.getElementById("細節區"), 開 = 區.style.display === "none";
   區.style.display = 開 ? "block" : "none";
-  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（38 格・現在做到哪）";
+  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（39 格・現在做到哪）";
   if(開) 畫();
 }
 建側欄(); 套預設("全部");

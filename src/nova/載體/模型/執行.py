@@ -10,6 +10,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from nova.契約.角色 import 預設逾時秒
+
 
 class 執行逾時(Exception):
     """子程序超過時限被殺掉。"""
@@ -29,7 +31,7 @@ def 跑cli(
     參數: Sequence[str],
     *,
     工作目錄: Path | None = None,
-    逾時秒: float = 300.0,
+    逾時秒: float = 預設逾時秒,
     環境: Mapping[str, str] | None = None,
 ) -> 執行結果:
     """跑一次外部 CLI，回結構化結果。逾時會殺掉子程序並丟 `執行逾時`。
