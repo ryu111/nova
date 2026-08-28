@@ -69,10 +69,11 @@ def test_三家的失敗都被分類成同一組代碼(家: str, 假CLI: Path) -
 def test_json輸出是結構化證據(家: str, 假CLI: Path) -> None:
     結果 = _問(家, 假CLI, 成功實錄[家], 0, "--json")
     證據 = json.loads(結果.stdout)
-    assert 證據["執行成功"] is True
+    assert 證據["終局"] == "success"
     assert 證據["失敗代碼"] == "none"
-    assert set(證據) >= {"文字", "執行成功", "失敗代碼", "原始結束碼", "對話識別碼", "用量"}
-    assert "成功" not in 證據, "只有『執行成功』，沒有『成功』——任務成敗不由這層給"
+    assert set(證據) >= {"文字", "終局", "失敗代碼", "原始結束碼", "對話識別碼", "用量"}
+    assert "成功" not in 證據, "任務成敗不由這層給"
+    assert "執行成功" not in 證據, "布林會把『結果未知』壓成『確定失敗』"
 
 
 def test_成本只有claude給其餘是空的(假CLI: Path) -> None:
@@ -81,6 +82,25 @@ def test_成本只有claude給其餘是空的(假CLI: Path) -> None:
     codex證據 = json.loads(_問("codex", 假CLI, 成功實錄["codex"], 0, "--json").stdout)
     assert claude證據["用量"]["成本美金"] is not None
     assert codex證據["用量"]["成本美金"] is None
+
+
+@pytest.mark.parametrize("家", 三家)
+def test_確定失敗的退出碼是1(家: str, 假CLI: Path) -> None:
+    """模型不存在＝請求沒出門＝確定失敗，重跑是安全的。"""
+    結果 = _問(家, 假CLI, 失敗實錄[家], 1)
+    assert 結果.returncode == 1
+    assert "確定失敗" in 結果.stderr
+
+
+@pytest.mark.parametrize("家", 三家)
+def test_結果未知的退出碼是3而不是1(家: str, 假CLI: Path) -> None:
+    """輸出解析不出來時我們不知道工作做了沒——腳本必須分得出來，才不會盲目重跑。
+
+    `agy` issue #76 就是這種：stdout 全空但結束碼 0。
+    """
+    結果 = _問(家, 假CLI, "README.md", 0)
+    assert 結果.returncode == 3, "結果未知不能跟確定失敗共用退出碼"
+    assert "不准自動重跑" in 結果.stderr
 
 
 def test_不認得的家要當場報錯(假CLI: Path) -> None:
