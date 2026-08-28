@@ -18,6 +18,7 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.7",
     "mypy>=1.13",
+    "pre-commit>=4.6.2",
 ]
 
 # pytest 官方對新專案的建議：測試放在套件外、用 importlib 匯入模式

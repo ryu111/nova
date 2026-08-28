@@ -21,12 +21,40 @@ uv run pytest                    # 全部測試
 uv run pytest tests/單元         # 只跑單元層
 uv run pytest tests/驗收/test_專案骨架.py::test_測試分三層   # 單一測試
 uv run pytest -k 骨架 -x         # 關鍵字篩選，第一個紅就停
+uv run pytest --lf               # 只重跑上次紅的
 uv run ruff check . && uv run ruff format .   # lint 與格式
 uv run mypy                      # 型別（strict）
+uv run pre-commit run --all-files             # 手動跑一次 commit 前的快閘
 ```
 
-四道閘全綠才算完成：`pytest` / `ruff check` / `ruff format --check` / `mypy`。
 一律走 `uv run`，不要先 activate venv——忘了 activate 會靜默跑到系統 Python 3.9。
+
+## 開發模式：TDD，每個階段跑的量不同
+
+先寫會紅的測試 → 看到它紅 → 最少的程式碼讓它綠 → 全綠下重構。
+通則在 `~/.claude/rules/測試.md`，這裡只寫 nova 的接線：
+
+| 階段 | 跑什麼 | 怎麼跑 | 時間 |
+|---|---|---|---|
+| 內圈（寫 code 時） | 手上那幾支 | `uv run pytest -k <關鍵字> -x` | < 5 秒 |
+| commit 前 | ruff check、ruff format、**tests/單元**、**機密防護** | pre-commit hook 自動 | < 10 秒 |
+| PR / push main | **四道閘全部** | GitHub Actions，check 名稱 `gates` | < 10 分鐘 |
+
+- 四道閘 = `ruff check` / `ruff format --check` / `mypy` / `pytest`。定義在
+  `.github/workflows/gates.yml`，本地一次跑完就是 `uv run pre-commit run --all-files`
+  再加 `uv run mypy && uv run pytest`。
+- **`gates` 這個 job 名稱是 main 保護規則的 required check context，不准改。**
+  改了 = 保護規則指向一個不存在的檢查，PR 會永遠卡住。
+- **不准 `git commit --no-verify`**，**不准 `gh pr merge --admin`**。
+  要繞過閘門，先修閘門。
+
+## 機密
+
+repo 是 **public**——洩漏一次就是永久的，GitHub 的快取與別人的 clone 收不回來。
+`.env`、`*.key`、`*.pem`、`credentials.json`、`secrets/` 已在 `.gitignore`，
+而且由 `tests/驗收/test_機密不進版控.py` 背書：它直接問 `git check-ignore`，
+並掃過 `git ls-files` 確認沒有機密檔案「已經被追蹤」（已追蹤的檔案寫進 `.gitignore` 也擋不住）。
+這支測試同時掛在 pre-commit，所以 commit 當下就會擋。
 
 ## 三層在這個 repo 的落點
 
@@ -72,5 +100,13 @@ graph 是第 4 階，**看過真實 trace、隱式控制流程真的難測了才
 ## 目前狀態
 
 骨架階段：三個子套件只有說明用的 `__init__.py`，還沒有實作。
-測試 11 支，全部在驗證骨架本身（src layout、三層子套件、三層測試目錄、設定不散落、
-規格文件在位）。尚未 `git init`。
+測試 18 支，全部在驗證骨架與防護本身（src layout、三層子套件、三層測試目錄、
+設定不散落、規格文件在位、機密不進版控）。`tests/整合/` 還是空的。
+
+已做過的固定負控（證明測試真的會紅，不必重推）：
+
+| 破壞什麼 | 哪支會紅 |
+|---|---|
+| `mkdir nova`（破壞 src layout） | `test_採用_src_layout_而非_flat_layout` |
+| 從 `.gitignore` 拿掉 `.env` | `test_git_本人確認會忽略[.env]` |
+| 直接 `git push origin main` | 被 ruleset 擋下（必經 PR） |
