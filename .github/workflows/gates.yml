@@ -22,14 +22,7 @@ jobs:
       - name: 安裝相依（鎖檔為準）
         run: uv sync --locked
 
-      - name: 閘一 ruff check
-        run: uv run ruff check .
-
-      - name: 閘二 ruff format
-        run: uv run ruff format --check .
-
-      - name: 閘三 mypy
-        run: uv run mypy
-
-      - name: 閘四 pytest
-        run: uv run pytest
+      # 只有一行：規則全部登記在 src/nova/載體/規則表.py，每條都有測試背書。
+      # --全部跑完 讓 CI 一次回報所有紅的，不要修一條推一次。
+      - name: nova 閘 ci
+        run: uv run nova 閘 ci --全部跑完

@@ -51,7 +51,7 @@ class Test繁體中文:
         assert 通過 is True, 證據
 
     def test_加入簡體字要擋(self, 迷你repo: Path) -> None:
-        (迷你repo / "src" / "乙.py").write_text("# 这是简体\n", encoding="utf-8")
+        (迷你repo / "src" / "乙.py").write_text("# 这是简体\n", encoding="utf-8")  # nova:允許非繁體
         subprocess.run(["git", "add", "-A"], cwd=迷你repo, check=True, capture_output=True)
         通過, 證據 = 檢查繁體中文(迷你repo)
         assert 通過 is False
@@ -59,7 +59,7 @@ class Test繁體中文:
 
     def test_沒被git追蹤的檔案不掃(self, 迷你repo: Path) -> None:
         """.venv、快取這些不該被掃。用 git ls-files 當範圍，不自己維護排除表。"""
-        (迷你repo / "沒加進git.py").write_text("# 这是简体\n", encoding="utf-8")
+        (迷你repo / "沒加進git.py").write_text("# 这是简体\n", encoding="utf-8")  # nova:允許非繁體
         assert 檢查繁體中文(迷你repo)[0] is True
 
 
