@@ -119,6 +119,8 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 | 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan` |
 | 可編輯 | `--tools Read,Write,... --permission-mode acceptEdits` | `--approve-for-me`（**不能同時給 `--sandbox`**） | `--mode accept-edits` |
 | 隔離設定 | `--bare` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
+| 預設型號 | 不設 | `gpt-5.6-luna`（高階 `gpt-5.6-sol`） | `gemini-3.7-flash-high` |
+| 推理強度 | 有 `--effort`，目前不用 | **沒有旗標**，走 `-c model_reasoning_effort="max"` | **包在型號裡** |
 | 不隔離 | `--restricted`（設定檔照樣隔離，CLAUDE.md 仍被讀） | 只留 `--ephemeral` | — |
 
 **claude 的取捨是真的，不是我們的 bug**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，

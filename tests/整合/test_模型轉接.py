@@ -6,13 +6,22 @@
 
 import os
 import stat
+import tomllib
 from pathlib import Path
 
 import pytest
 
-from nova.契約.角色 import 呼叫選項
+from nova.契約.角色 import 呼叫選項, 權限
 from nova.載體.模型.執行 import 跑cli
-from nova.載體.模型.轉接 import 建立, 找執行檔
+from nova.載體.模型.轉接 import (
+    agy預設模型,
+    codex常用模型,
+    codex推理強度,
+    codex高階模型,
+    家族,
+    建立,
+    找執行檔,
+)
 
 實錄 = Path(__file__).resolve().parents[1] / "整合" / "實錄"
 
@@ -146,3 +155,112 @@ def test_假CLI真的印出工作目錄(假CLI: Path, tmp_path: Path) -> None:
     別處.mkdir()
     結果 = 跑cli(假CLI, [], 工作目錄=別處, 環境={"假CLI_印工作目錄": "1", **os.environ})
     assert 結果.標準輸出.strip() == str(別處.resolve())
+
+
+class Test權限是漏出的:
+    """權限不由介面決定——藏起來就是幫使用者做風險決策。預設一律最嚴那邊。"""
+
+    def test_預設是唯讀(self) -> None:
+        """忘了設不會變成放行。"""
+        assert 呼叫選項().權限 is 權限.唯讀
+
+    def test_claude可編輯時才給工具(self) -> None:
+        唯讀 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        可寫 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert 唯讀[唯讀.index("--tools") : 唯讀.index("--tools") + 2] == ["--tools", ""]
+        assert "Write" in 可寫[可寫.index("--tools") + 1]
+        assert 可寫[可寫.index("--permission-mode") : 可寫.index("--permission-mode") + 2] == [
+            "--permission-mode",
+            "acceptEdits",
+        ]
+        assert "--permission-mode" not in 唯讀, "唯讀模式不該帶權限模式旗標"
+
+    def test_codex可編輯時不給sandbox(self) -> None:
+        """實測：`--sandbox` 與 `--approve-for-me` 互斥，一起給會 exit 2。"""
+        唯讀 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        可寫 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert "read-only" in 唯讀
+        assert "--approve-for-me" in 可寫
+        assert "--sandbox" not in 可寫
+
+    def test_agy可編輯時換成accept_edits(self) -> None:
+        可寫 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert 可寫[可寫.index("--mode") : 可寫.index("--mode") + 2] == ["--mode", "accept-edits"]
+
+    def test_三家都不准用最危險的旗標(self) -> None:
+        危險 = (
+            "--dangerously-skip-permissions",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--dangerously-bypass-hook-trust",
+        )
+        for 家 in ("claude", "codex", "agy"):
+            for 可以做什麼 in 權限:
+                參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=可以做什麼))
+                assert not (set(危險) & set(參數)), f"{家} 在 {可以做什麼} 用了危險旗標"
+
+
+class Test隔離設定是漏出的:
+    """讀了家目錄設定，nova[claude] 就跟 nova[codex] 行為不同。"""
+
+    def test_預設隔離(self) -> None:
+        assert 呼叫選項().隔離設定 is True
+
+    def test_claude隔離用bare不隔離用restricted(self) -> None:
+        """`--bare` 連 keychain 都不讀（訂閱登入會死），所以要有退路。"""
+        隔離 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        不隔離 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(隔離設定=False))
+        assert "--bare" in 隔離 and "--restricted" not in 隔離
+        assert "--restricted" in 不隔離 and "--bare" not in 不隔離
+
+    def test_codex隔離才擋使用者設定(self) -> None:
+        隔離 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        不隔離 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(隔離設定=False))
+        assert "--ignore-user-config" in 隔離 and "--ignore-rules" in 隔離
+        assert "--ignore-user-config" not in 不隔離
+
+
+class Test預設模型:
+    def test_agy有預設模型與推理強度(self) -> None:
+        """agy 的推理強度包在型號裡（`agy models` 實測），不是另一個旗標。"""
+        參數 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        assert ["--model", agy預設模型] == 參數[參數.index("--model") : 參數.index("--model") + 2]
+        assert agy預設模型.endswith("-high"), "沒指定就要用最高的推理強度"
+
+    def test_codex有預設模型與推理強度(self) -> None:
+        """codex 沒有 `--effort` 旗標（實測），推理強度走 `-c` 設定覆寫。"""
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        assert ["--model", codex常用模型] == 參數[參數.index("--model") : 參數.index("--model") + 2]
+        assert 參數[參數.index("-c") + 1] == f'model_reasoning_effort="{codex推理強度}"'
+
+    def test_codex的推理強度值是合法TOML(self) -> None:
+        """`-c` 的值會被當 TOML 解析，字串沒包引號會變成別的東西。"""
+        參數 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
+        鍵值 = 參數[參數.index("-c") + 1]
+        assert tomllib.loads(鍵值)["model_reasoning_effort"] == codex推理強度
+
+    def test_codex只用兩個型號(self) -> None:
+        """使用者裁定：luna 常用、sol 高階推理，基本上就這兩個。"""
+        assert codex常用模型 == "gpt-5.6-luna"
+        assert codex高階模型 == "gpt-5.6-sol"
+
+    def test_指定模型會蓋掉預設(self) -> None:
+        家與預設: tuple[tuple[家族, str], ...] = (("agy", agy預設模型), ("codex", codex常用模型))
+        for 家, 預設 in 家與預設:
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(模型="我指定的"))
+            assert "我指定的" in 參數
+            assert 預設 not in 參數
+
+
+class Testclaude的變長參數:
+    def test_tools不准緊鄰提示(self) -> None:
+        """`--tools <tools...>` 會把後面的提示一起吞掉，claude 會說「沒有 prompt」。
+
+        實測踩過一次：真 CLI 才抓得到，假 CLI 不會抱怨。
+        """
+        for 可以做什麼 in 權限:
+            參數 = 建立("claude", 執行檔=Path("/x")).組參數("我的提示", 呼叫選項(權限=可以做什麼))
+            工具值後面 = 參數[參數.index("--tools") + 2]
+            assert 工具值後面.startswith("-"), (
+                f"--tools 的值後面必須接一個選項終結變長參數，實際是 {工具值後面!r}"
+            )
+            assert 參數[-1] == "我的提示"
