@@ -33,6 +33,8 @@ python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門�
 uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
 uv run nova 問 --用 codex,agy "提示"                   # 接力：前一顆失敗換下一顆
 uv run nova 問 --用 codex --模型 gpt-5.6-sol "提示"     # 高階推理（預設是 gpt-5.6-luna）
+uv run nova 問 --用 codex --保留對話 "提示"             # 留下 sid
+uv run nova 問 --用 codex --續接 <sid> "接下去問"       # 持久對話
 uv run nova 工作流 --用 codex --審查用 agy "任務"       # 跑一輪完整 TDD
 uv run pytest -m 真cli                                 # 真的打三家 CLI（燒 token，兩個閘都排除）
 ```
@@ -211,9 +213,12 @@ codex 吃 17341 input token、agy 吃 14515）。
 | agy | `gemini-3.7-flash-high` | — | **包在型號裡**（`agy models` 實測） |
 | claude | 不設 | — | 有 `--effort` 但目前不用 |
 
-**claude 的設定隔離有代價**：`--bare` 是唯一能關掉 CLAUDE.md 自動探索的旗標，
-但它同時關掉 keychain 與 OAuth——訂閱登入會死。要嘛設 `ANTHROPIC_API_KEY`，
-要嘛用 `--不隔離設定`（改走 `--restricted`，設定檔照樣隔離但 CLAUDE.md 仍被讀）。
+**設定隔離走 `--setting-sources ""`**（實測：CLAUDE.md 讀不到，而且訂閱登入照樣能用）。
+**不要換回 `--bare`**——那條連 keychain 與 OAuth 都不讀，訂閱使用者會直接掛掉。
+
+**持久對話**：`--保留對話` 記下 sid，下一輪 `--續接 <sid>` 就接得回去。
+codex 有兩個真跑才知道的坑：`exec resume` 不吃 `--sandbox`／`--approve-for-me`（exit 2），
+而且 `--ephemeral` 不落地就續接不到。
 
 **真 CLI 測試不能省**（`pytest -m 真cli`）。它抓到三個假 CLI 抓不到的 bug：
 codex 的 `--sandbox` 與 `--approve-for-me` 互斥、claude 的 `--tools` 是變長參數會吞掉提示、
@@ -264,3 +269,7 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 逾時預設調回 300 秒 | `test_預設夠寬` 紅 |
 | 文件提到一支不存在的測試 | `test_文件提到的測試都真的存在` 紅 |
 | codex 的 `-c` 值沒包引號（TOML 解析不出來） | `test_codex的推理強度值是合法TOML` 紅 |
+| claude 的隔離換回 `--bare` | `test_claude用setting_sources隔離而不是bare` 紅 |
+| codex 續接時仍給 `--sandbox` | `test_codex續接時不准給sandbox或核准旗標` 紅 |
+| 解析器改回嚴格 JSON | `test_response裡有原始換行也解得動` 紅 |
+| 禁令改回「拆不開一律擋」 | `test_拆不開但沒有禁令要放行` 紅 |

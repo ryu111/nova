@@ -16,15 +16,15 @@ uv run pytest -m 真cli -q      # 會燒 token、需要三家都認證過
 
 import pytest
 
-from nova.契約.模型回應 import 失敗代碼, 終局
+from nova.契約.模型回應 import 終局
 from nova.契約.角色 import 呼叫選項, 權限
 from nova.載體.模型.轉接 import 建立
 
 三家 = ("claude", "codex", "agy")
 
-#: claude 的設定隔離（`--bare`）連 keychain 與 OAuth 都不讀，訂閱登入會死。
-#: 這不是我們的 bug，是那個旗標的設計。用下面的測試把這個限制釘住。
-可以隔離設定 = {"claude": False, "codex": True, "agy": True}
+#: 三家都隔離得了。claude 走 `--setting-sources ""`——實測讀不到 CLAUDE.md，
+#: 而且訂閱登入照樣能用（`--bare` 才是會弄壞認證的那條）。
+可以隔離設定 = {"claude": True, "codex": True, "agy": True}
 
 
 @pytest.mark.真cli
@@ -53,16 +53,39 @@ def test_每家都給得出用量(家: str) -> None:
 
 @pytest.mark.真cli
 @pytest.mark.serial
-def test_claude在設定隔離下會認證失敗而且說得出原因() -> None:
-    """把已知限制釘成會紅的測試。
+def test_claude隔離設定之後讀不到CLAUDE_md() -> None:
+    """設定隔離要真的隔離，不能只是旗標長得像。
 
-    `--bare` 連 keychain 與 OAuth 都不讀（`claude --help` 原文），
-    所以訂閱登入會變成「Not logged in」——那句話完全沒指向真因。
-    nova 補上診斷，這支測試驗的就是那段診斷。
+    這支同時守兩件事：CLAUDE.md 讀不到（行為由 nova 決定，不由使用者家目錄決定），
+    而且**認證沒被弄壞**（訂閱登入還能用）。
+    `--bare` 過得了前者、過不了後者，所以不能用它。
 
-    **這支紅了是好消息**：代表 claude 改了行為，或這台機器設了 `ANTHROPIC_API_KEY`，
-    那時候 `可以隔離設定["claude"]` 就可以改回 True。
+    （這支取代了原本「claude 在設定隔離下必定認證失敗」那支——
+    那條限制在 `--setting-sources` 出現之後就不成立了。）
     """
-    答 = 建立("claude", 執行檔=None).詢問("回覆 ok", 選項=呼叫選項(隔離設定=True, 逾時秒=120.0))
-    assert 答.失敗代碼 is 失敗代碼.認證, f"預期認證失敗，實際 {答.失敗代碼.value}：{答.文字[:200]}"
-    assert "ANTHROPIC_API_KEY" in 答.文字, "診斷沒說清楚是哪個旗標害的"
+    答 = 建立("claude", 執行檔=None).詢問(
+        "這個專案的 CLAUDE.md 裡有寫到什麼？如果你看不到任何 CLAUDE.md，只回覆「看不到」",
+        選項=呼叫選項(隔離設定=True, 逾時秒=180.0),
+    )
+    assert 答.終局 is 終局.成功, f"認證被弄壞了：{答.失敗代碼.value} — {答.文字[:200]}"
+    assert "看不到" in 答.文字, f"CLAUDE.md 沒被擋住：{答.文字[:300]}"
+
+
+@pytest.mark.真cli
+@pytest.mark.serial
+@pytest.mark.parametrize("家", ["codex", "agy"])
+def test_記住sid就能續接同一段對話(家: str) -> None:
+    """持久對話：第一輪留檔並記下 sid，第二輪帶回去接得上。"""
+    第一輪 = 建立(家, 執行檔=None).詢問(  # type: ignore[arg-type]
+        "記住：我的暗號是芭樂。只回覆「記住了」",
+        選項=呼叫選項(逾時秒=180.0, 保留對話=True, 隔離設定=可以隔離設定[家]),
+    )
+    assert 第一輪.終局 is 終局.成功, 第一輪.文字[:200]
+    assert 第一輪.對話識別碼, f"{家} 沒給 sid，續接不了"
+
+    第二輪 = 建立(家, 執行檔=None).詢問(  # type: ignore[arg-type]
+        "我的暗號是什麼？只回覆那兩個字",
+        選項=呼叫選項(逾時秒=180.0, 續接=第一輪.對話識別碼, 隔離設定=可以隔離設定[家]),
+    )
+    assert 第二輪.終局 is 終局.成功, 第二輪.文字[:200]
+    assert "芭樂" in 第二輪.文字, f"{家} 沒接上前一輪：{第二輪.文字[:200]}"
