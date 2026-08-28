@@ -23,7 +23,7 @@ from nova.載體.git查詢 import 追蹤中的檔案
 _補抓 = frozenset("万与机极网构据惊")  # nova:允許非繁體
 
 # 會被掃的副檔名。
-掃描副檔名 = frozenset({".py", ".md", ".yml", ".yaml", ".toml", ".cfg", ".sh"})
+掃描副檔名 = frozenset({".py", ".md", ".yml", ".yaml", ".toml", ".cfg", ".sh", ".html"})
 
 
 def 是漢字(字: str) -> bool:

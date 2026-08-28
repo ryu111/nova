@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nova 宿主反轉路線圖</title>
+<style>
+:root{
+  --底:#12100E; --面:#1B1917; --面2:#242120; --線:#3A3532; --字:#E8E3DD; --淡:#9B938B;
+  --綠:#4ADE80; --黃:#FBBF24; --紅:#F87171; --藍:#60A5FA; --紫:#C084FC;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--底);color:var(--字);
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;}
+.殼{display:grid;grid-template-columns:320px 1fr;height:100vh;}
+.側{background:var(--面);border-right:1px solid var(--線);overflow-y:auto;padding:18px;}
+.主{display:flex;flex-direction:column;overflow:hidden;}
+.畫布{flex:1;overflow:auto;background:var(--底);position:relative;}
+.輸出{border-top:1px solid var(--線);background:var(--面);padding:14px 18px;max-height:32vh;overflow-y:auto;}
+h1{font-size:17px;margin:0 0 2px}
+.副{color:var(--淡);font-size:12px;margin:0 0 18px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--淡);
+  margin:20px 0 8px;border-bottom:1px solid var(--線);padding-bottom:5px}
+.鈕組{display:flex;flex-wrap:wrap;gap:6px}
+button{font:inherit;font-size:12px;background:var(--面2);color:var(--字);
+  border:1px solid var(--線);border-radius:7px;padding:6px 10px;cursor:pointer}
+button:hover{border-color:var(--藍)}
+button.開{background:var(--藍);border-color:var(--藍);color:#0B1220;font-weight:600}
+label.勾{display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer;font-size:13px}
+label.勾:hover{color:var(--藍)}
+input[type=checkbox]{accent-color:var(--藍);width:15px;height:15px}
+.點{width:9px;height:9px;border-radius:50%;flex:none}
+.統計{display:flex;gap:14px;font-size:12px;color:var(--淡);margin:10px 0 0}
+.統計 b{font-size:17px;display:block;color:var(--字);font-variant-numeric:tabular-nums}
+.註列{background:var(--面2);border:1px solid var(--線);border-left:3px solid var(--紫);
+  border-radius:0 7px 7px 0;padding:8px 10px;margin:7px 0;font-size:12px}
+.註列 .名{font-weight:600;color:var(--紫)}
+.註列 .刪{float:right;background:none;border:none;color:var(--淡);cursor:pointer;padding:0 2px}
+pre{background:var(--底);border:1px solid var(--線);border-radius:8px;padding:12px;
+  font:12px/1.6 ui-monospace,Menlo,monospace;white-space:pre-wrap;margin:8px 0 0;max-height:20vh;overflow:auto}
+.列{display:flex;align-items:center;justify-content:space-between;gap:10px}
+svg{display:block}
+.節點{cursor:pointer}
+.節點:hover rect{stroke-width:2.4}
+.罩{position:fixed;inset:0;background:#000A;display:none;align-items:center;justify-content:center;z-index:9}
+.罩.開{display:flex}
+.窗{background:var(--面);border:1px solid var(--線);border-radius:12px;padding:20px;width:min(520px,92vw)}
+textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);border:1px solid var(--線);
+  border-radius:8px;padding:10px;font:13px/1.6 inherit;resize:vertical}
+.工具列{display:flex;gap:8px;align-items:center;padding:8px 18px;border-bottom:1px solid var(--線);background:var(--面);font-size:12px;color:var(--淡)}
+</style>
+</head>
+<body>
+<div class="殼">
+<aside class="側">
+  <h1>nova 宿主反轉路線圖</h1>
+  <p class="副">保證住在哪＝是不是殼。點任何一格寫下你要的，右下角產生可貼回給我的指令。</p>
+
+  <h2>看哪一段</h2>
+  <div class="鈕組" id="預設鈕"></div>
+
+  <h2>狀態</h2>
+  <div id="狀態勾"></div>
+  <div class="統計" id="統計"></div>
+
+  <h2>層</h2>
+  <div id="層勾"></div>
+
+  <h2>你的註記 (<span id="註數">0</span>)</h2>
+  <div id="註區"></div>
+  <p class="副" id="註空">還沒有。點圖上任何一格就能寫。</p>
+</aside>
+
+<main class="主">
+  <div class="工具列">
+    <button onclick="縮放(0.1)">＋</button><button onclick="縮放(-0.1)">−</button><button onclick="縮放(0)">重設</button>
+    <span id="倍率">100%</span>
+    <span style="margin-left:auto">● 已完成　◐ 部分　○ 未做　　實線＝資料流　虛線＝事件</span>
+  </div>
+  <div class="畫布" id="畫布"><div id="簡區" style="padding:26px 20px 8px">
+  <svg viewBox="0 0 1000 400" style="max-width:1000px;margin:0 auto">
+   <defs><marker id="箭簡" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9B938B"/></marker>
+   <marker id="箭綠" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4ADE80"/></marker></defs>
+
+   <text x="230" y="28" text-anchor="middle" fill="#F87171" font-size="14" font-weight="700">現在：工具模式</text>
+   <text x="740" y="28" text-anchor="middle" fill="#4ADE80" font-size="14" font-weight="700">目標：宿主模式</text>
+   <line x1="500" y1="10" x2="500" y2="390" stroke="#3A3532"/>
+
+   <rect x="170" y="52" width="120" height="38" rx="8" fill="#1B1917" stroke="#3A3532"/>
+   <text x="230" y="76" text-anchor="middle" fill="#E8E3DD" font-size="13">你</text>
+   <line x1="230" y1="90" x2="230" y2="116" stroke="#9B938B" stroke-width="1.4" marker-end="url(#箭簡)"/>
+   <rect x="120" y="120" width="220" height="60" rx="10" fill="#F8717118" stroke="#F87171" stroke-width="1.6"/>
+   <text x="230" y="145" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="600">Claude 的殼</text>
+   <text x="230" y="165" text-anchor="middle" fill="#F87171" font-size="11.5">持有 ctx・迴圈是他們的</text>
+   <path d="M 230 180 L 230 236" stroke="#9B938B" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#箭簡)"/>
+   <text x="292" y="212" text-anchor="middle" fill="#9B938B" font-size="11">偶爾呼叫</text>
+   <rect x="150" y="240" width="160" height="46" rx="8" fill="#1B1917" stroke="#3A3532"/>
+   <text x="230" y="268" text-anchor="middle" fill="#9B938B" font-size="13">nova（工具）</text>
+   <text x="230" y="330" text-anchor="middle" fill="#9B938B" font-size="12">規則＝虛線的懇求</text>
+   <text x="230" y="350" text-anchor="middle" fill="#9B938B" font-size="12">可以被忽略，漏了沒人發現</text>
+
+   <rect x="680" y="52" width="120" height="38" rx="8" fill="#1B1917" stroke="#3A3532"/>
+   <text x="740" y="76" text-anchor="middle" fill="#E8E3DD" font-size="13">你</text>
+   <line x1="740" y1="90" x2="740" y2="106" stroke="#4ADE80" stroke-width="1.4" marker-end="url(#箭綠)"/>
+   <rect x="650" y="110" width="180" height="42" rx="8" fill="#1B1917" stroke="#3A3532"/>
+   <text x="740" y="130" text-anchor="middle" fill="#E8E3DD" font-size="13">claude UI</text>
+   <text x="740" y="146" text-anchor="middle" fill="#9B938B" font-size="11">只是螢幕・完全沒變</text>
+   <line x1="740" y1="152" x2="740" y2="176" stroke="#4ADE80" stroke-width="1.4" marker-end="url(#箭綠)"/>
+   <rect x="620" y="180" width="240" height="62" rx="10" fill="#4ADE8018" stroke="#4ADE80" stroke-width="1.8"/>
+   <text x="740" y="205" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="600">nova</text>
+   <text x="740" y="225" text-anchor="middle" fill="#4ADE80" font-size="11.5">持有 ctx・規則・預算・停止條件</text>
+   <line x1="740" y1="242" x2="740" y2="266" stroke="#4ADE80" stroke-width="1.4" marker-end="url(#箭綠)"/>
+   <rect x="580" y="270" width="320" height="46" rx="8" fill="#1B1917" stroke="#60A5FA"/>
+   <text x="740" y="290" text-anchor="middle" fill="#E8E3DD" font-size="12.5">h：claude sdk ／ codex ／ agy ／ 本地模型</text>
+   <text x="740" y="307" text-anchor="middle" fill="#9B938B" font-size="11">執行者・只負責做・隨時可換</text>
+   <text x="740" y="345" text-anchor="middle" fill="#4ADE80" font-size="12">規則＝實線的包圍環，違反不了</text>
+   <text x="500" y="382" text-anchor="middle" fill="#E8E3DD" font-size="13" font-weight="700">只有一件事變了：ctx 歸誰。你的座位、你打的字、回你話的介面，都一樣。</text>
+  </svg>
+  <div style="text-align:center;margin-top:14px">
+    <button id="展開鈕" onclick="切細節()">展開細節圖（31 格・現在做到哪）</button>
+  </div>
+</div>
+<div id="細節區" style="display:none"><svg id="圖"></svg></div></div>
+  <div class="輸出">
+    <div class="列"><b style="font-size:13px">貼回給 Claude 的指令</b>
+      <button id="複製鈕" onclick="複製()">複製</button></div>
+    <pre id="提示"></pre>
+  </div>
+</main>
+</div>
+
+<div class="罩" id="罩" onclick="if(event.target===this)關窗()">
+  <div class="窗">
+    <div id="窗標" style="font-weight:600;margin-bottom:2px"></div>
+    <div id="窗副" class="副" style="margin-bottom:12px"></div>
+    <textarea id="窗文" placeholder="這一格你想要什麼？例如：先做這個、這裡的終態要三值、這格我不要…"></textarea>
+    <div class="鈕組" style="margin-top:12px;justify-content:flex-end">
+      <button onclick="關窗()">取消</button>
+      <button class="開" onclick="存註()">加入註記</button>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="圖資料">
+{
+ "節點": [
+  {
+   "id": "閘",
+   "標": "nova 閘（8 條）",
+   "副": "載體/閘.py ＋ 規則表.py",
+   "x": 40,
+   "y": 64,
+   "w": 210,
+   "h": 46,
+   "層": "閘",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/閘.py",
+    "src/nova/載體/規則表.py"
+   ],
+   "閘數": 8
+  },
+  {
+   "id": "禁令",
+   "標": "禁令指令攔截",
+   "副": "載體/禁令.py",
+   "x": 266,
+   "y": 64,
+   "w": 170,
+   "h": 46,
+   "層": "閘",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/禁令.py"
+   ]
+  },
+  {
+   "id": "ruleset",
+   "標": "GitHub ruleset",
+   "副": "伺服器端＝保證",
+   "x": 452,
+   "y": 64,
+   "w": 170,
+   "h": 46,
+   "層": "閘",
+   "態": "好",
+   "檔": []
+  },
+  {
+   "id": "ci",
+   "標": "CI required check",
+   "副": ".github/workflows/gates.yml",
+   "x": 638,
+   "y": 64,
+   "w": 200,
+   "h": 46,
+   "層": "閘",
+   "態": "好",
+   "檔": [
+    ".github/workflows/gates.yml"
+   ]
+  },
+  {
+   "id": "precommit",
+   "標": "pre-commit",
+   "副": ".pre-commit-config.yaml・加速器",
+   "x": 854,
+   "y": 64,
+   "w": 190,
+   "h": 46,
+   "層": "閘",
+   "態": "好",
+   "檔": [
+    ".pre-commit-config.yaml"
+   ]
+  },
+  {
+   "id": "hook",
+   "標": "PreToolUse hook",
+   "副": ".claude/settings.json",
+   "x": 1060,
+   "y": 64,
+   "w": 160,
+   "h": 46,
+   "層": "閘",
+   "態": "半",
+   "檔": [
+    ".claude/settings.json"
+   ],
+   "註": "寫好了但本 session 沒生效——這正是「宣稱有把關卻沒有」"
+  },
+  {
+   "id": "人",
+   "標": "人在 Claude Code",
+   "副": "客座・UI 不變",
+   "x": 40,
+   "y": 236,
+   "w": 190,
+   "h": 46,
+   "層": "觸發",
+   "態": "好",
+   "檔": []
+  },
+  {
+   "id": "跑",
+   "標": "nova 跑",
+   "副": "你敲＝事件",
+   "x": 250,
+   "y": 236,
+   "w": 150,
+   "h": 46,
+   "層": "觸發",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "排程",
+   "標": "排程到期",
+   "副": "時鐘＝事件",
+   "x": 420,
+   "y": 236,
+   "w": 160,
+   "h": 46,
+   "層": "觸發",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "收件",
+   "標": "收件檔出現",
+   "副": "檔案＝事件・唯一的橋",
+   "x": 600,
+   "y": 236,
+   "w": 200,
+   "h": 46,
+   "層": "觸發",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "mcp",
+   "標": "MCP 派票",
+   "副": "協定＝事件",
+   "x": 820,
+   "y": 236,
+   "w": 150,
+   "h": 46,
+   "層": "觸發",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "秘密",
+   "標": "① 載入秘密",
+   "副": "出生前就能擋",
+   "x": 80,
+   "y": 378,
+   "w": 170,
+   "h": 46,
+   "層": "核",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "預算",
+   "標": "① 預算鎖",
+   "副": "花超過就不生",
+   "x": 268,
+   "y": 378,
+   "w": 170,
+   "h": 46,
+   "層": "核",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "熔斷",
+   "標": "① 熔斷檢查",
+   "副": "連續失敗就停",
+   "x": 456,
+   "y": 378,
+   "w": 170,
+   "h": 46,
+   "層": "核",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "詢問",
+   "標": "② for 訊息 in 詢問(任務)",
+   "副": "對話活在這一行・載體/模型/轉接.py",
+   "x": 80,
+   "y": 456,
+   "w": 410,
+   "h": 52,
+   "層": "核",
+   "態": "好",
+   "檔": [
+    "src/nova/載體/模型/轉接.py",
+    "src/nova/載體/模型/執行.py"
+   ],
+   "註": "已完成：nova 問 --用 codex|agy|claude。但它現在是「被呼叫」，不是「對話誕生的地方」"
+  },
+  {
+   "id": "遮罩",
+   "標": "③ 遮罩",
+   "副": "秘密不外流",
+   "x": 520,
+   "y": 456,
+   "w": 150,
+   "h": 52,
+   "層": "核",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "記",
+   "標": "③ journal.記",
+   "副": "它說的話唯一的出路",
+   "x": 690,
+   "y": 456,
+   "w": 210,
+   "h": 52,
+   "層": "核",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "收割",
+   "標": "④ 程序收割",
+   "副": "殺乾淨不留孤兒",
+   "x": 80,
+   "y": 540,
+   "w": 170,
+   "h": 46,
+   "層": "核",
+   "態": "半",
+   "檔": [],
+   "註": "逾時會殺子程序，但沒有收割孫程序"
+  },
+  {
+   "id": "成本",
+   "標": "④ 成本落盤",
+   "副": "用量.成本美金",
+   "x": 268,
+   "y": 540,
+   "w": 170,
+   "h": 46,
+   "層": "核",
+   "態": "半",
+   "檔": [],
+   "註": "欄位有了，但只印出來、沒落盤；而且只有 claude 給成本"
+  },
+  {
+   "id": "終態",
+   "標": "④ 終態分類",
+   "副": "成功／確定失敗／結果未知",
+   "x": 456,
+   "y": 540,
+   "w": 230,
+   "h": 46,
+   "層": "核",
+   "態": "半",
+   "檔": [],
+   "註": "目前是二值（執行成功 bool）。timeout 被歸成確定失敗，但那其實是結果未知——重試會把可能做過的事再做一次"
+  },
+  {
+   "id": "claude",
+   "標": "claude 轉接器",
+   "副": "--tools '' --bare",
+   "x": 80,
+   "y": 672,
+   "w": 180,
+   "h": 46,
+   "層": "h",
+   "態": "好",
+   "檔": [],
+   "家": "claude"
+  },
+  {
+   "id": "codex",
+   "標": "codex 轉接器",
+   "副": "exec --sandbox read-only",
+   "x": 278,
+   "y": 672,
+   "w": 210,
+   "h": 46,
+   "層": "h",
+   "態": "好",
+   "檔": [],
+   "家": "codex"
+  },
+  {
+   "id": "agy",
+   "標": "agy 轉接器",
+   "副": "--mode plan",
+   "x": 506,
+   "y": 672,
+   "w": 170,
+   "h": 46,
+   "層": "h",
+   "態": "好",
+   "檔": [],
+   "家": "agy"
+  },
+  {
+   "id": "sdk",
+   "標": "claude-agent-sdk",
+   "副": "也只是 h・ctx 仍歸 nova",
+   "x": 694,
+   "y": 672,
+   "w": 200,
+   "h": 46,
+   "層": "h",
+   "態": "無",
+   "檔": [],
+   "註": "SDK 可以當 h（執行者），不能當載體（持有 ctx 的那層）。差別不在用不用，在 ctx 歸誰"
+  },
+  {
+   "id": "本地",
+   "標": "本地模型",
+   "副": "ollama／llama.cpp",
+   "x": 910,
+   "y": 672,
+   "w": 160,
+   "h": 46,
+   "層": "h",
+   "態": "無",
+   "檔": [],
+   "註": "介面的基準形狀就是它——只有腦。它跑得動，才證明真的沒綁定任何一家"
+  },
+  {
+   "id": "回應",
+   "標": "契約：模型回應",
+   "副": "契約/模型回應.py",
+   "x": 80,
+   "y": 790,
+   "w": 200,
+   "h": 46,
+   "層": "契約",
+   "態": "好",
+   "檔": [
+    "src/nova/契約/模型回應.py"
+   ]
+  },
+  {
+   "id": "檢查",
+   "標": "契約：檢查結果",
+   "副": "契約/檢查結果.py",
+   "x": 298,
+   "y": 790,
+   "w": 200,
+   "h": 46,
+   "層": "契約",
+   "態": "好",
+   "檔": [
+    "src/nova/契約/檢查結果.py"
+   ]
+  },
+  {
+   "id": "三值",
+   "標": "契約：終態三值",
+   "副": "at-most-once 的地基",
+   "x": 516,
+   "y": 790,
+   "w": 200,
+   "h": 46,
+   "層": "契約",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "jl",
+   "標": "journal/*.jsonl",
+   "副": "事件流・可 tail -f",
+   "x": 80,
+   "y": 900,
+   "w": 200,
+   "h": 46,
+   "層": "落盤",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "失敗簿",
+   "標": "狀態檔＋失敗簿",
+   "副": "需要你的事都在這",
+   "x": 298,
+   "y": 900,
+   "w": 200,
+   "h": 46,
+   "層": "落盤",
+   "態": "無",
+   "檔": []
+  },
+  {
+   "id": "歸檔",
+   "標": "已處理/ 歸檔",
+   "副": "成果帳本",
+   "x": 516,
+   "y": 900,
+   "w": 180,
+   "h": 46,
+   "層": "落盤",
+   "態": "無",
+   "檔": []
+  }
+ ],
+ "連線": [
+  {
+   "從": "人",
+   "到": "收件",
+   "型": "事件",
+   "標": "唯一的橋：丟長活"
+  },
+  {
+   "從": "跑",
+   "到": "秘密",
+   "型": "事件"
+  },
+  {
+   "從": "排程",
+   "到": "秘密",
+   "型": "事件"
+  },
+  {
+   "從": "收件",
+   "到": "預算",
+   "型": "事件"
+  },
+  {
+   "從": "mcp",
+   "到": "熔斷",
+   "型": "事件"
+  },
+  {
+   "從": "秘密",
+   "到": "詢問",
+   "型": "流"
+  },
+  {
+   "從": "預算",
+   "到": "詢問",
+   "型": "流"
+  },
+  {
+   "從": "熔斷",
+   "到": "詢問",
+   "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "遮罩",
+   "型": "流"
+  },
+  {
+   "從": "遮罩",
+   "到": "記",
+   "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "收割",
+   "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "成本",
+   "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "終態",
+   "型": "流"
+  },
+  {
+   "從": "詢問",
+   "到": "claude",
+   "型": "呼叫"
+  },
+  {
+   "從": "詢問",
+   "到": "codex",
+   "型": "呼叫"
+  },
+  {
+   "從": "詢問",
+   "到": "agy",
+   "型": "呼叫"
+  },
+  {
+   "從": "詢問",
+   "到": "sdk",
+   "型": "呼叫"
+  },
+  {
+   "從": "詢問",
+   "到": "本地",
+   "型": "呼叫"
+  },
+  {
+   "從": "終態",
+   "到": "三值",
+   "型": "流"
+  },
+  {
+   "從": "記",
+   "到": "jl",
+   "型": "流"
+  },
+  {
+   "從": "終態",
+   "到": "失敗簿",
+   "型": "流"
+  },
+  {
+   "從": "收割",
+   "到": "歸檔",
+   "型": "流"
+  },
+  {
+   "從": "claude",
+   "到": "回應",
+   "型": "流"
+  },
+  {
+   "從": "codex",
+   "到": "回應",
+   "型": "流"
+  },
+  {
+   "從": "agy",
+   "到": "回應",
+   "型": "流"
+  },
+  {
+   "從": "閘",
+   "到": "檢查",
+   "型": "流"
+  }
+ ]
+}
+</script>
+
+<script>
+const 資料 = JSON.parse(document.getElementById("圖資料").textContent);
+const 節點 = 資料.節點, 連線 = 資料.連線;
+const 狀 = {好:"已完成", 半:"部分", 無:"未做"};
+const 色 = {好:"#4ADE80", 半:"#FBBF24", 無:"#F87171"};
+
+const 線色 = {流:"#60A5FA", 事件:"#F87171", 呼叫:"#4ADE80"};
+const 線樣 = {流:"", 事件:"5 4", 呼叫:"8 4"};
+
+const 層清單 = [
+  {鍵:"閘",   名:"殼 A：閘（對寫 code 的 agent）"},
+  {鍵:"觸發", 名:"事件源（四種都收斂成一個函式呼叫）"},
+  {鍵:"核",   名:"執行核＝殼 B（對被委派的 LLM）"},
+  {鍵:"h",    名:"h 的實作（claude/codex/agy 平級）"},
+  {鍵:"契約", 名:"契約（跨層 schema）"},
+  {鍵:"落盤", 名:"落盤（你隨時能 cat）"},
+];
+
+const 預設 = {
+  "全部":       {層:["閘","觸發","核","h","契約","落盤"], 態:["好","半","無"]},
+  "現在有的":   {層:["閘","觸發","核","h","契約","落盤"], 態:["好"]},
+  "還沒做的":   {層:["閘","觸發","核","h","契約","落盤"], 態:["半","無"]},
+  "下一階：迴圈":{層:["核","契約","落盤"],                 態:["好","半","無"]},
+  "已完成的殼": {層:["閘","契約"],                         態:["好","半","無"]},
+};
+
+const 態 = {層:{}, 態:{}, 註:[], 預設:"全部", 倍:1};
+層清單.forEach(l=>態.層[l.鍵]=true);
+Object.keys(狀).forEach(k=>態.態[k]=true);
+
+const 找 = id => 節點.find(n=>n.id===id);
+const 看得到 = n => 態.層[n.層] && 態.態[n.態];
+
+function 建側欄(){
+  const 預設鈕 = document.getElementById("預設鈕");
+  預設鈕.innerHTML = Object.keys(預設).map(k=>
+    `<button data-k="${k}" onclick="套預設('${k}')">${k}</button>`).join("");
+  document.getElementById("狀態勾").innerHTML = Object.entries(狀).map(([k,v])=>
+    `<label class="勾"><input type="checkbox" ${態.態[k]?"checked":""} onchange="態.態['${k}']=this.checked;態.預設='';畫()">
+     <span class="點" style="background:${色[k]}"></span>${v}</label>`).join("");
+  document.getElementById("層勾").innerHTML = 層清單.map(l=>
+    `<label class="勾"><input type="checkbox" ${態.層[l.鍵]?"checked":""} onchange="態.層['${l.鍵}']=this.checked;態.預設='';畫()">${l.名}</label>`).join("");
+}
+
+function 套預設(k){
+  const p = 預設[k]; 態.預設 = k;
+  層清單.forEach(l=>態.層[l.鍵] = p.層.includes(l.鍵));
+  Object.keys(狀).forEach(s=>態.態[s] = p.態.includes(s));
+  建側欄(); 畫();
+}
+
+function 縮放(d){ 態.倍 = d===0 ? 1 : Math.min(2, Math.max(0.4, 態.倍+d)); 畫(); }
+
+function 邊(n){ return {左:n.x, 右:n.x+n.w, 上:n.y, 下:n.y+n.h, 中x:n.x+n.w/2, 中y:n.y+n.h/2}; }
+
+function 畫(){
+  const svg = document.getElementById("圖");
+  const 寬 = 1240, 高 = 990;
+  svg.setAttribute("viewBox", `0 0 ${寬} ${高}`);
+  svg.setAttribute("width", 寬*態.倍); svg.setAttribute("height", 高*態.倍);
+  document.getElementById("倍率").textContent = Math.round(態.倍*100)+"%";
+
+  let s = `<defs>`;
+  Object.entries(線色).forEach(([t,c])=>{
+    s += `<marker id="箭${t}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`;
+  });
+  s += `</defs>`;
+
+  // 區塊底
+  const 區 = [
+    {鍵:"閘", x:20, y:30, w:1180, h:104, 標:"殼 A ── 對「寫 code 的 agent」而言，這已經是殼", 色:"#4ADE80"},
+    {鍵:"觸發",x:20, y:200, w:990, h:100, 標:"事件源 ── 四種事件都收斂成同一個函式呼叫", 色:"#F87171"},
+    {鍵:"核", x:20, y:330, w:990, h:280, 標:"殼 B：執行核 ── 對「被委派的 LLM」而言，這才是殼（大部分還沒建）", 色:"#C084FC"},
+    {鍵:"h",  x:20, y:640, w:990, h:104, 標:"h 的實作 ── claude／codex／agy 平級，都只是 h 的一種", 色:"#60A5FA"},
+    {鍵:"契約",x:20, y:758, w:990, h:104, 標:"契約 ── 跨層一律 schema 化", 色:"#FBBF24"},
+    {鍵:"落盤",x:20, y:868, w:990, h:104, 標:"落盤 ── 你隨時能 cat 的檔案", 色:"#9B938B"},
+  ];
+  區.forEach(z=>{
+    if(!態.層[z.鍵]) return;
+    s += `<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="14" fill="${z.色}0F" stroke="${z.色}44" stroke-width="1.2"/>`;
+    s += `<text x="${z.x+16}" y="${z.y+22}" fill="${z.色}" font-size="12.5" font-weight="700">${z.標}</text>`;
+  });
+
+  // 連線
+  連線.forEach(c=>{
+    const a = 找(c.從), b = 找(c.到);
+    if(!a||!b||!看得到(a)||!看得到(b)) return;
+    const A = 邊(a), B = 邊(b);
+    const d = `M ${A.中x} ${A.下} C ${A.中x} ${A.下+40}, ${B.中x} ${B.上-40}, ${B.中x} ${B.上}`;
+    s += `<path d="${d}" fill="none" stroke="${線色[c.型]}" stroke-width="1.4" opacity=".55"
+           stroke-dasharray="${線樣[c.型]}" marker-end="url(#箭${c.型})"/>`;
+    if(c.標) s += `<text x="${(A.中x+B.中x)/2}" y="${(A.下+B.上)/2}" fill="${線色[c.型]}" font-size="11" text-anchor="middle">${c.標}</text>`;
+  });
+
+  // 節點
+  節點.filter(看得到).forEach(n=>{
+    const 有註 = 態.註.some(z=>z.目標===n.id);
+    const c = 色[n.態];
+    s += `<g class="節點" onclick="開窗('${n.id}')">
+      <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="9"
+        fill="#1B1917" stroke="${有註?"#C084FC":c}" stroke-width="${有註?2.6:1.5}"/>
+      <circle cx="${n.x+13}" cy="${n.y+15}" r="4.5" fill="${c}"/>
+      <text x="${n.x+26}" y="${n.y+19}" fill="#E8E3DD" font-size="12.5" font-weight="600">${n.標}</text>
+      <text x="${n.x+12}" y="${n.y+36}" fill="#9B938B" font-size="10.5">${n.副}</text>
+    </g>`;
+  });
+
+  svg.innerHTML = s;
+  更新統計(); 更新註區(); 更新提示();
+  document.querySelectorAll("#預設鈕 button").forEach(b=>
+    b.classList.toggle("開", b.dataset.k===態.預設));
+}
+
+function 更新統計(){
+  const 全 = 節點.filter(n=>態.層[n.層]);
+  const 數 = k => 全.filter(n=>n.態===k).length;
+  document.getElementById("統計").innerHTML = Object.entries(狀).map(([k,v])=>
+    `<div><b style="color:${色[k]}">${數(k)}</b>${v}</div>`).join("");
+}
+
+let 目前 = null;
+function 開窗(id){
+  目前 = 找(id);
+  document.getElementById("窗標").textContent = 目前.標;
+  document.getElementById("窗副").textContent = 目前.副 + (目前.註 ? " ── " + 目前.註 : "");
+  const 舊 = 態.註.find(z=>z.目標===id);
+  document.getElementById("窗文").value = 舊 ? 舊.文 : "";
+  document.getElementById("罩").classList.add("開");
+  document.getElementById("窗文").focus();
+}
+function 關窗(){ document.getElementById("罩").classList.remove("開"); 目前=null; }
+function 存註(){
+  const 文 = document.getElementById("窗文").value.trim();
+  態.註 = 態.註.filter(z=>z.目標!==目前.id);
+  if(文) 態.註.push({目標:目前.id, 標:目前.標, 副:目前.副, 態:目前.態, 文});
+  關窗(); 畫();
+}
+function 刪註(id){ 態.註 = 態.註.filter(z=>z.目標!==id); 畫(); }
+
+function 更新註區(){
+  document.getElementById("註數").textContent = 態.註.length;
+  document.getElementById("註空").style.display = 態.註.length ? "none" : "block";
+  document.getElementById("註區").innerHTML = 態.註.map(z=>
+    `<div class="註列"><button class="刪" onclick="刪註('${z.目標}')">✕</button>
+     <div class="名">${z.標}</div><div style="color:var(--淡)">${z.文}</div></div>`).join("");
+}
+
+function 更新提示(){
+  const 開層 = 層清單.filter(l=>態.層[l.鍵]).map(l=>l.名.split("──")[0].split("（")[0].trim());
+  const 全 = 節點.filter(n=>態.層[n.層]);
+  const 數 = k => 全.filter(n=>n.態===k).length;
+  let t = `這是 nova 宿主反轉路線圖上我圈出來的部分。\n\n`;
+  t += `目前看的是：${開層.join("、")}（已完成 ${數("好")}、部分 ${數("半")}、未做 ${數("無")}）。\n`;
+  if(態.註.length===0){
+    t += `\n我還沒圈任何一格——先幫我確認這張圖跟你理解的一致嗎？有沒有畫錯或漏掉的。`;
+  }else{
+    t += `\n我要推進的部分：\n`;
+    態.註.forEach(z=>{
+      t += `\n**${z.標}**（${z.副}・目前 ${狀[z.態]}）\n${z.文}\n`;
+    });
+    t += `\n請照 nova 的規矩做：先寫會紅的測試、看到它紅、再寫最少的實作，最後附固定負控。`;
+  }
+  document.getElementById("提示").textContent = t;
+}
+
+function 複製(){
+  navigator.clipboard.writeText(document.getElementById("提示").textContent).then(()=>{
+    const b = document.getElementById("複製鈕"); b.textContent = "已複製！";
+    setTimeout(()=>b.textContent="複製", 1400);
+  });
+}
+
+function 切細節(){
+  const 區 = document.getElementById("細節區"), 開 = 區.style.display === "none";
+  區.style.display = 開 ? "block" : "none";
+  document.getElementById("展開鈕").textContent = 開 ? "收起細節圖" : "展開細節圖（31 格・現在做到哪）";
+  if(開) 畫();
+}
+建側欄(); 套預設("全部");
+</script>
+</body>
+</html>
