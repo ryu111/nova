@@ -1,0 +1,45 @@
+"""角色的唯一實作：固定系統提示 ＋ 可換的腦（組合，不繼承）。
+
+只有一個實作，所以不寫工廠、不寫抽象基底——`寫程式.md` 的階梯。
+出現第二種角色（例如需要多輪對話的）再談抽象。
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from nova.契約.模型回應 import 回應
+from nova.契約.角色 import 語言模型
+
+_分隔 = "\n\n---\n\n"
+
+
+def 組提示(系統提示: str, 使用者提示: str) -> str:
+    """把角色身分與這次的任務併成一段。
+
+    為什麼用併的、不用各家的 system prompt 旗標：**只有 claude 有
+    `--system-prompt`**，codex 與 agy 查不到對應旗標（見設計文件 02）。
+    走最小公倍數，三家收到的東西才一樣——換腦但行為一樣。
+    """
+    if not 系統提示.strip():
+        return 使用者提示
+    return f"{系統提示}{_分隔}{使用者提示}"
+
+
+@dataclass(frozen=True, slots=True)
+class 固定提示角色:
+    """一個角色。`系統提示` 是它的身分，`腦` 隨時可換。"""
+
+    名稱: str
+    系統提示: str
+    腦: 語言模型
+    模型: str | None = None
+    逾時秒: float = 300.0
+
+    def 做(self, 提示: str, *, 工作目錄: Path | None = None) -> 回應:
+        """做一件事，回結構化證據。"""
+        return self.腦.詢問(
+            組提示(self.系統提示, 提示),
+            模型=self.模型,
+            工作目錄=工作目錄,
+            逾時秒=self.逾時秒,
+        )

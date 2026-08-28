@@ -4,18 +4,17 @@
 """
 
 import dataclasses
-import typing
 
 import pytest
 
-from nova.契約.模型回應 import _終局表, 全部失敗代碼, 全部終局, 回應, 用量, 終局判定
+from nova.契約.模型回應 import _終局表, 回應, 失敗代碼, 用量, 終局, 終局判定
 
 
 def _空回應(**覆寫: object) -> 回應:
     預設: dict[str, object] = {
         "文字": "ok",
-        "終局": "success",
-        "失敗代碼": "none",
+        "終局": 終局.成功,
+        "失敗代碼": 失敗代碼.無,
         "原始結束碼": 0,
         "對話識別碼": None,
         "用量": 用量(輸入token=1, 輸出token=1),
@@ -50,31 +49,25 @@ def test_終局是三值() -> None:
     殺掉子程序時工作可能已經做了一半。把它當確定失敗，重試就會把可能做過的事
     再做一次。三值才分得開「可以重試」與「不可以重試」。
     """
-    assert set(全部終局) == {"success", "failed", "unknown"}
-
-
-def test_終局全是ASCII() -> None:
-    """終局要跨程序流動（CLI 的 --json 輸出、日誌），屬 CLAUDE.md 的 ASCII 例外。"""
-    for 值 in 全部終局:
-        assert 值.isascii() and 值 == 值.lower()
+    assert {成員.value for 成員 in 終局} == {"success", "failed", "unknown"}
 
 
 class Test終局判定:
-    @pytest.mark.parametrize("代碼", ["auth", "model-not-found", "usage"])
-    def test_確定沒送到模型的是確定失敗(self, 代碼: str) -> None:
+    @pytest.mark.parametrize("代碼", [失敗代碼.認證, 失敗代碼.模型不存在, 失敗代碼.用法錯誤])
+    def test_確定沒送到模型的是確定失敗(self, 代碼: 失敗代碼) -> None:
         """認證錯、模型不存在、旗標錯——請求根本沒出門，重試是安全的。"""
-        assert 終局判定(代碼) == "failed"  # type: ignore[arg-type]
+        assert 終局判定(代碼) is 終局.確定失敗
 
-    @pytest.mark.parametrize("代碼", ["timeout", "interrupted", "upstream", "unknown"])
-    def test_可能已經做了一半的是結果未知(self, 代碼: str) -> None:
+    @pytest.mark.parametrize("代碼", [失敗代碼.逾時, 失敗代碼.被中斷, 失敗代碼.上游, 失敗代碼.未知])
+    def test_可能已經做了一半的是結果未知(self, 代碼: 失敗代碼) -> None:
         """逾時被殺、被中斷、上游 5xx、解析不出來——都可能已經產生副作用。
 
         寧漏不重：這幾種一律不准自動重試。
         """
-        assert 終局判定(代碼) == "unknown"  # type: ignore[arg-type]
+        assert 終局判定(代碼) is 終局.結果未知
 
     def test_沒失敗就是成功(self) -> None:
-        assert 終局判定("none") == "success"
+        assert 終局判定(失敗代碼.無) is 終局.成功
 
     def test_每個失敗代碼都要有明確的終局(self) -> None:
         """新增失敗代碼卻忘了決定它可不可以重試——這支會紅。
@@ -82,30 +75,27 @@ class Test終局判定:
         要驗的是**表裡有沒有那一列**，不是「回傳值合不合法」——
         `終局判定` 有 fail-closed 的預設值，所以回傳值永遠合法，那樣驗等於沒驗。
         """
-        沒決定 = [代碼 for 代碼 in 全部失敗代碼 if 代碼 not in _終局表]
+        沒決定 = [代碼 for 代碼 in 失敗代碼 if 代碼 not in _終局表]
         assert not 沒決定, f"這些失敗代碼還沒決定可不可以重試：{沒決定}"
 
     def test_表裡沒有的代碼要fail_closed(self) -> None:
         """萬一真的漏了，也要落在「不准重試」那一邊。"""
-        assert 終局判定("這個代碼不存在") == "unknown"  # type: ignore[arg-type]
+        assert 終局判定("這個代碼不存在") is 終局.結果未知  # type: ignore[arg-type]
 
 
 def test_失敗代碼全是ASCII() -> None:
-    """失敗代碼要跨程序流動（CLI 輸出、日誌、CI），屬 CLAUDE.md 的 ASCII 例外。"""
-    assert 全部失敗代碼, "至少要有一個失敗代碼"
-    for 代碼 in 全部失敗代碼:
-        assert 代碼.isascii(), f"{代碼!r} 不是 ASCII"
-        assert 代碼 == 代碼.lower(), f"{代碼!r} 要小寫"
+    """失敗代碼要跨程序流動（CLI 輸出、日誌、CI），屬 CLAUDE.md 的 ASCII 例外。
+
+    改用 StrEnum 之後，「常數表與型別標註漂移」這個問題消失了——只有一個來源。
+    """
+    assert list(失敗代碼), "至少要有一個失敗代碼"
+    for 代碼 in 失敗代碼:
+        assert 代碼.value.isascii(), f"{代碼!r} 的值不是 ASCII"
+        assert 代碼.value == 代碼.value.lower(), f"{代碼!r} 的值要小寫"
 
 
-def test_失敗代碼與型別標註一致() -> None:
-    """常數與 Literal 分兩個地方寫就會漂移，用測試釘在一起。"""
-    標註 = typing.get_type_hints(回應)["失敗代碼"]
-    assert set(typing.get_args(標註)) == set(全部失敗代碼)
-
-
-def test_沒失敗時代碼是none() -> None:
-    assert _空回應().失敗代碼 == "none"
+def test_沒失敗時代碼是無() -> None:
+    assert _空回應().失敗代碼 is 失敗代碼.無
 
 
 def test_成本可以是空的() -> None:

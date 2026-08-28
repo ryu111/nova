@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from nova.契約.模型回應 import 回應
+from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.載體.模型.轉接 import 建立
 from nova.載體.禁令 import 檢查指令
@@ -23,7 +23,7 @@ from nova.載體.閘 import 跑閘
 放行, 閘紅, 阻擋 = 0, 1, 2
 # 結果未知要跟確定失敗分開，腳本才知道「這個不准重跑」。
 未知 = 3
-_終局的退出碼 = {"success": 放行, "failed": 閘紅, "unknown": 未知}
+_終局的退出碼 = {終局.成功: 放行, 終局.確定失敗: 閘紅, 終局.結果未知: 未知}
 
 
 def _印結果(結果表: list[檢查結果]) -> int:
@@ -96,9 +96,9 @@ def _摘要(家: str, 答: 回應) -> str:
     量 = f"{用.輸入token}→{用.輸出token} token"
     if 用.成本美金 is not None:
         量 += f" · US${用.成本美金:.4f}"
-    if 答.終局 == "success":
+    if 答.終局 is 終局.成功:
         return f"[{家}] 完成 · {量}"
-    如何 = "確定失敗" if 答.終局 == "failed" else "結果未知（不准自動重跑）"
+    如何 = "確定失敗" if 答.終局 is 終局.確定失敗 else "結果未知（不准自動重跑）"
     return f"[{家}] {如何} {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}"
 
 
