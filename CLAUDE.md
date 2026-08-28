@@ -31,6 +31,7 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 
 python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門面：一次 import 就能用
 uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
+uv run nova 問 --用 codex,agy "提示"                   # 接力：前一顆失敗換下一顆
 uv run nova 工作流 --用 codex --審查用 agy "任務"       # 跑一輪完整 TDD
 uv run pytest -m 真cli                                 # 真的打三家 CLI（燒 token，兩個閘都排除）
 ```
@@ -244,3 +245,6 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 門面多匯出一個名字 | `test_門面很小` 紅 |
 | 平行度改回 `-n auto` | `test_規則表用的是算出來的數字不是auto` 紅 |
 | `平行成數` 改成 1.0（吃滿） | `test_不會吃滿` 等 5 支紅 |
+| 接力在可編輯下遇到結果未知也換腦 | `test_結果未知在可編輯時不准換` 等 2 支紅 |
+| 接力全掛時不留「試過誰」的證據 | `test_全部失敗要留下試過誰的證據` 等 2 支紅 |
+| 逾時預設調回 300 秒 | `test_預設夠寬` 紅 |

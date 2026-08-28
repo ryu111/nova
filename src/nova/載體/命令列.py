@@ -11,13 +11,15 @@ import dataclasses
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 from nova.契約.工作流 import 任務, 執行器, 步驟結果, 結束代碼, 階段定義
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
-from nova.契約.角色 import 呼叫選項, 權限
+from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
-from nova.載體.模型.轉接 import 建立
+from nova.載體.模型.接力 import 接力腦
+from nova.載體.模型.轉接 import 家族, 建立
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
@@ -115,7 +117,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     分擔 Claude 的壓力與使用額度。
     """
     try:
-        模型 = 建立(參數.用, 執行檔=Path(參數.執行檔) if 參數.執行檔 else None)
+        模型 = _建腦(參數.用, Path(參數.執行檔) if 參數.執行檔 else None)
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
@@ -144,13 +146,19 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     return _終局的退出碼[答.終局]
 
 
-def _建角色(家: str, 執行檔: str | None, 系統提示: str, 可以做什麼: 權限) -> 固定提示角色:
-    return 固定提示角色(
-        名稱=家,
-        系統提示=系統提示,
-        腦=建立(家, 執行檔=Path(執行檔) if 執行檔 else None),  # type: ignore[arg-type]
-        權限=可以做什麼,
-    )
+def _建腦(來源: str, 執行檔: Path | None) -> 語言模型:
+    """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。"""
+    家們 = [家.strip() for 家 in 來源.split(",") if 家.strip()]
+    if not 家們:
+        訊息 = "至少要指定一家"
+        raise ValueError(訊息)
+    腦們 = tuple(建立(cast(家族, 家), 執行檔=執行檔) for 家 in 家們)
+    return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
+
+
+def _建角色(來源: str, 執行檔: str | None, 系統提示: str, 可以做什麼: 權限) -> 固定提示角色:
+    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None)
+    return 固定提示角色(名稱=腦.名稱, 系統提示=系統提示, 腦=腦, 權限=可以做什麼)
 
 
 def _邊跑邊印(內層: 執行器) -> 執行器:
@@ -173,8 +181,11 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
 
     `--審查用` 必須跟 `--用` 不同家——自己審自己等於沒審（硬規則 4）。
     """
-    if 參數.審查用 == 參數.用:
-        print(f"審查要換一顆腦：--審查用 不能跟 --用 同樣是 {參數.用}", file=sys.stderr)
+    做事的 = {家.strip() for 家 in 參數.用.split(",") if 家.strip()}
+    審查的 = {家.strip() for 家 in 參數.審查用.split(",") if 家.strip()}
+    if 做事的 & 審查的:
+        重疊 = "、".join(sorted(做事的 & 審查的))
+        print(f"審查要換一顆腦：{重疊} 同時出現在 --用 與 --審查用", file=sys.stderr)
         return 阻擋
     工作目錄 = 在哪跑(參數.工作目錄)
     描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
@@ -231,11 +242,20 @@ def 建剖析器() -> argparse.ArgumentParser:
 
     問剖析 = 子.add_parser("問", help="把一件事委派給別家 LLM CLI（分擔額度）")
     問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
-    問剖析.add_argument("--用", required=True, help="哪一家：claude、codex、agy")
+    問剖析.add_argument(
+        "--用",
+        required=True,
+        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+    )
     問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
     問剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
     問剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
-    問剖析.add_argument("--逾時", type=float, default=300.0, help="幾秒沒回應就殺掉")
+    問剖析.add_argument(
+        "--逾時",
+        type=float,
+        default=預設逾時秒,
+        help=f"幾秒沒回應就殺掉（預設 {預設逾時秒:.0f}）。砍太早會變成『結果未知』，那是不可回復的",
+    )
     問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
     問剖析.add_argument(
         "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
@@ -249,7 +269,7 @@ def 建剖析器() -> argparse.ArgumentParser:
 
     流剖析 = 子.add_parser("工作流", help="跑一輪 TDD：測試→驗證紅→實作→驗證綠→審查")
     流剖析.add_argument("任務", nargs="*", help="要做完的事。不給就從 stdin 讀")
-    流剖析.add_argument("--用", required=True, help="測試員與實作員用哪一家")
+    流剖析.add_argument("--用", required=True, help="測試員與實作員用哪一家。逗號分隔＝接力")
     流剖析.add_argument(
         "--審查用", required=True, help="審查員用哪一家。**必須跟 --用 不同**——自己審自己等於沒審"
     )

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nova.契約.模型回應 import 回應
-from nova.契約.角色 import 呼叫選項, 權限, 語言模型
+from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 
 _分隔 = "\n\n---\n\n"
 
@@ -33,7 +33,7 @@ class 固定提示角色:
     系統提示: str
     腦: 語言模型
     模型: str | None = None
-    逾時秒: float = 300.0
+    逾時秒: float = 預設逾時秒
     #: 這個角色能動到什麼。測試員與審查員唯讀就夠，只有實作員需要可編輯。
     權限: 權限 = 權限.唯讀
 

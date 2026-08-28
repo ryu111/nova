@@ -135,3 +135,42 @@ def test_門面很小() -> None:
         "失敗代碼",
         "權限",
     }
+
+
+class Test接力:
+    """`用` 給一串就是接力：前一顆失敗換下一顆。"""
+
+    def test_一串裡第一顆掛了換第二顆(self, tmp_path: Path) -> None:
+        壞的 = tmp_path / "壞的"
+        壞的.write_text("#!/bin/sh\nexit 2\n")  # 結束碼 2 = 用法錯誤 = 確定失敗
+        壞的.chmod(壞的.stat().st_mode | stat.S_IEXEC)
+        好的, _ = _假CLI(tmp_path, "agy")
+        答 = nova.問("在嗎", 用=["codex", "agy"], 執行檔={"codex": 壞的, "agy": 好的})
+        assert 答.終局 is nova.終局.成功
+        assert 答.文字 == "ok\n"
+
+    def test_逗號分隔也算一串(self, tmp_path: Path) -> None:
+        """從命令列傳進來的形狀。"""
+        壞的 = tmp_path / "壞的"
+        壞的.write_text("#!/bin/sh\nexit 2\n")
+        壞的.chmod(壞的.stat().st_mode | stat.S_IEXEC)
+        好的, _ = _假CLI(tmp_path, "agy")
+        答 = nova.問("在嗎", 用="codex,agy", 執行檔={"codex": 壞的, "agy": 好的})
+        assert 答.終局 is nova.終局.成功
+
+    def test_全掛了要留下試過誰(self, tmp_path: Path) -> None:
+        壞的 = tmp_path / "壞的"
+        壞的.write_text("#!/bin/sh\nexit 2\n")
+        壞的.chmod(壞的.stat().st_mode | stat.S_IEXEC)
+        答 = nova.問("在嗎", 用="codex,agy", 執行檔=壞的)
+        assert 答.終局 is nova.終局.確定失敗
+        assert "codex:usage" in 答.文字 and "agy:usage" in 答.文字
+
+    def test_做事與審查的鏈不准重疊(self) -> None:
+        """`codex,agy` 對上 `agy` ——agy 同時做事又審自己。"""
+        with pytest.raises(ValueError, match="換一顆腦"):
+            nova.派工("做點事", 用="codex,agy", 審查用="agy")
+
+    def test_空的鏈要當場炸(self) -> None:
+        with pytest.raises(ValueError, match="至少要指定一家"):
+            nova.問("在嗎", 用="")
