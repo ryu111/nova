@@ -4,6 +4,7 @@
 手寫假資料只會證明解析器符合我對格式的想像。
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -160,3 +161,52 @@ class Test成功但沒話說:
     def test_有說話就照常成功(self) -> None:
         有話 = _agy空回應.replace('"response":""', '"response":"好"')
         assert 解析agy(有話, 0).終局 is 終局.成功
+
+
+class Test診斷不准被自己的罐頭句擋掉:
+    """CLI 明明講了為什麼失敗，nova 卻回「不知道發生什麼事」。
+
+    真實案例（2026-08-29，就是這條 bug 被抓到的那次）：叫 agy 讀網頁，
+    它的 stderr 寫得清清楚楚——
+
+        jetski: no output produced — a tool required the "read_url" permission
+        that headless mode cannot prompt for, so it was auto-denied.
+
+    而 nova 回的是「CLI 回報成功但一個字都沒說——工具可能失敗了而錯誤被吞掉」。
+
+    原因是順序錯了：`_成功但沒話說算未知` 先把 `文字` 填成那句罐頭，
+    `_補上診斷` 的守衛 `if 答.文字.strip(): return 答` 就以為「已經有話說了」，
+    把真的診斷擋在門外。**是 nova 自己的填充句吞掉了證據。**
+
+    這一格是「觀察」通往「推理」的關口：拿不到失敗原因，
+    轉移表就只能一律停，沒辦法依失敗種類換策略。
+    """
+
+    def test_agy空回應時要拿stderr當證據(self) -> None:
+        信封 = json.dumps(
+            {"conversation_id": "x", "status": "SUCCESS", "response": "", "num_turns": 1}
+        )
+        診斷 = (
+            'jetski: no output produced — a tool required the "read_url" permission '
+            "that headless mode cannot prompt for, so it was auto-denied."
+        )
+        答 = 解析agy(信封, 0, 診斷)
+        assert 答.終局 is 終局.結果未知, "空回應還是結果未知，這條沒變"
+        assert "read_url" in 答.文字, f"真的診斷被吞掉了：{答.文字}"
+
+    def test_沒有stderr時才回罐頭句(self) -> None:
+        """有話說就說真的，沒話說才用罐頭——**罐頭是後備不是預設**。"""
+        信封 = json.dumps({"conversation_id": "x", "status": "SUCCESS", "response": ""})
+        答 = 解析agy(信封, 0, "")
+        assert 答.終局 is 終局.結果未知
+        assert 答.文字, "完全沒證據的時候還是要講一句話，不能回空字串"
+
+    def test_三家都要收得下stderr(self) -> None:
+        """介面隔離：三家同形，不要只有踩到 bug 的那一家特別。"""
+        for 解析, 輸出 in (
+            (解析claude, '{"result":"","is_error":false}'),
+            (解析codex, ""),
+            (解析agy, '{"status":"SUCCESS","response":""}'),
+        ):
+            答 = 解析(輸出, 0, "某家的診斷字樣ABC")
+            assert "某家的診斷字樣ABC" in 答.文字, f"{解析.__name__} 沒把 stderr 當證據"

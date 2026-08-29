@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局, 終局判定
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設選項
 from nova.載體.模型.執行 import 執行逾時, 跑cli
 from nova.載體.模型.接力 import 缺席腦
@@ -24,7 +24,9 @@ from nova.載體.模型.解析 import 撿對話識別碼, 解析agy, 解析claud
 預設候選目錄 = (Path.home() / ".local" / "bin",)
 
 組參數型 = Callable[[str, 呼叫選項], list[str]]
-解析型 = Callable[[str, int], 回應]
+#: 解析一次 CLI 執行要三樣東西：stdout、結束碼、**stderr**。
+#: 少了第三樣，「CLI 明明講了為什麼失敗」就會變成「不知道發生什麼事」。
+解析型 = Callable[[str, int, str], 回應]
 
 
 #: 可編輯模式下 claude 需要的工具。列白名單不用 "default"——要哪些寫出來。
@@ -238,7 +240,7 @@ def 找執行檔(
 部分輸出上限 = 12_000
 
 
-def 逾時的回應(解析: 解析型, 部分標準輸出: str) -> 回應:
+def 逾時的回應(解析: 解析型, 部分標準輸出: str, 部分標準錯誤: str = "") -> 回應:
     """逾時是**結果未知**——但子程序已經吐出來的東西不該一起丟掉。
 
     **終局、失敗代碼、原始結束碼、用量一律不從解析結果來。**
@@ -259,7 +261,7 @@ def 逾時的回應(解析: 解析型, 部分標準輸出: str) -> 回應:
     )
     if not 部分標準輸出.strip():
         return 空的
-    半成品 = 解析(部分標準輸出, -1)
+    半成品 = 解析(部分標準輸出, -1, 部分標準錯誤)
     return replace(
         空的,
         對話識別碼=半成品.對話識別碼 or 撿對話識別碼(部分標準輸出),
@@ -300,8 +302,8 @@ class 命令列模型:
                 環境=環境,
             )
         except 執行逾時 as 錯:
-            return 逾時的回應(self.解析, 錯.部分標準輸出)
-        答 = _補上診斷(self.解析(結果.標準輸出, 結果.結束碼), 結果.標準錯誤)
+            return 逾時的回應(self.解析, 錯.部分標準輸出, 錯.部分標準錯誤)
+        答 = self.解析(結果.標準輸出, 結果.結束碼, 結果.標準錯誤)
         return _補上認證提示(答, self.名稱, 選項)
 
 
@@ -313,24 +315,6 @@ def 建立(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
         raise ValueError(訊息)
     組, 析 = _規格[家]
     return 命令列模型(名稱=家, 執行檔=執行檔 or 找執行檔(家), 組參數=組, 解析=析)
-
-
-_診斷上限 = 2000
-
-
-def _補上診斷(答: 回應, 標準錯誤: str) -> 回應:
-    """失敗而且沒話可說時，把 stderr 當證據。
-
-    不補的話，`usage`（旗標給錯）這種失敗會回一個**空字串**——
-    使用者只看得到「確定失敗 usage」，看不到是哪個旗標錯了。
-    診斷丟掉比結論丟掉更難查，因為它看起來完全正常。
-    """
-    if 答.終局 is 終局.成功 or 答.文字.strip():
-        return 答
-    診斷 = 標準錯誤.strip()
-    if not 診斷:
-        return 答
-    return replace(答, 文字=診斷[:_診斷上限])
 
 
 #: 認證失敗時的家別提示。錯誤訊息只說「沒登入」，不會說是哪個旗標害的。
