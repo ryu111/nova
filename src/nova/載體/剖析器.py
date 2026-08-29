@@ -83,6 +83,24 @@ def _加委派類(
     )
     問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
     問剖析.add_argument(
+        "--預算token",
+        type=int,
+        default=None,
+        help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
+    )
+    問剖析.add_argument(
+        "--預算美金",
+        type=float,
+        default=None,
+        help="這段時間內全專案最多花多少美金，超過就停（預設不鎖；算不出成本時一律放行）",
+    )
+    問剖析.add_argument(
+        "--預算幾小時",
+        type=float,
+        default=24.0,
+        help="預算的時間窗口（預設 24 小時）",
+    )
+    問剖析.add_argument(
         "--不記全文",
         action="store_true",
         help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
@@ -145,6 +163,24 @@ def _加委派類(
     )
     流剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
     流剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
+    流剖析.add_argument(
+        "--預算token",
+        type=int,
+        default=None,
+        help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
+    )
+    流剖析.add_argument(
+        "--預算美金",
+        type=float,
+        default=None,
+        help="這段時間內全專案最多花多少美金，超過就停（預設不鎖；算不出成本時一律放行）",
+    )
+    流剖析.add_argument(
+        "--預算幾小時",
+        type=float,
+        default=24.0,
+        help="預算的時間窗口（預設 24 小時）",
+    )
     流剖析.add_argument(
         "--不記全文",
         action="store_true",
