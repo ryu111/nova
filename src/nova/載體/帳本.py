@@ -41,12 +41,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from hashlib import sha256
-from os import environ
 from pathlib import Path
 from secrets import token_hex
 from typing import TextIO
 
 from nova.契約.帳本 import 事件, 欄位對應, 記一筆
+from nova.載體.狀態 import 狀態根目錄
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,8 +153,7 @@ def 預設帳本目錄(專案: Path | None = None) -> Path:
     `專案` 不給就退回舊的全域位置——那是給「沒有專案概念」的呼叫端用的
     （例如純粹想看歷史），不是預設路徑。
     """
-    根 = environ.get("XDG_STATE_HOME")
-    底 = (Path(根) if 根 else Path.home() / ".local" / "state") / "nova"
+    底 = 狀態根目錄()
     return 底 / "帳本" if 專案 is None else 底 / "專案" / 專案識別(專案) / "帳本"
 
 

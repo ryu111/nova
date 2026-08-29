@@ -49,6 +49,7 @@ from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
+from nova.載體.額度 import 執行查詢額度
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 
@@ -597,6 +598,12 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
     return _終局的退出碼[果.答.終局]
 
 
+def _子命令_額度(參數: argparse.Namespace) -> int:
+    """查詢 codex 與 agy 額度並寫入快取。"""
+    del 參數
+    return 執行查詢額度()
+
+
 #: 子命令 → 處理函式。**唯一的登記來源**：名字在剖析器宣告、處理函式在這裡，
 #: 由 `建剖析器` 在宣告的當下綁起來。少一格會在建剖析器時就炸。
 處理們: dict[str, 處理型] = {
@@ -607,6 +614,7 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
     "工作流": _子命令_工作流,
     "帳本": _子命令_帳本,
     "生圖": _子命令_生圖,
+    "額度": _子命令_額度,
 }
 
 
