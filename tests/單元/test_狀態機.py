@@ -10,7 +10,7 @@ import pytest
 
 from nova.契約.工作流 import 審查判定, 步驟結果, 種類, 結束, 結束代碼, 階段代碼, 階段定義
 from nova.契約.模型回應 import 終局
-from nova.迴圈.狀態機 import TDD階段表, 下一步, 查階段
+from nova.迴圈.狀態機 import TDD階段表, 下一步, 卡住了, 卡住門檻, 查階段
 
 
 def _結果(
@@ -141,3 +141,61 @@ def test_enum的值都是ASCII() -> None:
     for 群 in (階段代碼, 種類, 結束代碼):
         for 成員 in 群:
             assert 成員.value.isascii(), f"{成員!r} 的值不是 ASCII"
+
+
+class Test沒進展就要停:
+    """「重複相同失敗方法而無策略改變」是 loop 的第一號反模式。
+
+    nova 的兩條回頭邊（驗證紅沒紅退回測試、驗證綠沒綠退回實作）本來就可能
+    來回不停，現在唯一擋它的是**步數上限**——那是「燒完 20 步才停」，
+    不是「發現沒進展就停」。中間那 18 步全是白花的錢。
+
+    **只看判準階段。** 模型階段的證據是自由文字，每次都不一樣，比對永遠不相等；
+    判準階段的證據是 pytest 的輸出，是確定性的——**同一個判準吐出一模一樣的東西，
+    就是真的什麼都沒變**。這是 OpenHands 那套 stuck detector 的同一個想法
+    （deterministic equality，忽略會變動的 metadata），但只留對 nova 成立的那一半。
+
+    為什麼不是「連續」而是「出現過」：中間夾著模型階段，本來就不連續。
+    """
+
+    def _判準步(self, 綠: bool, 證據: str) -> 步驟結果:
+        return 步驟結果(階段=階段代碼.驗證紅, 終局=終局.成功, 判準綠=綠, 證據=證據)
+
+    def test_同一個判準吐出同樣的紅N次就算卡住(self) -> None:
+        軌跡 = tuple(self._判準步(綠=False, 證據="1 failed") for _ in range(卡住門檻))
+        assert 卡住了(軌跡) is not None
+
+    def test_差一次還不算(self) -> None:
+        """門檻要真的是門檻，不是「出現兩次就慌」。"""
+        軌跡 = tuple(self._判準步(綠=False, 證據="1 failed") for _ in range(卡住門檻 - 1))
+        assert 卡住了(軌跡) is None
+
+    def test_證據不一樣就不算卡住(self) -> None:
+        """錯誤訊息在變 ＝ 有在動。**這才是「進展」的機械定義。**"""
+        軌跡 = tuple(self._判準步(綠=False, 證據=f"{n} failed") for n in range(卡住門檻))
+        assert 卡住了(軌跡) is None
+
+    def test_綠的不算卡住(self) -> None:
+        """同一個判準連綠三次是正常的（重跑確認），不是卡住。"""
+        軌跡 = tuple(self._判準步(綠=True, 證據="all passed") for _ in range(卡住門檻 + 2))
+        assert 卡住了(軌跡) is None
+
+    def test_模型階段不看證據(self) -> None:
+        """模型的自由文字本來就每次不同，拿它比對只會永遠不相等——
+
+        更糟的是**萬一相等**（模型剛好回一樣的話），那也不代表沒進展。
+        所以模型階段一律不算進來。
+        """
+        軌跡 = tuple(
+            步驟結果(階段=階段代碼.測試, 終局=終局.成功, 判準綠=None, 證據="我寫好了")
+            for _ in range(卡住門檻 + 3)
+        )
+        assert 卡住了(軌跡) is None
+
+    def test_理由要說得出是哪一階和幾次(self) -> None:
+        """「卡住了」不可行動。要能直接看出下一步該查哪裡。"""
+        軌跡 = tuple(self._判準步(綠=False, 證據="1 failed") for _ in range(卡住門檻))
+        理由 = 卡住了(軌跡)
+        assert 理由 is not None
+        assert 階段代碼.驗證紅.value in 理由
+        assert str(卡住門檻) in 理由
