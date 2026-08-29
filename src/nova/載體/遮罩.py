@@ -22,6 +22,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from nova.載體.秘密 import 已載入的鍵環境變數
+
 #: 環境變數的鍵長這樣才當它是祕密。純長度判斷會把 `PWD` 跟 `LANG` 也遮掉，
 #: 那會讓整份紀錄變成馬賽克。
 _祕密的鍵 = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE)", re.IGNORECASE)
@@ -146,15 +148,30 @@ def _遮掉密碼那段(命中: re.Match[str]) -> str:
 
 
 def _值得遮的環境值(環境: Mapping[str, str]) -> list[tuple[str, str]]:
-    """挑出「鍵名看起來是祕密、值又夠長」的那些。**長的排前面。**
+    """挑出該遮的環境變數。**長的排前面。**
 
     長的先遮是因為短值可能是長值的子字串：先遮短的會把長的切成兩半，
     留下沒被遮到的尾巴。
+
+    兩種來源：
+
+    1. **鍵名看起來是祕密**（`KEY`／`TOKEN`／`SECRET`…）——這是**猜**的，
+       猜得中一般情況，猜不中 `MY_THING=sk-...`。
+    2. **nova 自己從祕密檔載進去的**（`NOVA_LOADED_SECRETS` 上的名單）——
+       這個**不必猜**，是不是祕密在載入的當下就知道了。
+
+    值太短的一律不遮（兩種來源都是）：`A=1` 遮下去會把帳本裡每一個 `1` 都吃掉。
+
+    **名單本身要排除掉。** `NOVA_LOADED_SECRETS` 這個名字撞得上 `_祕密的鍵`
+    的 `SECRET`，不排除的話它的值（一串鍵名）也會被遮，
+    遮出來的東西還會巢狀套進其他標記裡。鍵名不是祕密。
     """
+    自己載的 = {名 for 名 in 環境.get(已載入的鍵環境變數, "").split(",") if 名}
     收 = [
         (值, 鍵)
         for 鍵, 值 in 環境.items()
-        if _祕密的鍵.search(鍵)
+        if 鍵 != 已載入的鍵環境變數
+        and (鍵 in 自己載的 or _祕密的鍵.search(鍵))
         and len(值) >= _最短的祕密
         and 值.strip().lower() not in _不是祕密的值
     ]

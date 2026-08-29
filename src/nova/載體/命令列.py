@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -51,6 +52,7 @@ from nova.載體.熔斷 import 該跳過嗎
 from nova.載體.狀態 import 狀態根目錄
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
+from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
@@ -172,6 +174,9 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     挑法 = _挑腦(參數)
     if 挑法 is None:
         return 阻擋
+    出不了生 = _秘密先交出去(在哪跑(參數.工作目錄))
+    if 出不了生 is not None:
+        return 出不了生
     擋 = _預算先擋一下(參數)
     if 擋 is not None:
         return 擋
@@ -269,6 +274,24 @@ def _帳本目錄(參數: argparse.Namespace) -> Path:
 #: 帳本檔名開頭的時戳格式。**跟 `帳本.新執行識別碼` 是同一個格式**——
 #: 兩邊走散的話，窗口過濾會靜默地濾掉全部（看起來像「從來沒花過」）。
 _檔名時戳 = "%Y%m%dT%H%M%SZ"
+
+
+def _秘密先交出去(專案: Path) -> int | None:
+    """把這個專案的祕密塞進 `os.environ`，子程序就繼承得到。回退出碼 ＝ 別出生。
+
+    **為什麼是 `os.environ` 不是只給子程序的那份**：`遮罩` 讀的是 `os.environ`。
+    只塞給子程序的話，祕密會被用、但不會被遮——它會以明文躺進帳本，
+    而那是一個沒有任何症狀的洩漏（`tests/驗收/test_載進去的秘密不進帳本.py` 守著）。
+
+    **沒有祕密檔就是沒有祕密要載**（回 None）——預設關閉，跟熔斷與預算鎖同一條。
+    """
+    try:
+        載入到(os.environ, 專案=專案)
+    except 看不懂的祕密檔 as 錯:
+        # **出生前就擋。** 打出去之後才發現，祕密已經在子程序裡了。
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    return None
 
 
 def _預算先擋一下(參數: argparse.Namespace) -> int | None:
@@ -575,6 +598,9 @@ def _工作流開跑前(參數: argparse.Namespace, 工作目錄: Path, 進度�
     if 擋住 is not None:
         print(擋住, file=sys.stderr)
         return 阻擋
+    出不了生 = _秘密先交出去(工作目錄)
+    if 出不了生 is not None:
+        return 出不了生
     return _預算先擋一下(參數)
 
 
@@ -792,6 +818,28 @@ def _子命令_排程(參數: argparse.Namespace) -> int:
     return 放行
 
 
+def _子命令_秘密(參數: argparse.Namespace) -> int:
+    """祕密檔在哪、載得到哪幾個鍵。**只印路徑與鍵名，一個值都不印。**
+
+    印值的話這個子命令自己就變成洩漏管道——而它存在的理由是讓人查得動
+    「為什麼子程序沒拿到憑證」，那個問題只需要鍵名。
+    """
+    del 參數
+    專案 = 在哪跑(None)
+    路徑 = 祕密檔(專案)
+    print(f"祕密檔：{路徑}")
+    if not 路徑.is_file():
+        print("  （沒有。要載入憑證就寫一份 KEY=VALUE，然後 chmod 600）")
+        return 放行
+    try:
+        鍵們 = sorted(載入到({}, 專案=專案))
+    except 看不懂的祕密檔 as 錯:
+        print(f"  {錯}", file=sys.stderr)
+        return 阻擋
+    print(f"  載得到 {len(鍵們)} 個鍵：{'、'.join(鍵們)}")
+    return 放行
+
+
 def _子命令_收件(參數: argparse.Namespace) -> int:
     """看收件匣：丟一個檔進去就是派一次工，檔案內容就是題目。
 
@@ -980,6 +1028,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "問": _子命令_問,
     "工作流": _子命令_工作流,
     "排程": _子命令_排程,
+    "秘密": _子命令_秘密,
     "收件": _子命令_收件,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
