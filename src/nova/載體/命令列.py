@@ -28,13 +28,15 @@ from nova.契約.工作流 import (
     階段定義,
 )
 from nova.契約.帳本 import 一條規則的帳, 摘要
+from nova.契約.成果 import 成果
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.剖析器 import 建剖析器, 處理型
-from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目錄
+from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
+from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
@@ -51,7 +53,7 @@ from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
-from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
+from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 
 放行, 閘紅, 阻擋 = 0, 1, 2
 #: 護欄生效：**按設計停了，不是壞了。** 外圈看到這個碼不准去「修」——
@@ -344,7 +346,7 @@ def _建角色(  # noqa: PLR0913 —— 全部是「建一顆角色」的參數�
 
 
 @contextmanager
-def _開帳(參數: argparse.Namespace) -> Iterator[帳本]:
+def _開帳(參數: argparse.Namespace, *, 執行識別碼: str | None = None) -> Iterator[帳本]:
     """CLI **預設記帳**：它是程式不是函式庫，程式留執行紀錄是正常的。
 
     而且 opt-in 的帳本等於沒有帳本——真的需要事後追查的那次，
@@ -357,7 +359,7 @@ def _開帳(參數: argparse.Namespace) -> Iterator[帳本]:
     if 參數.不記帳:
         yield 不記帳本()
         return
-    with 開帳本(_帳本目錄(參數)) as 帳:
+    with 開帳本(_帳本目錄(參數), 執行識別碼=執行識別碼) as 帳:
         yield 帳
 
 
@@ -420,8 +422,11 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     if not 描述.strip():
         print("沒有任務可以做（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
+    # **兩本帳共用同一個識別碼**：成果上的識別碼就是事件帳本那個
+    # `<執行識別碼>.jsonl` 的檔名，走散了就對不回去。
+    識別 = 新執行識別碼()
     try:
-        with _開帳(參數) as 帳:
+        with _開帳(參數, 執行識別碼=識別) as 帳:
 
             def 建(階段: 階段代碼, 提示: str, 可以做什麼: 權限) -> 固定提示角色:
                 # **不給 `--用` 就照派工表**——策略寫在表裡卻沒人執行等於沒有策略。
@@ -456,7 +461,86 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     for 步 in 果.軌跡:
         print(f"[{步.階段.value}] {步.終局.value}\n{步.證據}\n")
     print(f"\n{果.結束.代碼.value}：{果.結束.原因}", file=sys.stderr)
-    return _工作流退出碼(果.結束, 果.軌跡)
+    碼 = _工作流退出碼(果.結束, 果.軌跡)
+    _歸檔成果(參數, 識別=識別, 任務=描述, 果=果, 退出碼=碼)
+    return 碼
+
+
+def _歸檔成果(
+    參數: argparse.Namespace,
+    *,
+    識別: str,
+    任務: str,
+    果: 工作流結果,
+    退出碼: int,
+) -> None:
+    """把一次工作的收場寫進成果帳本。
+
+    事件帳本答不出「做完了沒」——那要從軌跡自己推，而推的規則
+    （`3` 蓋過 `4`）住在 `_工作流退出碼`。所以收場與退出碼直接寫在成果上。
+
+    **帳寫不下去不准把工作結果吃掉。** 磁碟滿了、權限不對，都只是少一筆帳；
+    把它變成非零退出碼會讓外圈以為工作失敗了。
+    """
+    摘 = _這次的摘要(參數, 識別)
+    try:
+        歸檔(
+            成果(
+                執行識別碼=識別,
+                任務=任務.strip(),
+                收場=果.結束.代碼.value,
+                退出碼=退出碼,
+                起=摘.起 if 摘 else "",
+                迄=摘.迄 if 摘 else "",
+                走了幾階=len(果.軌跡),
+                總token=摘.總token if 摘 else 0,
+            ),
+            目錄=_已處理目錄(參數),
+        )
+    except OSError as 錯:
+        print(f"成果沒記成（{錯}）", file=sys.stderr)
+
+
+def _這次的摘要(參數: argparse.Namespace, 識別: str) -> 摘要 | None:
+    """起訖與 token 從剛寫完的事件帳本讀回來，不在這裡再算一次。
+
+    `--不記帳` 的時候沒有檔案，那些格子就留空——**留空不准假裝成 0**，
+    所以起訖是空字串不是某個假時間。
+    """
+    檔 = _帳本目錄(參數) / f"{識別}.jsonl"
+    if not 檔.is_file():
+        return None
+    try:
+        return 讀一次執行(檔)
+    except OSError:
+        return None
+
+
+def _已處理目錄(參數: argparse.Namespace) -> Path:
+    """跟 `_帳本目錄` 用同一個專案鍵——兩本帳要住在同一個專案資料夾底下。"""
+    if 參數.帳本目錄:
+        return Path(參數.帳本目錄).parent / "已處理"
+    return 已處理目錄(在哪跑(None))
+
+
+def _子命令_已處理(參數: argparse.Namespace) -> int:
+    """看成果帳本：哪幾件工作做完了、收在哪種結局。
+
+    **有讀取端才算補了成果帳本**——只有寫端的話那是寫檔案給沒人看。
+    """
+    目錄 = 已處理目錄(在哪跑(None))
+    筆們 = 列出成果(目錄, 上限=參數.最近)
+    if not 筆們:
+        print(f"還沒有任何成果（會寫在 {目錄}）")
+        return 放行
+    for 筆 in 筆們:
+        print(_一行成果(筆))
+    return 放行
+
+
+def _一行成果(筆: 成果) -> str:
+    階 = f"{筆.走了幾階} 階" if 筆.走了幾階 else "沒走到任何一階"
+    return f"{筆.執行識別碼}  {筆.收場}（碼 {筆.退出碼}）  {階}  {筆.總token} token  {筆.任務}"
 
 
 _收場的退出碼 = {
@@ -620,6 +704,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "問": _子命令_問,
     "工作流": _子命令_工作流,
     "帳本": _子命令_帳本,
+    "已處理": _子命令_已處理,
     "生圖": _子命令_生圖,
     "額度": _子命令_額度,
 }
