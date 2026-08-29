@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from nova import 家族額度, 額度
 from nova.契約.工作流 import (
@@ -37,7 +37,7 @@ from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
-from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行
+from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
@@ -170,6 +170,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
                 Path(參數.執行檔) if 參數.執行檔 else None,
                 帳,
                 熔斷了=_這個專案誰熔斷了(_帳本目錄(參數), 啟用=參數.熔斷),
+                記全文=not 參數.不記全文,
             ).詢問(
                 提示,
                 選項=呼叫選項(
@@ -281,6 +282,7 @@ def _建腦(
     帳: 帳本,
     *,
     熔斷了: Callable[[str], bool] = lambda _: False,
+    記全文: bool = True,
 ) -> 語言模型:
     """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。
 
@@ -295,7 +297,7 @@ def _建腦(
         raise ValueError(訊息)
     # 少裝一家不該讓整串垮掉（見 `缺席腦`）。只指定一家卻沒裝則當場炸。
     原始 = tuple(建立或缺席(cast(家族, 家), 執行檔=執行檔, 可以缺席=len(家們) > 1) for 家 in 家們)
-    腦們 = 記帳每一顆(原始, 帳)
+    腦們 = 記帳每一顆(原始, 帳, 記全文=記全文)
     return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
 
 
@@ -338,8 +340,9 @@ def _建角色(  # noqa: PLR0913 —— 全部是「建一顆角色」的參數�
     帳: 帳本,
     *,
     模型: str | None = None,
+    記全文: bool = True,
 ) -> 固定提示角色:
-    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None, 帳)
+    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None, 帳, 記全文=記全文)
     # 模型走**角色**不走腦：同一顆腦可以被不同角色用不同型號叫
     # （推理階段要 sol，例行階段要便宜的預設）。
     return 固定提示角色(名稱=腦.名稱, 系統提示=系統提示, 腦=腦, 權限=可以做什麼, 模型=模型)
@@ -432,9 +435,19 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
                 # **不給 `--用` 就照派工表**——策略寫在表裡卻沒人執行等於沒有策略。
                 指名 = 參數.審查用 if 階段 is 階段代碼.審查 else 參數.用
                 if 指名:
-                    return _建角色(指名, 參數.執行檔, 提示, 可以做什麼, 帳)
+                    return _建角色(
+                        指名, 參數.執行檔, 提示, 可以做什麼, 帳, 記全文=not 參數.不記全文
+                    )
                 派 = _階段的派法(階段)
-                return _建角色(",".join(派.腦們), None, 提示, 可以做什麼, 帳, 模型=派.模型)
+                return _建角色(
+                    ",".join(派.腦們),
+                    None,
+                    提示,
+                    可以做什麼,
+                    帳,
+                    模型=派.模型,
+                    記全文=not 參數.不記全文,
+                )
 
             執行 = 建TDD執行器(
                 角色表={
@@ -587,6 +600,8 @@ def _子命令_帳本(參數: argparse.Namespace) -> int:
             print(f"找不到 {參數.執行識別碼}（在 {目錄}）", file=sys.stderr)
             return 阻擋
         print(_一次的細節(讀一次執行(對的[0])))
+        if 參數.全文:
+            print(_模型講了什麼(讀原始事件(對的[0])))
         return 放行
     if not 檔們:
         print(f"還沒有任何帳本（會寫在 {目錄}）")
@@ -594,6 +609,28 @@ def _子命令_帳本(參數: argparse.Namespace) -> int:
     for 檔 in 檔們[: 參數.最近]:
         print(_一行摘要(讀一次執行(檔)))
     return 放行
+
+
+def _模型講了什麼(事件們: list[dict[str, Any]]) -> str:
+    """把每一次呼叫講的話印出來。**遮罩過的**——`遮掉幾處` 一起印。
+
+    少了那個數字，「這是原文」跟「這裡缺了三塊」長得一模一樣。
+    """
+    行們: list[str] = []
+    for 事 in 事件們:
+        文 = 事.get("text")
+        if not isinstance(文, str):
+            continue
+        註 = []
+        if 事.get("redactions"):
+            註.append(f"遮掉 {事['redactions']} 處")
+        if 事.get("text_truncated"):
+            註.append(f"截斷（原本 {事.get('text_len')} 字）")
+        抬頭 = f"── 呼叫 {事.get('call')} · {事.get('family')}"
+        if 註:
+            抬頭 += "（" + "、".join(註) + "）"
+        行們.append(f"{抬頭}\n{文}")
+    return "\n\n".join(行們) or "（這次沒有記全文——可能用了 --不記全文，或這次沒有模型呼叫）"
 
 
 def _一行摘要(摘: 摘要) -> str:

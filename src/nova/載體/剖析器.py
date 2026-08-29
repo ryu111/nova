@@ -82,6 +82,11 @@ def _加委派類(
         help="照派工表自動挑腦：routine 給 agy（分擔額度）、reasoning 給 sol",
     )
     問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
+    問剖析.add_argument(
+        "--不記全文",
+        action="store_true",
+        help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
+    )
     問剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
     問剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
     問剖析.add_argument(
@@ -140,6 +145,11 @@ def _加委派類(
     )
     流剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
     流剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
+    流剖析.add_argument(
+        "--不記全文",
+        action="store_true",
+        help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
+    )
     流剖析.add_argument("--執行檔", default=None, help="--用 那家 CLI 的絕對路徑")
     流剖析.add_argument(
         "--最多步數", type=int, default=預設最多步數, help="停止條件：走幾步就強制停"
@@ -177,6 +187,11 @@ def _加觀測類(
     帳剖析.add_argument("執行識別碼", nargs="?", default=None, help="不給就列出最近幾次")
     帳剖析.add_argument("--帳本目錄", default=None, help="從哪裡讀。預設 ~/.local/state/nova/帳本")
     帳剖析.add_argument("--最近", type=int, default=10, help="列出幾次（預設 10）")
+    帳剖析.add_argument(
+        "--全文",
+        action="store_true",
+        help="連模型講的話一起印（遮罩過）。要給執行識別碼才有東西可印",
+    )
     帳剖析.add_argument(
         "--規則",
         action="store_true",
