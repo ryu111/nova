@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from nova.契約.模型回應 import 終局
-from nova.契約.角色 import 呼叫選項, 權限
+from nova.契約.角色 import 呼叫選項, 權限, 預設逾時秒
 from nova.載體.模型.執行 import 跑cli
 from nova.載體.模型.解析 import 解析agy
 from nova.載體.模型.轉接 import (
@@ -24,6 +24,8 @@ from nova.載體.模型.轉接 import (
     家族,
     建立,
     找執行檔,
+    決定逾時秒,
+    高階模型逾時秒,
 )
 
 實錄 = Path(__file__).resolve().parents[1] / "整合" / "實錄"
@@ -379,6 +381,31 @@ class Test權限是漏出的:
             "提示", 呼叫選項(續接="某個id", 權限=權限.全開)
         )
         assert "--dangerously-bypass-approvals-and-sandbox" not in 參數
+
+
+class Test高階模型要給夠時間:
+    """砍太早不只是慢，是把可回復的工作變成不可回復的歧義。
+
+    實測（2026-08-29）：`gpt-5.6-sol` 讀五篇原文＋一份設計文件做對照，
+    **25 分鐘逾時、0 token 回來**，nova 判 `結果未知`（不准自動重跑）。
+    那次是呼叫端自己把 `--逾時` 設成 1500 造成的——**這就是為什麼它不能是呼叫端的自由**。
+    """
+
+    def test_選了sol就給一小時(self) -> None:
+        assert 決定逾時秒(呼叫選項(模型=codex高階模型)) == 高階模型逾時秒
+
+    def test_一般模型維持三十分鐘(self) -> None:
+        assert 決定逾時秒(呼叫選項()) == 預設逾時秒
+        assert 決定逾時秒(呼叫選項(模型=codex常用模型)) == 預設逾時秒
+
+    def test_下限是下限不是預設值(self) -> None:
+        """呼叫端調**高**照樣有效，調**低**不算數。
+
+        單向的理由就是那個不對稱：等太久的代價只是等，砍太早的代價是不可回復。
+        真的需要短皮帶就換一顆模型，不要把高階模型綁短。
+        """
+        assert 決定逾時秒(呼叫選項(模型=codex高階模型, 逾時秒=7200.0)) == 7200.0
+        assert 決定逾時秒(呼叫選項(模型=codex高階模型, 逾時秒=60.0)) == 高階模型逾時秒
 
 
 class Test隔離設定是漏出的:
