@@ -21,7 +21,7 @@ uv run pytest                    # 全部測試
 uv run pytest tests/單元         # 只跑單元層
 uv run pytest tests/驗收/test_專案骨架.py::test_測試分三層   # 單一測試
 uv run pytest -k 骨架 -x         # 關鍵字篩選，第一個紅就停
-uv run pytest --lf               # 只重跑上次紅的
+uv run pytest --lf               # 只重跑上次紅的（**重播工具，不是驗收工具**——見設計 05）
 uv run ruff check . && uv run ruff format .   # lint 與格式
 uv run mypy                      # 型別（strict）
 
