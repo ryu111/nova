@@ -7,12 +7,13 @@ pre-commit、CI、agent 的 hook 全部呼叫這裡的同一支程式，所以�
 """
 
 import argparse
+import contextlib
 import dataclasses
 import json
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -56,6 +57,7 @@ from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
+from nova.載體.預算 import 上限, 花了多少, 超支了嗎
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 
@@ -146,11 +148,22 @@ def _摘要(家: str, 答: 回應) -> str:
     return f"[{家}] {如何} {答.失敗代碼}（結束碼 {答.原始結束碼}）· {量}{對話}"
 
 
-def _子命令_問(參數: argparse.Namespace) -> int:
-    """把一件事委派給別家 LLM CLI。
+@dataclasses.dataclass(frozen=True, slots=True)
+class _要問的東西:
+    """前置檢查全部過了之後，這次要打出去的東西。"""
 
-    這是統一介面的第一個真實呼叫端——用 codex／agy 接手工作，
-    分擔 Claude 的壓力與使用額度。
+    提示: str
+    用: str
+    模: str | None
+    可以做什麼: 權限
+    屍: Path | None
+
+
+def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
+    """打出去之前要檢查與準備的全部。**回 int ＝ 別打了，那個數字就是退出碼。**
+
+    抽出來不只為了 C901——「檢查與準備」跟「打出去並回報」是兩件事，
+    而且**只有這一段有權力讓那個請求不要發生**。
     """
     提示 = " ".join(參數.提示) if 參數.提示 else sys.stdin.read()
     if not 提示.strip():
@@ -159,7 +172,9 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     挑法 = _挑腦(參數)
     if 挑法 is None:
         return 阻擋
-    用, 模 = 挑法
+    擋 = _預算先擋一下(參數)
+    if 擋 is not None:
+        return 擋
     可以做什麼 = _挑權限(參數)
     屍 = Path(參數.輸出檔) if 參數.輸出檔 else None
     if 屍 is not None:
@@ -167,21 +182,34 @@ def _子命令_問(參數: argparse.Namespace) -> int:
             print("--輸出檔 要它寫檔，就得給 --可編輯（或 --全開）", file=sys.stderr)
             return 阻擋
         提示 = 加上寫檔指示(提示, 屍)
+    用, 模 = 挑法
+    return _要問的東西(提示=提示, 用=用, 模=模, 可以做什麼=可以做什麼, 屍=屍)
+
+
+def _子命令_問(參數: argparse.Namespace) -> int:
+    """把一件事委派給別家 LLM CLI。
+
+    這是統一介面的第一個真實呼叫端——用 codex／agy 接手工作，
+    分擔 Claude 的壓力與使用額度。
+    """
+    這次 = _問的前置(參數)
+    if isinstance(這次, int):
+        return 這次
     try:
         with _開帳(參數) as 帳:
             答 = _建腦(
-                用,
+                這次.用,
                 Path(參數.執行檔) if 參數.執行檔 else None,
                 帳,
                 熔斷了=_這個專案誰熔斷了(_帳本目錄(參數), 啟用=參數.熔斷),
                 記全文=not 參數.不記全文,
             ).詢問(
-                提示,
+                這次.提示,
                 選項=呼叫選項(
-                    模型=模,
+                    模型=這次.模,
                     工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
                     逾時秒=參數.逾時,
-                    權限=可以做什麼,
+                    權限=這次.可以做什麼,
                     隔離設定=not 參數.不隔離設定,
                     續接=參數.續接,
                     保留對話=參數.保留對話 or bool(參數.續接),
@@ -190,15 +218,15 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
-    if 屍 is not None:
-        答 = 撿回殘骸(答, 屍)
+    if 這次.屍 is not None:
+        答 = 撿回殘骸(答, 這次.屍)
     if 參數.json:
         # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
         證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
         print(json.dumps(證據, ensure_ascii=False, indent=2))
     else:
         print(答.文字)
-    print(_摘要(用, 答), file=sys.stderr)
+    print(_摘要(這次.用, 答), file=sys.stderr)
     return _終局的退出碼[答.終局]
 
 
@@ -236,6 +264,62 @@ def _帳本目錄(參數: argparse.Namespace) -> Path:
     if 參數.帳本目錄:
         return Path(參數.帳本目錄)
     return 預設帳本目錄(在哪跑(None))
+
+
+#: 帳本檔名開頭的時戳格式。**跟 `帳本.新執行識別碼` 是同一個格式**——
+#: 兩邊走散的話，窗口過濾會靜默地濾掉全部（看起來像「從來沒花過」）。
+_檔名時戳 = "%Y%m%dT%H%M%SZ"
+
+
+def _預算先擋一下(參數: argparse.Namespace) -> int | None:
+    """超支就印原因並回退出碼，沒超回 None。**在打出去之前叫**——
+
+    打完再判就只是事後記錄，一塊錢都沒省。
+
+    兩個上限都沒給就是**不鎖**：「我主要是要看帳，但不要讓帳去把流程關閉。」
+    熔斷是這樣，預算也是這樣。
+    """
+    限 = 上限(token=參數.預算token, 美金=參數.預算美金)
+    if 限.token is None and 限.美金 is None:
+        return None
+    現在 = datetime.now(UTC)
+    try:
+        花 = 花了多少(
+            _窗口內的執行(_帳本目錄(參數), 現在=現在, 幾小時=參數.預算幾小時),
+            現在=現在,
+            幾小時=參數.預算幾小時,
+        )
+    except ValueError as 錯:
+        # **旗標給錯是用法錯誤（2），不是護欄生效（4）。** 壓成同一個碼的話，
+        # 外圈會把「人打錯字」當成「按設計停了」，然後去調上限。
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    擋 = 超支了嗎(花, 限)
+    if 擋 is None:
+        return None
+    print(f"預算鎖：{擋}", file=sys.stderr)
+    return 護欄碼
+
+
+def _窗口內的執行(帳本目錄: Path, *, 現在: datetime, 幾小時: float) -> list[摘要]:
+    """窗口內的執行摘要。**先用檔名的時戳濾，再開檔**——
+
+    檔名開頭就是 UTC 時戳，字典序就是時序，所以「三個月前那幾千次」
+    連開都不用開。每次呼叫前把整個專案的帳本讀完會變成新的成本漏洞。
+
+    讀不動的檔跳過（不是整段算不出來）：一筆壞掉就整個算不出來
+    等於沒有預算鎖。
+    """
+    if 幾小時 <= 0:
+        return []  # 由 `花了多少` 統一報錯，這裡不重複那句話
+    起點 = (現在 - timedelta(hours=幾小時)).strftime(_檔名時戳)
+    執行們 = []
+    for 檔 in 列出執行(帳本目錄):
+        if 檔.stem < 起點:
+            break  # 新的在前，遇到第一個舊的就不必再看了
+        with contextlib.suppress(OSError):
+            執行們.append(讀一次執行(檔))
+    return 執行們
 
 
 #: 熔斷往回看幾次執行。門檻是連續 3 次，看 10 次夠判斷而且讀得快。
@@ -475,14 +559,32 @@ def _工作流鎖(參數: argparse.Namespace) -> Path:
     return _已處理目錄(參數).parent / "工作流.鎖"
 
 
-def _工作流跑一輪(參數: argparse.Namespace) -> int:
-    """真正的那一輪。拆出來只為了讓鎖包住它，行為完全沒變。"""
-    工作目錄 = 在哪跑(參數.工作目錄)
-    進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
+def _工作流開跑前(參數: argparse.Namespace, 工作目錄: Path, 進度檔: Path | None) -> int | None:
+    """開跑前的兩道檢查。**回退出碼 ＝ 別跑了。**
+
+    **順序有意義**：用法錯誤（2）先講完，再談護欄（4）。指令本身打錯的時候
+    先說「超支了」，會把人帶去調上限——而真正的問題是那行指令。
+
+    **排程自己跑的是工作流，不是 `nova 問`**：預算鎖只接在 `問` 上的話，
+    它剛好在最需要它的那條路徑上不存在。
+
+    從簡: 只在開跑前查一次跨執行預算。跑到一半超支由工作流自己的
+    token stop rule 收，所以缺口的上界就是那一輪的上限，不是無限。
+    """
     擋住 = _工作流前置檢查(參數, 工作目錄, 進度檔)
     if 擋住 is not None:
         print(擋住, file=sys.stderr)
         return 阻擋
+    return _預算先擋一下(參數)
+
+
+def _工作流跑一輪(參數: argparse.Namespace) -> int:
+    """真正的那一輪。拆出來只為了讓鎖包住它，行為完全沒變。"""
+    工作目錄 = 在哪跑(參數.工作目錄)
+    進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
+    擋 = _工作流開跑前(參數, 工作目錄, 進度檔)
+    if 擋 is not None:
+        return 擋
     題 = _這次要做什麼(參數)
     if isinstance(題, int):
         return 題
