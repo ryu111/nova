@@ -13,7 +13,16 @@ import sys
 from pathlib import Path
 from typing import cast
 
-from nova.契約.工作流 import 任務, 執行器, 步驟結果, 結束代碼, 階段定義
+from nova.契約.工作流 import (
+    任務,
+    停止條件,
+    執行器,
+    步驟結果,
+    結束代碼,
+    階段定義,
+    預設最多token,
+    預設最多步數,
+)
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
@@ -217,7 +226,7 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     果 = 跑工作流(
         任務(描述=描述, 工作目錄=工作目錄),
         執行一步=_邊跑邊印(執行),
-        最多步數=參數.最多步數,
+        停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
     )
     for 步 in 果.軌跡:
         print(f"[{步.階段.value}] {步.終局.value}\n{步.證據}\n")
@@ -297,7 +306,15 @@ def 建剖析器() -> argparse.ArgumentParser:
     流剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
     流剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
     流剖析.add_argument("--執行檔", default=None, help="--用 那家 CLI 的絕對路徑")
-    流剖析.add_argument("--最多步數", type=int, default=12, help="停止條件：走幾步就強制停")
+    流剖析.add_argument(
+        "--最多步數", type=int, default=預設最多步數, help="停止條件：走幾步就強制停"
+    )
+    流剖析.add_argument(
+        "--最多token",
+        type=int,
+        default=預設最多token,
+        help="停止條件：累計花到這麼多 token 就不再發下一次呼叫",
+    )
     流剖析.set_defaults(執行=_子命令_工作流)
 
     return 剖析器

@@ -80,6 +80,15 @@ class 用量:
     思考token: int | None = None
     成本美金: float | None = None
 
+    @property
+    def 總token(self) -> int:
+        """預算要拿來加總的那個數。
+
+        只加輸入與輸出：思考 token 三家都算在輸出裡，快取讀取是另一種計價
+        （而且不是每家都給）。**把不確定的東西加進總數，得到的是猜測不是預算。**
+        """
+        return self.輸入token + self.輸出token
+
 
 @dataclass(frozen=True, slots=True)
 class 回應:

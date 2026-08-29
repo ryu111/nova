@@ -146,6 +146,27 @@ class Test派工:
             "review",
         ]
 
+    def test_預算用完就一步都不准跑(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+        """`最多token` 擋在**發呼叫之前**——事後才發現超支，錢已經花掉了。
+
+        給 0 是最乾淨的證明：連第一次呼叫都不該發出去，所以假 CLI 的紀錄檔不會存在。
+        """
+        做事的, 做事紀錄 = 做假CLI("codex")
+        審查的, _ = 做假CLI("agy", "agy_review_pass.json")
+        果 = nova.派工(
+            "做點事",
+            用="codex",
+            審查用="agy",
+            工作目錄=tmp_path,
+            判準指令=[str(_翻牌判準(tmp_path))],
+            執行檔=做事的,
+            審查執行檔=審查的,
+            最多token=0,
+        )
+        assert 果.結束.代碼.value == "aborted", 果.結束.原因
+        assert "token" in 果.結束.原因
+        assert not 做事紀錄.exists(), "預算是 0 卻還是叫了模型"
+
     def test_執行檔不准誤用到審查那家(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
         """`執行檔` 是給 `用` 那家的。拿它去跑 `審查用` 那家＝跑錯二進位。
 

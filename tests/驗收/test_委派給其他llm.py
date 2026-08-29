@@ -117,6 +117,23 @@ def test_不認得的家要當場報錯(假CLI: Path) -> None:
     assert "不存在的家" in 結果.stderr
 
 
+def test_工作流有token預算這個旋鈕() -> None:
+    """成本上限要在命令列上看得見——藏在程式碼裡的預設值，使用者沒辦法調。
+
+    行為本身由 `tests/整合/test_門面.py::test_預算用完就一步都不准跑` 背書；
+    這裡只守「這個旋鈕沒有在某次重構裡消失」。
+    """
+    結果 = subprocess.run(
+        [str(nova執行檔), "工作流", "--help"],
+        cwd=專案根目錄,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert 結果.returncode == 0
+    assert "--最多token" in 結果.stdout
+
+
 class Test工作流的換腦保證:
     """自己審自己等於沒審——硬規則 4。這條從文件變成機械保證。"""
 
