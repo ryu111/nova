@@ -33,6 +33,43 @@ _模型關鍵詞 = (
 )
 _認證關鍵詞 = ("authentication", "unauthorized", "invalid api key", "not logged in")
 
+#: 額度／配額用完的字樣。出處：openai/codex issue #38603 貼出實際重現指令與輸出。
+#:
+#: **只挑穩定片段**——原文帶著「try again at Sep 13th, 2026 7:11 PM」這種
+#: 動態日期，整句拿來比對永遠不會命中。
+#:
+#: **claude 與 agy 的字串還沒查到**（那份研究只跑完 codex 就停了）。
+#: 空著比編一個好：編出來的規則讓分類器看起來有在守，而其實永遠不命中。
+_額度關鍵詞 = ("hit your usage limit", "usage limit reached", "quota exceeded")
+
+#: 權限／沙箱擋下來的字樣。**每一條都有實跑證據**，不是想像出來的：
+#:
+#: - `auto-denied`、`permission that headless mode` —— agy 的 headless 權限系統
+#:   （原文：`a tool required the "read_url" permission that headless mode
+#:   cannot prompt for, so it was auto-denied.`）
+#: - `operation not permitted` —— codex 的 `workspace-write` 沙箱（設計文件 02 有貼原文）
+#: - `permission denied` —— POSIX 的通用講法，走 shell 的工具都可能吐這句
+#:
+#: **不准憑想像加字串**：加一條永遠不會命中的規則，比沒有更糟——
+#: 它讓分類器看起來有在守，而其實沒有。
+_權限關鍵詞 = (
+    "auto-denied",
+    "permission that headless mode",
+    "operation not permitted",
+    "permission denied",
+)
+
+#: 關鍵詞 → 失敗代碼。**加一種分類＝加一列，不是回來改 if 鏈**（開放封閉）。
+#:
+#: **順序有意義**：先命中的先贏。認證擺在額度前面，因為「額度用完」的訊息
+#: 有時候也帶著帳號字樣，而認證是更靠近源頭的判斷。
+_關鍵詞表: tuple[tuple[tuple[str, ...], 失敗代碼], ...] = (
+    (_模型關鍵詞, 失敗代碼.模型不存在),
+    (_認證關鍵詞, 失敗代碼.認證),
+    (_額度關鍵詞, 失敗代碼.額度耗盡),
+    (_權限關鍵詞, 失敗代碼.權限被擋),
+)
+
 # HTTP 狀態與「旗標用錯」的結束碼。抽成常數是 ruff PLR2004 要求，
 # 順便讓「哪個數字代表什麼」只寫一次。
 _未授權, _禁止, _找不到, _太多請求, _伺服器錯誤起點 = 401, 403, 404, 429, 500
@@ -78,10 +115,9 @@ def _分類(結束碼: int, http狀態: int | None, 訊息: str) -> 失敗代碼
     if 結束碼 == _旗標用錯的結束碼:
         return 失敗代碼.用法錯誤
     低 = 訊息.lower()
-    if any(詞 in 低 for 詞 in _模型關鍵詞):
-        return 失敗代碼.模型不存在
-    if any(詞 in 低 for 詞 in _認證關鍵詞):
-        return 失敗代碼.認證
+    for 詞們, 代碼 in _關鍵詞表:
+        if any(詞 in 低 for 詞 in 詞們):
+            return 代碼
     if http狀態 is not None:
         return _由http狀態分類(http狀態)
     return 失敗代碼.未知
@@ -238,7 +274,23 @@ def _補上診斷(答: 回應, 標準錯誤: str) -> 回應:
     診斷 = 標準錯誤.strip()
     if not 診斷:
         return 答
-    return replace(答, 文字=診斷[:診斷上限])
+    # stderr 是**第一次**有真的文字可以分類——`_分類` 先前只看得到 stdout，
+    # 而失敗的時候 stdout 常常是空的。所以這裡要再分一次。
+    #
+    # **只從 `未知` 往上升。** 已經分出 `逾時`／`認證` 的不准被覆蓋：
+    # 那些是更靠近源頭的判斷（runner 自己的 deadline、HTTP 狀態），
+    # 拿一段 stderr 的字串比對去蓋掉它們是往下降不是往上升。
+    代碼 = 答.失敗代碼
+    if 代碼 is 失敗代碼.未知:
+        代碼 = _分類(答.原始結束碼, None, 診斷)
+    if 代碼 is 答.失敗代碼:
+        return replace(答, 文字=診斷[:診斷上限])
+    # 代碼變了，終局就要跟著重算——**由 `終局表` 決定，不是在這裡臨場判**。
+    # 這會把某些「結果未知」升成「確定失敗」（例如額度用完：請求被拒、
+    # 模型一個字都沒跑），而那個方向正是 at-most-once 最敏感的方向。
+    # 所以它必須由表決定：表裡每一列旁邊都寫著「為什麼這樣算」，
+    # 臨場判會讓那個理由散落在各處而且沒人守。
+    return replace(答, 文字=診斷[:診斷上限], 失敗代碼=代碼, 終局=終局判定(代碼))
 
 
 def _成功但沒話說算未知(答: 回應, 標準錯誤: str) -> 回應:
@@ -264,10 +316,15 @@ def _成功但沒話說算未知(答: 回應, 標準錯誤: str) -> 回應:
     # **stderr 優先於罐頭句。** 順序寫反過（先填罐頭再看 stderr）就等於
     # 用自己的填充句把真的證據擋在門外——那正是這條 bug 原本的樣子。
     診斷 = 標準錯誤.strip()
+    # 空回應這條路**不走 `_壞掉`**，所以分類要在這裡自己做一次。
+    # 少了這一行，agy 的 auto-deny 會永遠是 `unknown`——
+    # 而那正是「換腦沒用卻一直換」的那一格。
+    低 = 診斷.lower()
+    代碼 = 失敗代碼.權限被擋 if any(詞 in 低 for 詞 in _權限關鍵詞) else 失敗代碼.未知
     return replace(
         答,
         終局=終局.結果未知,
-        失敗代碼=失敗代碼.未知,
+        失敗代碼=代碼,
         文字=診斷[:診斷上限] if 診斷 else "CLI 回報成功但一個字都沒說——工具可能失敗了而錯誤被吞掉",
     )
 
