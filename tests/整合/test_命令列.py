@@ -264,4 +264,7 @@ class Test進度檔在工作目錄裡要被擋下來:
             "true",
             "隨便",
         )
-        assert 結果.returncode != 阻擋, 結果.stderr[:200]
+        # **斷言看訊息不看退出碼**——這一格被 CI 教過一次：
+        # CI 沒裝三家 CLI，建腦時 FileNotFoundError，一樣回 2。
+        # 退出碼在那裡是對的，只是不是這支測試在守的那件事。
+        assert "在工作目錄" not in 結果.stderr, 結果.stderr[:300]
