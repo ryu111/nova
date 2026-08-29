@@ -26,7 +26,7 @@ from nova.載體.判準 import 建判準
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
-from nova.載體.模型.轉接 import 家族, 建立
+from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.角色 import 固定提示角色
 from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
@@ -70,7 +70,12 @@ def _建腦(來源: 腦來源, 執行檔: 執行檔來源, 帳: 帳本) -> 語�
     會壓成一筆，換腦的原因整個消失。
     """
     家們 = _拆成家們(來源)
-    原始 = tuple(建立(cast(家族, 家), 執行檔=_找執行檔(家, 執行檔)) for 家 in 家們)
+    # 一串裡少裝一家不該讓整串垮掉——那正是接力要處理的事（見 `缺席腦`）。
+    # 只指定一家卻沒裝則是明確的設定錯誤，讓它炸。
+    原始 = tuple(
+        建立或缺席(cast(家族, 家), 執行檔=_找執行檔(家, 執行檔), 可以缺席=len(家們) > 1)
+        for 家 in 家們
+    )
     腦們 = 記帳每一顆(原始, 帳)
     if len(腦們) == 1:
         return 腦們[0]

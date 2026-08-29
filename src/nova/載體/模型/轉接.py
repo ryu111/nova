@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Literal
 
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局, 終局判定
-from nova.契約.角色 import 呼叫選項, 權限, 預設選項
+from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設選項
 from nova.載體.模型.執行 import 執行逾時, 跑cli
+from nova.載體.模型.接力 import 缺席腦
 from nova.載體.模型.解析 import 撿對話識別碼, 解析agy, 解析claude, 解析codex
 
 家族 = Literal["claude", "codex", "agy"]
@@ -335,3 +336,17 @@ def _補上認證提示(答: 回應, 家: str, 選項: 呼叫選項) -> 回應:
         return 答
     提示 = _認證提示.get(家)
     return replace(答, 文字=答.文字 + 提示) if 提示 else 答
+
+
+def 建立或缺席(家: 家族, *, 執行檔: Path | None, 可以缺席: bool) -> 語言模型:
+    """建一顆腦；`可以缺席` 時，沒裝的那家降級成 `缺席腦` 而不是丟例外。
+
+    **只有在鏈上才可以缺席。** 只指定一家卻沒裝是明確的設定錯誤，
+    早點炸比較好；一串裡少一家則正是接力要處理的事。
+    """
+    try:
+        return 建立(家, 執行檔=執行檔)
+    except FileNotFoundError as 錯:
+        if not 可以缺席:
+            raise
+        return 缺席腦(名稱=家, 原因=str(錯))
