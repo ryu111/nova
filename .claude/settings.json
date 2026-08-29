@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --no-sync --project \"$CLAUDE_PROJECT_DIR\" nova 檢查指令 --stdin",
+            "command": "uv run --no-sync --project \"$CLAUDE_PROJECT_DIR\" nova 檢查指令 --stdin || exit 2",
             "timeout": 15,
             "statusMessage": "nova 檢查指令"
           }
