@@ -248,44 +248,6 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 狀態機是**純函式轉移表**，所以測試零 LLM、零 token。**這不是圖層**：
 單一路徑加兩條回頭邊，屬迴圈七欄位的 action policy 與 stop rule。
 
-已做過的固定負控（證明防護真的會紅，不必重推）：
-
-| 破壞什麼 | 結果 |
-|---|---|
-| `mkdir nova`（破壞 src layout） | `test_採用_src_layout_而非_flat_layout` 紅 |
-| 從 `.gitignore` 拿掉 `.env` | `test_git_本人確認會忽略[.env]` 紅 |
-| 直接 `git push origin main` | 被 ruleset 擋下（`Changes must be made through a pull request`） |
-| 測試檔留了簡體字 | `nova 閘` 的 `lang-traditional` 紅，指到檔名行號 |
-| `規則表.py` import 沒排序 | `nova 閘` 的 `ruff-check` 紅，commit 被擋 |
-| 寫一個分支複雜度 9 的函式 | `ruff-check` 紅在 `C901 too complex (9 > 8)` |
-| 新增失敗代碼卻不進 `_終局表` | `test_每個失敗代碼都要有明確的終局` 紅（原本那支不會紅，靠負控才發現） |
-| `_成功但沒話說算未知` 改成直接 `return 答` | `Test成功但沒話說` 四支紅（空回應又被當成功） |
-| codex 可編輯換回 `--approve-for-me` | `test_codex的可編輯有真的邊界` 紅（真跑 CLI，檔案寫進家目錄） |
-| claude 唯讀工具白名單改回 `""` | `test_唯讀看得到工作目錄裡的檔案[claude]` 紅（連 Read 都沒了） |
-| agy 唯讀不給 `--add-dir` | `test_agy三種權限都要給add_dir` 紅；真跑則是審查員看不到檔案 |
-| 審查階段改回 `種類.模型` | `test_審查要求修改要退回實作` 與 `test_審查沒給判定一律中止` 紅 |
-| `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
-| gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
-| gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |
-| 把 `test_repo檢查.py` 搬回 `tests/單元/` | `test_單元層不准fork子程序` 紅，指到檔名與痕跡 |
-| 解析 claude 時改看 `subtype` 而非 `is_error` | `test_模型不存在_不准看subtype` 紅（實錄裡失敗案例的 `subtype` 也是 `"success"`） |
-| 把 `timeout` 的終局改成 `failed` | `test_可能已經做了一半的是結果未知[timeout]` 紅 |
-| 新增失敗代碼但不進 `_終局表` | `test_每個失敗代碼都要有明確的終局` 紅 |
-| 把 `驗證紅` 的期望改成綠 | 狀態機與工作流共 9 支紅 |
-| 把 `跑工作流` 的步數上限拿掉 | `test_來回不停會撞到步數上限` **掛住跑不完**（證明沒有 stop rule 就是成本漏洞） |
-| 讓驗證階段改由角色做（自寫自評） | `test_判準階段的步驟結果帶紅綠模型階段不帶` 等 4 支紅 |
-| 某條閘忘了排除 `真cli` 標記 | `test_兩個閘都排除真cli` 紅 |
-| 讓 `--審查用` 可以跟 `--用` 同一家 | `test_審查用不能跟用同一家` 紅 |
-| `派工` 讓兩家共用同一個 `執行檔` | `test_執行檔不准誤用到審查那家` 紅 |
-| 門面多匯出一個名字 | `test_門面很小` 紅 |
-| 平行度改回 `-n auto` | `test_規則表用的是算出來的數字不是auto` 紅 |
-| `平行成數` 改成 1.0（吃滿） | `test_不會吃滿` 等 5 支紅 |
-| 接力在可編輯下遇到結果未知也換腦 | `test_結果未知在可編輯時不准換` 等 2 支紅 |
-| 接力全掛時不留「試過誰」的證據 | `test_全部失敗要留下試過誰的證據` 等 2 支紅 |
-| 逾時預設調回 300 秒 | `test_預設夠寬` 紅 |
-| 文件提到一支不存在的測試 | `test_文件提到的測試都真的存在` 紅 |
-| codex 的 `-c` 值沒包引號（TOML 解析不出來） | `test_codex的推理強度值是合法TOML` 紅 |
-| claude 的隔離換回 `--bare` | `test_claude用setting_sources隔離而不是bare` 紅 |
-| codex 續接時仍給 `--sandbox` | `test_codex續接時不准給sandbox或核准旗標` 紅 |
-| 解析器改回嚴格 JSON | `test_response裡有原始換行也解得動` 紅 |
-| 禁令改回「拆不開一律擋」 | `test_拆不開但沒有禁令要放行` 紅 |
+做過的固定負控整理在 [`docs/負控紀錄.md`](docs/負控紀錄.md)——**那些不必重推**，
+懷疑某條防護時照著「破壞什麼」那欄做一次就好。新增保證時做一次負控、寫進 commit 訊息、
+在那份檔補一列，**不要加到本檔**（理由：[`docs/決策/0001-規則要住哪一層.md`](docs/決策/0001-規則要住哪一層.md)）。
