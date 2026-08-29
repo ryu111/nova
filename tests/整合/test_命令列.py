@@ -7,6 +7,8 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ from nova.載體.命令列 import (
     _濾掉熔斷的,
     _階段的工作種類,
     _階段的派法,
+    主程式,
     放行,
     未知,
     處理們,
@@ -32,6 +35,8 @@ from nova.載體.命令列 import (
 from nova.載體.帳本 import 不記帳本
 from nova.載體.派工表 import 怎麼派
 from nova.迴圈.狀態機 import TDD階段表
+
+做假CLI型 = Callable[..., tuple[Path, Path]]
 
 nova執行檔 = Path(sys.executable).parent / "nova"
 專案根目錄 = Path(__file__).resolve().parent.parent.parent
@@ -411,3 +416,77 @@ class Test熔斷要真的改變行為:
         假.touch()
         腦 = _建腦("agy,codex", 假, 不記帳本())
         assert "→" in 腦.名稱, f"預設就把鏈濾掉了：{腦.名稱}"
+
+
+def _寫連續失敗帳(目錄: Path, 家: str = "codex", 次數: int = 3) -> None:
+    目錄.mkdir(parents=True, exist_ok=True)
+    現在字串 = datetime.now(UTC).isoformat()
+    for 序號 in range(次數):
+        識別 = f"20260830T000{序號}00Z-失敗{序號}"
+        檔 = 目錄 / f"{識別}.jsonl"
+        事件們 = [
+            {
+                "run": 識別,
+                "seq": 1,
+                "ts": 現在字串,
+                "event": "call_started",
+                "call": 1,
+                "family": 家,
+            },
+            {
+                "run": 識別,
+                "seq": 2,
+                "ts": 現在字串,
+                "event": "call_finished",
+                "call": 1,
+                "family": 家,
+                "outcome": "failed",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+        ]
+        檔.write_text(
+            "".join(json.dumps(事, ensure_ascii=False) + "\n" for 事 in 事件們),
+            encoding="utf-8",
+        )
+
+
+class Test跨執行熔斷預設關閉:
+    """跨執行熔斷預設關閉：看帳跟關流程是兩件事。
+
+    帳本要繼續記、繼續讀得到，但預設不准因為帳本裡的歷史而不去叫某一家腦；
+    只有使用者明確給了 `--熔斷` 旗標時才啟用過濾。
+    """
+
+    def test_預設不熔斷就算帳本有連續失敗也照樣叫(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 做假CLI: 做假CLI型
+    ) -> None:
+        """帳本只負責記與讀，不准在未明確指定 --熔斷 時自動阻擋呼叫。"""
+        帳本目錄 = tmp_path / "帳"
+        _寫連續失敗帳(帳本目錄, 家="codex", 次數=3)
+        假_codex, 紀錄_codex = 做假CLI("codex")
+        假_agy, _ = 做假CLI("agy")
+        monkeypatch.setattr(
+            "nova.載體.模型.轉接.找執行檔",
+            lambda 家, **_: 假_codex if 家 == "codex" else 假_agy,
+        )
+        碼 = 主程式(["問", "--用", "codex,agy", "--帳本目錄", str(帳本目錄), "在嗎"])
+        assert 碼 == 0
+        assert 紀錄_codex.exists(), "預設不開熔斷時，就算帳本有連續失敗也應該呼叫 codex"
+
+    def test_明確指定熔斷旗標時連續失敗的家會被濾掉(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, 做假CLI: 做假CLI型
+    ) -> None:
+        """只有在明確給了 --熔斷 時，連續失敗的家才會被熔斷濾掉並走下一家。"""
+        帳本目錄 = tmp_path / "帳"
+        _寫連續失敗帳(帳本目錄, 家="codex", 次數=3)
+        假_codex, 紀錄_codex = 做假CLI("codex")
+        假_agy, 紀錄_agy = 做假CLI("agy")
+        monkeypatch.setattr(
+            "nova.載體.模型.轉接.找執行檔",
+            lambda 家, **_: 假_codex if 家 == "codex" else 假_agy,
+        )
+        碼 = 主程式(["問", "--用", "codex,agy", "--帳本目錄", str(帳本目錄), "--熔斷", "在嗎"])
+        assert 碼 == 0
+        assert not 紀錄_codex.exists(), "明確指定 --熔斷 時，連續失敗的 codex 應該被濾掉"
+        assert 紀錄_agy.exists(), "接力鏈應該換下一顆 agy 執行"

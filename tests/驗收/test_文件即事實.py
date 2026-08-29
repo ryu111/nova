@@ -10,8 +10,10 @@
 讀的人會以為不用自己檢查。
 """
 
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -99,3 +101,36 @@ def test_文件提到的檔案都真的存在() -> None:
         if not (專案根目錄 / 路徑).exists()
     ]
     assert not 缺的, "文件宣稱存在但找不到的檔案：\n  " + "\n  ".join(缺的)
+
+
+def _路線圖節點() -> list[dict[str, Any]]:
+    """把路線圖裡內嵌的那份 JSON 讀出來。
+
+    它不是 Markdown，反引號那套抓不到——路徑住在 `"檔": [...]` 陣列裡。
+    """
+    原文 = (專案根目錄 / "docs" / "路線圖.html").read_text(encoding="utf-8")
+    找到 = re.search(r'<script[^>]*id="圖資料"[^>]*>(.*?)</script>', 原文, re.DOTALL)
+    assert 找到 is not None, "路線圖的圖資料區塊不見了，這支檢查會變成永遠綠的假保護"
+    節點 = json.loads(找到.group(1))["節點"]
+    assert isinstance(節點, list)
+    return 節點
+
+
+def test_路線圖有節點可以檢查() -> None:
+    assert len(_路線圖節點()) > 30, "抓不到路線圖節點，這支檢查會變成永遠綠的假保護"
+
+
+def test_路線圖指到的檔案都真的存在() -> None:
+    """路線圖每一格宣稱的實作檔必須存在。
+
+    這一格是被這次改動逼出來的：路線圖有 39 格、指到二十幾個路徑，
+    而 `test_文件提到的檔案都真的存在` 只掃 Markdown 的反引號，
+    **一條都掃不到**。搬了檔案沒改路線圖，圖會繼續宣稱它在那裡。
+    """
+    缺的 = [
+        f"{節點['id']} 指到 {路徑}"
+        for 節點 in _路線圖節點()
+        for 路徑 in 節點.get("檔", [])
+        if not (專案根目錄 / str(路徑)).exists()
+    ]
+    assert not 缺的, "路線圖宣稱存在但找不到的檔案：\n  " + "\n  ".join(缺的)
