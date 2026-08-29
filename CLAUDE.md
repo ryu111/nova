@@ -259,6 +259,7 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | codex 可編輯換回 `--approve-for-me` | `test_codex的可編輯有真的邊界` 紅（真跑 CLI，檔案寫進家目錄） |
 | claude 唯讀工具白名單改回 `""` | `test_唯讀看得到工作目錄裡的檔案[claude]` 紅（連 Read 都沒了） |
 | agy 唯讀不給 `--add-dir` | `test_agy三種權限都要給add_dir` 紅；真跑則是審查員看不到檔案 |
+| 審查階段改回 `種類.模型` | `test_審查要求修改要退回實作` 與 `test_審查沒給判定一律中止` 紅 |
 | `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
 | gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
 | gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |

@@ -67,10 +67,10 @@ def 假CLI群(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 def 做假CLI(假CLI群: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 做假CLI型:
     """回傳 (執行檔, 紀錄檔)。紀錄檔每支測試獨立，執行檔整個 session 共用。"""
 
-    def 做(家: str = "claude") -> tuple[Path, Path]:
+    def 做(家: str = "claude", 實錄檔: str | None = None) -> tuple[Path, Path]:
         紀錄 = tmp_path / f"{家}.json"
         鍵 = 家.upper()
-        monkeypatch.setenv(f"NOVA_FAKE_{鍵}_TRANSCRIPT", str(實錄目錄 / 成功實錄[家]))
+        monkeypatch.setenv(f"NOVA_FAKE_{鍵}_TRANSCRIPT", str(實錄目錄 / (實錄檔 or 成功實錄[家])))
         monkeypatch.setenv(f"NOVA_FAKE_{鍵}_RECORD", str(紀錄))
         return 假CLI群[家], 紀錄
 
@@ -125,7 +125,9 @@ class Test派工:
 
     def test_跑完一輪(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
         做事的, _ = 做假CLI("codex")
-        審查的, _ = 做假CLI("agy")
+        # 審查員一定要給判定，不然這一輪會被判成「沒給結論」而中止——
+        # 那正是 test_審查沒給判定一律中止 守的行為。
+        審查的, _ = 做假CLI("agy", "agy_review_pass.json")
         果 = nova.派工(
             "做點事",
             用="codex",
@@ -151,7 +153,7 @@ class Test派工:
         會讓 agy 跑 codex 的二進位——假 CLI 不會抱怨，真的跑才會爆。
         """
         做事的, 做事紀錄 = 做假CLI("codex")
-        審查的, 審查紀錄 = 做假CLI("agy")
+        審查的, 審查紀錄 = 做假CLI("agy", "agy_review_pass.json")
         nova.派工(
             "做點事",
             用="codex",
