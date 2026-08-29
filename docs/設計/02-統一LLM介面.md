@@ -119,7 +119,7 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 | 唯讀 | `--restricted --add-dir <工作目錄> --tools Read,Grep,Glob` | `--sandbox read-only` | `--mode plan --add-dir <工作目錄>`（**擋不住寫，見下**） |
 | 可編輯 | `--restricted --add-dir <工作目錄> --tools <清單> --allowedTools <同一份> --permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits --add-dir <工作目錄>` |
 | 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
-| 生圖 | ❌ 沒有 | ❌ 沒有 | 有 `generate_image` 工具，但 **headless 下不可用且會假回報成功**（見下節） |
+| 生圖 | ❌ 沒有 | ❌ 沒有 | `generate_image` **可用**，但只有**全開**權限下檔案才進得了工作目錄；可編輯下圖留在 `~/.gemini/.../brain/` 而 CLI 假回報成功（見下節） |
 | 隔離設定 | `--setting-sources ""` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
 | 續接對話 | `--resume <id>` | `exec resume <id>`（**子指令**，不吃 `--sandbox`） | `--conversation <id>` |
 | 對話落地 | 一律留 | 預設 `--ephemeral` 不留，**要續接得先關掉** | 一律留 |
@@ -374,16 +374,16 @@ agent_message  失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（
 
 ## 成功但沒話說＝結果未知
 
-實測 agy 的 `generate_image`（headless、`-p` 模式）：
+實測 agy 生圖（headless、`--print` 模式，可編輯權限）：
 
 ```
 tool  generate_image  ACTIVE
-tool  generate_image  ERROR
+tool  generate_image  ERROR        ← 這一行的歸屬後來證明是誤讀，見下一節
 RESULT  status= SUCCESS | response= '' | error= None
---- 檔案 --- （空的，find 全機也找不到任何新圖檔）
+--- 工作目錄 --- （空的）
 ```
 
-工具自己 `ERROR`，而 envelope 仍然是 `status: SUCCESS`、`error: null`、`response: ""`。
+envelope 是 `status: SUCCESS`、`error: null`、`response: ""`，工作目錄卻什麼都沒有。
 **診斷被整個吞掉，只剩一個空字串。** 照原本的解析器，這會回 `終局.成功`，
 上游於是以為圖生好了。
 
@@ -398,8 +398,53 @@ RESULT  status= SUCCESS | response= '' | error= None
 不必在三個地方各記一次。負控：把 `_成功但沒話說算未知` 改成直接 `return 答`，
 `Test成功但沒話說` 的四支立刻紅（已跑過）。
 
-**結論寫進能力表：agy 的生圖在 headless 模式不可用。** 不是「還沒試出正確用法」，
-是它會假回報成功——這比不能用更危險，所以要標在表上。
+## 生圖：原本的結論是錯的，而且錯在哪很值得記
+
+上一節第一版的結論是「**agy 的生圖在 headless 模式不可用**」，而且寫了
+「find 全機也找不到任何新圖檔」。**兩句都是錯的。**
+
+2026-08-29 拿 `--output-format stream-json` 把原始串流整段撈出來看，真相是：
+
+```
+generate_image  → 成功。圖產在 ~/.gemini/antigravity-cli/brain/<sid>/star_<ts>.jpg
+run_command     → 被擋。模型接著想用 sips 把 jpg 轉成 png 搬進工作目錄：
+                  {"error":{"type":"TOOL_ERROR",
+                   "message":"permission check failed for command \"sips ...\": user denied"}}
+envelope        → status: SUCCESS、error: null、response: ""
+```
+
+錯的是**後面那道 shell**，不是生圖。第一版看到 `ERROR` 就記到 `generate_image` 頭上，
+又只在工作目錄裡找檔案（圖在家目錄的隱藏目錄底下，`find` 的範圍根本沒涵蓋），
+兩個誤讀疊起來就變成一句斬釘截鐵的假結論。
+
+### 三種權限下的實測矩陣
+
+| 權限 | `generate_image` | 檔案落到哪 | nova 回什麼 |
+|---|---|---|---|
+| 唯讀（`--mode plan`） | **沒試**（見下方開放問題） | — | — |
+| 可編輯（`--mode accept-edits`） | ✅ 成功 | `~/.gemini/antigravity-cli/brain/<sid>/*.jpg`——**`--add-dir` 管不到它** | `結果未知`（空回應降級擋下） |
+| 全開（`--dangerously-skip-permissions`） | ✅ 成功 | ✅ **工作目錄**（實測 `star.png`、1,070,181 位元組、1024×1024） | `成功`，文字帶檔案路徑與大小 |
+
+用量參考：全開那次 50,694 → 1,607 token（含 12,188 快取讀取、903 思考）。
+生圖比純文字貴一個量級，**要不要開這條路是成本決定不是能力決定**。
+
+### 這件事真正的教訓
+
+不是「生圖能不能用」，是**空回應降級這條保證救了一次**。
+
+可編輯那次，CLI 說 `SUCCESS`、圖也真的產出來了，但工作目錄空空如也——
+如果解析器照 envelope 回「成功」，上游會以為圖在手上。降級成 `結果未知` 之後，
+呼叫端拿到的是「不知道發生什麼事」，於是有人去看原始串流，才挖出真相。
+
+**這條保證的正當性沒有因為誤記而動搖，反而被這次驗證了。** 改的只是註解裡
+錯誤的歸屬——誤記會讓下一個人去修錯的地方。
+
+### 開放問題（今晚沒驗）
+
+唯讀（`plan` 模式）擋不擋得住生圖？**傾向擋不住**：圖是寫到
+`~/.gemini/antigravity-cli/brain/` 而不是 workspace，唯讀的白名單管的是
+workspace 內的檔案工具。如果真的擋不住，那就是**唯讀權限的第四個破口**，
+要進 `docs/設計/02` 的權限表而不是這一節。下次驗。
 
 ## 已知缺口
 

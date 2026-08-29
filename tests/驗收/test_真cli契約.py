@@ -258,3 +258,33 @@ def test_唯讀看得到工作目錄裡的檔案(家: str, tmp_path: 路徑) -> 
         選項=呼叫選項(權限=權限.唯讀, 工作目錄=tmp_path, 逾時秒=300.0, 隔離設定=可以隔離設定[家]),
     )
     assert _暗號 in 答.文字, f"{家} 唯讀時讀不到工作目錄：{答.失敗代碼.value}／{答.文字[:250]}"
+
+
+@pytest.mark.真cli
+@pytest.mark.serial
+def test_agy生圖要全開權限檔案才進得了工作目錄(tmp_path: 路徑) -> None:
+    """記錄 agy 生圖的行為契約，不是記錄「它能不能生圖」。
+
+    實測（2026-08-29）：`generate_image` 本身在可編輯權限下就成功了，圖產在
+    `~/.gemini/antigravity-cli/brain/<sid>/*.jpg`——**`--add-dir` 管不到那裡**。
+    要把圖搬進工作目錄得再跑一道 shell（`sips` 轉檔），那道在可編輯下被權限擋掉，
+    CLI 卻仍回 `status: SUCCESS`、`response: ""`。
+
+    所以這支只驗**全開**這條路：圖真的落在工作目錄裡。可編輯那條的行為由
+    `tests/單元/test_模型解析.py::Test成功但沒話說` 背書（空回應降級成結果未知），
+    不必再燒一次 token。
+
+    這支很貴（實測 50,694 → 1,607 token）也看模型臉色——它得自己想到要轉檔。
+    紅了先看 `docs/設計/02-統一LLM介面.md` 的生圖矩陣，不要直接改斷言。
+    """
+    答 = 建立("agy", 執行檔=None).詢問(
+        f"用 generate_image 產生一張簡單的星星圖，"
+        f"然後把檔案複製到 {tmp_path}/star.png（需要轉檔就用 sips）。"
+        f"最後回報檔案路徑與大小。",
+        選項=呼叫選項(
+            權限=權限.全開, 工作目錄=tmp_path, 逾時秒=600.0, 隔離設定=可以隔離設定["agy"]
+        ),
+    )
+    圖檔 = [p for p in tmp_path.iterdir() if p.suffix.lower() in (".png", ".jpg", ".jpeg")]
+    assert 圖檔, f"全開權限下圖沒進工作目錄：{答.終局.value}／{答.文字[:300]}"
+    assert 圖檔[0].stat().st_size > 1000, f"檔案小得不像圖：{圖檔[0].stat().st_size} 位元組"

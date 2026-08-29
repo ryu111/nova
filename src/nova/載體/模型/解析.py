@@ -224,9 +224,16 @@ def _解析agy(標準輸出: str, 結束碼: int) -> 回應:
 def _成功但沒話說算未知(答: 回應) -> 回應:
     """CLI 說成功、卻一個字都沒回，那不是成功，是不知道發生什麼事。
 
-    實測（agy 的 `generate_image`）：模型呼叫工具、工具 `state: ERROR`，
+    實測（agy 生圖那一路）：模型先呼叫 `generate_image`（**成功**，圖產在
+    `~/.gemini/antigravity-cli/brain/<sid>/*.jpg`），再呼叫 `run_command` 想用
+    `sips` 轉檔搬出來，這一步被權限擋下——`{"error":{"type":"TOOL_ERROR",
+    "message":"permission check failed ... user denied"}}`。
     而 envelope 仍然是 `status: SUCCESS`、`error: null`、`response: ""`。
     診斷被整個吞掉，只剩一個空字串。
+
+    （2026-08-29 補正：原本這裡寫「`generate_image` 的 `state: ERROR`」，
+    抓原始串流之後確認錯的是後續那道 shell，不是生圖本身。**守則沒變**，
+    變的只是錯誤的歸屬——這種誤記會讓下一個人去修錯的地方。）
 
     這種情況只能是**結果未知**：工具動過了，做到哪不知道。
     當成功會讓上游以為事情辦完了；當確定失敗又會讓接力去重做副作用。
