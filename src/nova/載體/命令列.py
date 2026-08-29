@@ -70,6 +70,7 @@ from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
+from nova.載體.遮罩 import 遮罩
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 超支了嗎
@@ -794,7 +795,9 @@ def _歸檔成果(
         歸檔(
             成果(
                 執行識別碼=識別,
-                任務=題.描述.strip(),
+                # **使用者打進去的那句話也要遮**——它跟模型講的話一樣會落盤，
+                # 而且比模型那份活得更久（`已處理/` 沒有截斷也沒有輪替）。
+                任務=遮罩(題.描述.strip()).文字,
                 收場=果.結束.代碼.value,
                 退出碼=退出碼,
                 起=摘.起 if 摘 else "",

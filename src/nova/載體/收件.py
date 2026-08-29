@@ -35,6 +35,7 @@ from secrets import token_hex
 
 from nova.載體.帳本 import 專案識別
 from nova.載體.狀態 import 狀態根目錄
+from nova.載體.遮罩 import 遮罩
 
 _處理中 = "處理中"
 
@@ -151,7 +152,9 @@ def 完成一件(單: 收件單, *, 執行識別碼: str, 已處理: Path) -> Pa
     """
     已處理.mkdir(parents=True, exist_ok=True)
     落點 = 已處理 / f"{執行識別碼}.收件"
-    落點.write_text(單.任務, encoding="utf-8")
+    # **原文也要過遮罩。** 「原文」的意思是「當初丟進來的是什麼」，
+    # 不是「連憑證一起留一份」——而 `已處理/` 是躺在磁碟上直到有人刪掉的東西。
+    落點.write_text(遮罩(單.任務).文字, encoding="utf-8")
     單.處理中路徑.unlink(missing_ok=True)
     return 落點
 
