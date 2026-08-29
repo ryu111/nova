@@ -18,6 +18,8 @@ from nova.載體.剖析器 import 建剖析器
 from nova.載體.命令列 import (
     _哪幾家,
     _工作流退出碼,
+    _建腦,
+    _濾掉熔斷的,
     _階段的工作種類,
     _階段的派法,
     放行,
@@ -27,6 +29,7 @@ from nova.載體.命令列 import (
     閘紅,
     阻擋,
 )
+from nova.載體.帳本 import 不記帳本
 from nova.載體.派工表 import 怎麼派
 from nova.迴圈.狀態機 import TDD階段表
 
@@ -361,3 +364,50 @@ class Test子命令只准有一份登記來源:
         """名字只准出現在剖析器裡。第二份對照表就是這條 bug 的形狀。"""
         原始碼 = (專案根目錄 / "src" / "nova" / "載體" / "命令列.py").read_text(encoding="utf-8")
         assert "_子命令分派" not in 原始碼
+
+
+class Test熔斷要真的改變行為:
+    """純函式存在不等於熔斷存在——**沒有呼叫端的判斷只是 Evidence，不是 State**。
+
+    `docs/設計/06` 對持久化那格的判準原話是「有沒有任何一行程式碼會因為
+    帳本裡的東西改變行為」。`該跳過嗎` 剛做好時沒有任何呼叫端，
+    所以那一格還是空的。
+
+    接在哪：**建腦之前**。熔斷的意思是「不要打出去」，
+    等打完再判就只是事後記錄，一點都沒省。
+    """
+
+    def test_連續失敗的家會被從接力鏈裡拿掉(self) -> None:
+        鏈 = _濾掉熔斷的("agy,codex", lambda 家: 家 == "agy")
+        assert 鏈 == ["codex"], 鏈
+
+    def test_沒熔斷就原封不動(self) -> None:
+        """**這支防的是擋過頭**——濾錯了會讓正常的鏈少一顆備援。"""
+        assert _濾掉熔斷的("agy,codex", lambda _: False) == ["agy", "codex"]
+
+    def test_全部都熔斷時不准濾成空的(self) -> None:
+        """濾成空鏈等於「什麼都不能做」，那比讓它去撞牆更糟——
+
+        使用者拿到的會是「至少要指定一家」這種看不懂的錯誤，
+        而真正的原因（三家都連續失敗了）完全沒被講出來。
+        **寧可留最後一顆讓它去試，也不要無聲地把鏈清空。**
+        """
+        assert _濾掉熔斷的("agy,codex", lambda _: True) == ["codex"]
+
+    def test_建腦時真的會問熔斷(self, tmp_path: Path) -> None:
+        """**接線本身要有測試**——純函式在、但沒人叫，熔斷就不存在。
+
+        用一個「說每家都熔斷了」的假判斷：接線接上的話，
+        `agy,codex` 會被濾到只剩最後一顆，腦的名稱就不再是接力鏈的形狀。
+        """
+        假 = tmp_path / "假CLI"
+        假.touch()
+        腦 = _建腦("agy,codex", 假, 不記帳本(), 熔斷了=lambda _: True)
+        assert "→" not in 腦.名稱, f"還是接力鏈，代表沒問熔斷：{腦.名稱}"
+
+    def test_預設不熔斷任何一家(self, tmp_path: Path) -> None:
+        """**這支防的是預設值把熔斷寫死成開路。**"""
+        假 = tmp_path / "假CLI"
+        假.touch()
+        腦 = _建腦("agy,codex", 假, 不記帳本())
+        assert "→" in 腦.名稱, f"預設就把鏈濾掉了：{腦.名稱}"
