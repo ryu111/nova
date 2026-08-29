@@ -44,6 +44,7 @@ from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
+from nova.載體.進度 import 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
@@ -291,9 +292,14 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
                 },
                 跑判準=建判準(判準指令(參數.判準)),
             )
+            進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
+            # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
+            # 拆成兩個旗標的話，一定有人只給其中一個，然後以為自己接上了。
+            走過的 = "" if 進度檔 is None else 讀進度(進度檔)
+            內層 = _邊跑邊印(執行) if 進度檔 is None else 進度執行器(_邊跑邊印(執行), 進度檔)
             果 = 跑工作流(
-                任務(描述=描述, 工作目錄=工作目錄),
-                執行一步=記帳執行器(_邊跑邊印(執行), 帳),
+                任務(描述=描述, 工作目錄=工作目錄, 前情=走過的),
+                執行一步=記帳執行器(內層, 帳),
                 停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
                 起點=階段代碼(參數.起點),
             )
@@ -538,6 +544,11 @@ def _加委派類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
         "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
     )
     流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    流剖析.add_argument(
+        "--進度檔",
+        default=None,
+        help="跨輪的記憶：每跑完一階就寫進去，開跑前讀回來當前情。有模型全文，路徑自己挑",
+    )
     流剖析.add_argument(
         "--起點",
         default=階段代碼.測試.value,
