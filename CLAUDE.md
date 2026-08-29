@@ -32,6 +32,9 @@ uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過�
 python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門面：一次 import 就能用
 uv run nova 問 --用 codex "提示"                       # 委派一件事，分擔額度
 uv run nova 問 --用 codex,agy "提示"                   # 接力：前一顆失敗換下一顆
+uv run nova 問 --工作 routine "提示"                   # 照派工表挑：例行給 agy
+uv run nova 問 --工作 reasoning "提示"                 # 照派工表挑：推理給 sol
+uv run nova 帳本                                       # 看執行紀錄（誰被叫、花多少）
 uv run nova 問 --用 codex --模型 gpt-5.6-sol "提示"     # 高階推理（預設是 gpt-5.6-luna）
 uv run nova 問 --用 codex --保留對話 "提示"             # 留下 sid
 uv run nova 問 --用 codex --續接 <sid> "接下去問"       # 持久對話

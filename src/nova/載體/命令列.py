@@ -28,6 +28,7 @@ from nova.契約.工作流 import (
 from nova.契約.帳本 import 摘要
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
+from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目錄
@@ -35,6 +36,7 @@ from nova.載體.帳本讀取 import 列出執行, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
+from nova.載體.派工表 import 怎麼派
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
@@ -137,12 +139,16 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     if not 提示.strip():
         print("沒有提示可以問（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
+    挑法 = _挑腦(參數)
+    if 挑法 is None:
+        return 阻擋
+    用, 模 = 挑法
     try:
         with _開帳(參數) as 帳:
-            答 = _建腦(參數.用, Path(參數.執行檔) if 參數.執行檔 else None, 帳).詢問(
+            答 = _建腦(用, Path(參數.執行檔) if 參數.執行檔 else None, 帳).詢問(
                 提示,
                 選項=呼叫選項(
-                    模型=參數.模型,
+                    模型=模,
                     工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
                     逾時秒=參數.逾時,
                     權限=_挑權限(參數),
@@ -160,8 +166,26 @@ def _子命令_問(參數: argparse.Namespace) -> int:
         print(json.dumps(證據, ensure_ascii=False, indent=2))
     else:
         print(答.文字)
-    print(_摘要(參數.用, 答), file=sys.stderr)
+    print(_摘要(用, 答), file=sys.stderr)
     return _終局的退出碼[答.終局]
+
+
+def _挑腦(參數: argparse.Namespace) -> tuple[str, str | None] | None:
+    """決定這次用哪條鏈、哪顆模型。回 None ＝ 參數矛盾，呼叫端該退出。
+
+    `--工作` 查派工表（策略寫在表裡不是寫在我腦裡）；`--用` 是手動指定。
+    **兩個都給是矛盾不是「其中一個優先」**——猜一個會讓策略被無聲推翻。
+    """
+    if 參數.工作 and (參數.用 or 參數.模型):
+        print("--工作 已經決定了要用誰跟哪顆模型，不要同時給 --用 或 --模型", file=sys.stderr)
+        return None
+    if 參數.工作:
+        派 = 怎麼派(工作種類(參數.工作))
+        return ",".join(派.腦們), 派.模型
+    if not 參數.用:
+        print("要給 --用（哪一家）或 --工作（照派工表挑）", file=sys.stderr)
+        return None
+    return 參數.用, 參數.模型
 
 
 def _挑權限(參數: argparse.Namespace) -> 權限:
@@ -343,8 +367,14 @@ def 建剖析器() -> argparse.ArgumentParser:
     問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
     問剖析.add_argument(
         "--用",
-        required=True,
+        default=None,
         help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+    )
+    問剖析.add_argument(
+        "--工作",
+        default=None,
+        choices=[種.value for 種 in 工作種類],
+        help="照派工表自動挑腦：routine 給 agy（分擔額度）、reasoning 給 sol",
     )
     問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
     問剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
