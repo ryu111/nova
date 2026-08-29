@@ -5,6 +5,7 @@
 
 import contextlib
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -18,7 +19,7 @@ from nova.契約.額度 import 家族額度, 快取轉快照, 視窗, 額度快�
 from nova.載體.模型 import 轉接
 from nova.載體.模型.執行 import 跑cli
 from nova.載體.狀態 import 狀態根目錄
-from nova.載體.程序 import 收割整棵
+from nova.載體.程序 import 具名啟動, 收割整棵
 
 _一天幾分 = 1440
 _一小時幾分 = 60
@@ -241,8 +242,10 @@ def 查詢codex額度(*, 截止秒: float = _codex截止秒) -> tuple[list[視�
     """向 codex app-server 查詢限額。回傳 (視窗清單, 錯誤訊息)。"""
     try:
         執行檔 = 轉接.找執行檔("codex")
+        啟動列, 角色標記 = 具名啟動(執行檔, ["app-server"])
         程序 = subprocess.Popen(  # noqa: S603
-            [str(執行檔), "app-server"],
+            啟動列,
+            env={**os.environ, "APP_ROLE": 角色標記},
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             # stderr 沒有人讀。開成管線的話，app-server 吐滿緩衝區就換它卡住——

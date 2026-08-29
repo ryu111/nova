@@ -389,9 +389,10 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "態": "好",
    "檔": [
     "src/nova/載體/程序.py",
-    "tests/整合/test_程序收割.py"
+    "tests/整合/test_程序收割.py",
+    "tests/整合/test_子程序有名字.py"
    ],
-   "註": "子程序一律 start_new_session 自成一組，逾時 killpg 整組 TERM→KILL。<b>活動監視器上的名字是另一件事</b>——kernel 在 exec 當下依執行檔路徑定名，事後改不了"
+   "註": "子程序一律 start_new_session 自成一組，逾時 killpg 整組 TERM→KILL。名字也治了：kernel 在 exec 當下依執行檔路徑定名、事後改不了，所以 python shebang 腳本改用直譯器的硬連結 <b>nova-&lt;角色&gt;</b> 去跑，活動監視器上不再是一片 python3.13。真二進位原封不動"
   },
   {
    "id": "成本",
