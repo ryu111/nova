@@ -84,12 +84,19 @@ claude / codex / agy           腦 + 一整套自帶載體（工具、session、
 
 | 要關掉 | claude | codex | agy |
 |---|---|---|---|
-| 工具 | `--allowedTools`／`--tools` 清空 | `--sandbox read-only` + `-a never` | `--mode plan` |
-| 家目錄設定 | 疑似 `--bare`（**語意未驗證**，見缺口 2） | `CODEX_HOME` 換掉 | `~/.gemini` 設定隔離未查 |
-| 自帶 system prompt | `--system-prompt ""` | 查不到 | 查不到 |
+| 工具 | `--tools <白名單>`＋`--allowedTools <同一份>` | `--sandbox read-only` | `--mode plan` |
+| 家目錄設定 | `--setting-sources ""` ＋ `--strict-mcp-config` | `--ignore-user-config --ignore-rules` | ❌ 查不到旗標，對 agy 是 no-op |
+| MCP server | `--strict-mcp-config`（`--tools` 管不到，見下） | 沒查 | 沒查 |
+| 自帶 system prompt | `--system-prompt ""`（**只換掉，關不掉**，見缺口 4） | 查不到 | 查不到 |
 
 **這張表每一格都要有測試背書**，不然「有沒有真的關掉」只能靠讀 code——
-依最高原則第一條，那等於沒有保證。目前只有 claude 那欄查證過部分，其餘是待辦。
+依最高原則第一條，那等於沒有保證。
+
+（2026-08-29 修正：這張表一度和實作對不上——寫著 `--bare`（那條現在是**明文禁止**，
+會弄壞訂閱登入）與 `CODEX_HOME`（實作根本沒用過這個環境變數）。
+**文件裡的旗標名稱沒有測試在守**，`test_文件提到的測試都真的存在` 只比對反引號裡的
+測試函式名，比不到旗標——所以這一格只能靠人看。改文件時要對著
+`src/nova/載體/模型/轉接.py` 現行實作抄，不要憑印象。）
 
 ### 那 `claude-agent-sdk` 呢？
 
@@ -112,7 +119,10 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 | `權限`（唯讀／可編輯／全開） | **唯讀** | 藏起來就是幫使用者做風險決策。預設最嚴——忘了設不會變成放行 |
 | `隔離設定`（要不要擋家目錄設定） | **True** | 讀了 `~/.claude/CLAUDE.md`，nova[claude] 就跟 nova[codex] 行為不同 |
 
-各家的落地（全部對著 `--help` 查證，而且 `-m 真cli` 真跑過）：
+各家的落地（全部對著 `--help` 查證，而且 `-m 真cli` 真跑過——
+**這句話一度是假的**：claude 的續接曾經只有墊片背書，2026-08-29 把它加進
+`test_記住sid就能續接同一段對話` 的 parametrize 才補實。宣稱有把關卻沒有，
+比沒有把關更糟，因為讀的人以為驗過了）：
 
 | | claude | codex | agy |
 |---|---|---|---|

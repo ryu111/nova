@@ -84,9 +84,16 @@ def test_claude隔離設定之後拿不到自動注入的指引(tmp_path: 路徑
 
 @pytest.mark.真cli
 @pytest.mark.serial
-@pytest.mark.parametrize("家", ["codex", "agy"])
+@pytest.mark.parametrize("家", 三家)
 def test_記住sid就能續接同一段對話(家: str) -> None:
-    """持久對話：第一輪留檔並記下 sid，第二輪帶回去接得上。"""
+    """持久對話：第一輪留檔並記下 sid，第二輪帶回去接得上。
+
+    **claude 一度不在這張清單裡**，而能力表卻寫著「全部…而且 `-m 真cli` 真跑過」。
+    那是「宣稱有把關卻沒有」——比沒有把關更糟，因為讀的人以為驗過了。
+    claude 那條原本只有整合層的墊片驗旗標形狀，而**墊片證明的是轉遞形狀，
+    不是可達性**：codex 的先例就是 resume 路徑吃不下 `--sandbox`（exit 2），
+    只有真跑才看得到。
+    """
     第一輪 = 建立(家, 執行檔=None).詢問(  # type: ignore[arg-type]
         "記住：我的暗號是芭樂。只回覆「記住了」",
         選項=呼叫選項(逾時秒=180.0, 保留對話=True, 隔離設定=可以隔離設定[家]),
