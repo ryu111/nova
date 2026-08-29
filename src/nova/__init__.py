@@ -21,8 +21,14 @@ from nova.契約.工作流 import (
     預設最多token,
     預設最多步數,
 )
-from nova.契約.模型回應 import 回應, 失敗代碼, 終局
-from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
+from nova.契約.模型回應 import 回應 as 回應
+from nova.契約.模型回應 import 失敗代碼 as 失敗代碼
+from nova.契約.模型回應 import 終局 as 終局
+from nova.契約.角色 import 呼叫選項, 語言模型, 預設逾時秒
+from nova.契約.角色 import 權限 as 權限
+from nova.契約.額度 import 家族額度 as 家族額度
+from nova.契約.額度 import 視窗 as 視窗
+from nova.契約.額度 import 額度快照 as 額度快照
 from nova.載體.判準 import 建判準
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
@@ -30,8 +36,10 @@ from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.角色 import 固定提示角色
 from nova.載體.階段記帳 import 記帳執行器
+from nova.載體.額度 import 查詢額度
 from nova.迴圈 import 角色提示
-from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
+from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
+from nova.迴圈.工作流 import 工作流結果 as 工作流結果
 
 #: `用` 可以給一家，也可以給一串（前一顆失敗就換下一顆）。
 #: 字串用逗號分隔也算一串，方便從命令列傳進來。
@@ -99,7 +107,33 @@ def _開帳(目錄: Path | None) -> Iterator[帳本]:
 
 
 __version__ = "0.1.0"
-__all__ = ["__version__", "問", "派工", "回應", "工作流結果", "終局", "失敗代碼", "權限"]
+__all__ = [
+    "__version__",
+    "問",
+    "派工",
+    "回應",
+    "工作流結果",
+    "終局",
+    "失敗代碼",
+    "權限",
+    "額度",
+    "額度快照",
+    "家族額度",
+    "視窗",
+]
+
+
+def 額度(
+    *,
+    最舊秒: float = 0.0,
+    每家: Callable[[家族額度], None] | None = None,
+) -> 額度快照:
+    """查詢 codex 與 agy 的訂閱限額快照。
+
+    每拿到一家的結果就立刻呼叫一次 `每家`。
+    快取比 `最舊秒` 新時直接從快取讀回。
+    """
+    return 查詢額度(最舊秒=最舊秒, 每家=每家)
 
 
 def 問(  # noqa: PLR0913 —— 公開簽章由門面規格固定

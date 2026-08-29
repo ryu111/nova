@@ -7,7 +7,6 @@ import contextlib
 import json
 import queue
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -15,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, TypedDict
 
+from nova.契約.額度 import 家族額度, 快取轉快照, 視窗, 額度快照
 from nova.載體.模型 import 轉接
 from nova.載體.狀態 import 狀態根目錄
 
@@ -325,33 +325,68 @@ def _快取年紀(檔: Path, 現在: float) -> float | None:
         return None
 
 
-def _寫入快取檔(家族清單: list[家族型]) -> None:
+def _寫入快取檔(家族清單: list[家族型], ts: int | None = None) -> None:
     """將查詢到的家族額度資料寫入狀態快取檔。"""
     快取檔 = 額度快取路徑()
     快取檔.parent.mkdir(parents=True, exist_ok=True)
     快取資料: 快取資料型 = {
-        "ts": int(datetime.now(UTC).timestamp()),
+        "ts": int(datetime.now(UTC).timestamp()) if ts is None else ts,
         "families": 家族清單,
     }
     快取檔.write_text(json.dumps(快取資料, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def 執行查詢額度(*, 最舊秒: float = 0.0) -> int:
+def _從快取讀(快取檔: Path, 每家: Callable[[家族額度], None] | None) -> 額度快照 | None:
+    """嘗試從快取檔讀取額度快照。讀取失敗回傳 None。"""
+    with contextlib.suppress(Exception):
+        快取資料 = json.loads(快取檔.read_text(encoding="utf-8"))
+        快照 = 快取轉快照(快取資料)
+        if 每家 is not None:
+            for 家 in 快照.家族們:
+                with contextlib.suppress(Exception):
+                    每家(家)
+        return 快照
+    return None
+
+
+def _查一家(
+    名稱: str, 家族代碼: str, 查詢函式: Callable[[], tuple[list[視窗型], str | None]]
+) -> tuple[家族額度, 家族型 | None]:
+    """查詢單一模型家族之額度。"""
+    視窗清單, 錯誤 = 查詢函式()
+    if 錯誤:
+        return 家族額度(家=名稱, 視窗們=(), 失敗原因=錯誤), None
+    短窗 = 短窗排前面(視窗清單)
+    視窗元組 = tuple(
+        視窗(
+            標籤=窗["label"],
+            用掉百分比=窗["used_percent"],
+            重置於=窗["resets_at"],
+        )
+        for 窗 in 短窗
+    )
+    return 家族額度(家=名稱, 視窗們=視窗元組, 失敗原因=None), {"family": 家族代碼, "windows": 短窗}
+
+
+def 查詢額度(
+    *,
+    最舊秒: float = 0.0,
+    每家: Callable[[家族額度], None] | None = None,
+) -> 額度快照:
     """查詢 codex 與 agy 額度並寫入快取。
 
-    `最舊秒` 是節流：快取比它新就什麼都不做、直接回 0。
-    **這一格刻意住在 nova 而不是叫的人那邊**——快取檔在哪、多久算舊，
-    都是 nova 的知識。散到呼叫端的設定檔裡就變成兩份，而且測不到。
-
-    退出碼：
-    - 兩家都成功（或快取還新、根本沒去問）回 0
-    - 任一家失敗回 1（成功的那家仍寫入快取）
+    `最舊秒` 是節流：快取比它新就直接讀回快取。
+    `每家` 每拿到一家的結果就立刻呼叫一次。
     """
-    if not 該重抓嗎(_快取年紀(額度快取路徑(), time.time()), 最舊秒):
-        return 0
+    快取檔 = 額度快取路徑()
+    if not 該重抓嗎(_快取年紀(快取檔, time.time()), 最舊秒):
+        快照 = _從快取讀(快取檔, 每家)
+        if 快照 is not None:
+            return 快照
 
+    現在秒 = int(datetime.now(UTC).timestamp())
     成功家族清單: list[家族型] = []
-    全部成功 = True
+    所有家族: list[家族額度] = []
 
     查詢清單: tuple[tuple[str, str, Callable[[], tuple[list[視窗型], str | None]]], ...] = (
         ("codex", "cx", 查詢codex額度),
@@ -359,15 +394,15 @@ def 執行查詢額度(*, 最舊秒: float = 0.0) -> int:
     )
 
     for 名稱, 家族代碼, 查詢函式 in 查詢清單:
-        視窗清單, 錯誤 = 查詢函式()
-        if 錯誤:
-            全部成功 = False
-            sys.stderr.write(f"[{名稱}] 失敗：{錯誤}\n")
-        else:
-            sys.stderr.write(f"[{名稱}] 成功取得額度\n")
-            成功家族清單.append({"family": 家族代碼, "windows": 短窗排前面(視窗清單)})
+        家, 成功資料 = _查一家(名稱, 家族代碼, 查詢函式)
+        if 成功資料 is not None:
+            成功家族清單.append(成功資料)
+        所有家族.append(家)
+        if 每家 is not None:
+            with contextlib.suppress(Exception):
+                每家(家)
 
     if 成功家族清單:
-        _寫入快取檔(成功家族清單)
+        _寫入快取檔(成功家族清單, ts=現在秒)
 
-    return 0 if 全部成功 else 1
+    return 額度快照(時間=現在秒, 家族們=tuple(所有家族))
