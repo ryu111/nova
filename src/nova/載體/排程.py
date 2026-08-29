@@ -137,7 +137,7 @@ def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: i
             "看不出是誰的 job。要指到 nova 自己那支"
         )
         raise ValueError(訊息)
-    標籤 = f"com.nova.{_標籤(專案)}"
+    標籤 = 排程標籤(專案)
     log目錄 = 狀態根 / "log"
     設定 = {
         "Label": 標籤,
@@ -161,7 +161,14 @@ def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: i
     return plistlib.dumps(設定, sort_keys=True).decode("utf-8")
 
 
-def _標籤(專案: Path) -> str:
-    """專案路徑 → 一段小寫 ASCII kebab。空的就退回 `project`。"""
+def 排程標籤(專案: Path) -> str:
+    """這個專案的 launchd Label。**只准有這一份。**
+
+    印出來的安裝指令自己說「檔名要跟 Label 一致」，所以呼叫端不准自己再算一次
+    `專案.name.lower()`——專案名只要不是現成的小寫 ASCII（有空格、有大寫、有中文），
+    兩份就會對不上，而使用者照著做會得到一個 `launchctl load` 不動的檔案。
+
+    小寫 ASCII kebab，空的就退回 `project`。
+    """
     名 = _標籤字元.sub("-", 專案.name.lower()).strip("-")
-    return 名 or "project"
+    return f"com.nova.{名 or 'project'}"
