@@ -10,8 +10,9 @@ import argparse
 import dataclasses
 import json
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -39,6 +40,7 @@ from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.殘骸 import 加上寫檔指示, 撿回殘骸
 from nova.載體.派工表 import 怎麼派
+from nova.載體.熔斷 import 該跳過嗎
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
@@ -160,7 +162,12 @@ def _子命令_問(參數: argparse.Namespace) -> int:
         提示 = 加上寫檔指示(提示, 屍)
     try:
         with _開帳(參數) as 帳:
-            答 = _建腦(用, Path(參數.執行檔) if 參數.執行檔 else None, 帳).詢問(
+            答 = _建腦(
+                用,
+                Path(參數.執行檔) if 參數.執行檔 else None,
+                帳,
+                熔斷了=_這個專案誰熔斷了(_帳本目錄(參數)),
+            ).詢問(
                 提示,
                 選項=呼叫選項(
                     模型=模,
@@ -212,12 +219,69 @@ def _挑權限(參數: argparse.Namespace) -> 權限:
     return 權限.可編輯 if 參數.可編輯 else 權限.唯讀
 
 
-def _建腦(來源: str, 執行檔: Path | None, 帳: 帳本) -> 語言模型:
+def _帳本目錄(參數: argparse.Namespace) -> Path:
+    """這次要讀寫哪一份帳本。**寫端與讀端共用一個答案**——
+
+    兩邊各算一次的話，改了帳本落點只改到一邊，
+    症狀是「明明記了卻讀不到」，而那看起來像帳本壞了。
+    """
+    if 參數.帳本目錄:
+        return Path(參數.帳本目錄)
+    return 預設帳本目錄(在哪跑(None))
+
+
+#: 熔斷往回看幾次執行。門檻是連續 3 次，看 10 次夠判斷而且讀得快。
+_熔斷看幾次 = 10
+
+
+def _這個專案誰熔斷了(帳本目錄: Path) -> Callable[[str], bool]:
+    """讀這個專案的帳本歷史，做一個「這一家熔斷了嗎」的判斷。
+
+    **只讀最近幾次**：熔斷看的是「連續」，而歷史一長，
+    每次呼叫前都把整個專案的帳本讀完就變成新的成本漏洞。
+
+    讀不到帳本就一律不熔斷（fail-open）：**熔斷是省錢的最佳化，不是安全防護**。
+    讀不到就當沒事，比讓使用者卡在一個他不知道怎麼解的狀態好。
+    """
+    try:
+        檔們 = 列出執行(帳本目錄)[:_熔斷看幾次]
+        執行們 = [讀一次執行(檔) for 檔 in 檔們]
+    except OSError:
+        return lambda _: False
+    現在 = datetime.now(UTC)
+    return lambda 家: 該跳過嗎(執行們, 家, 現在) is not None
+
+
+def _濾掉熔斷的(來源: str, 熔斷了: Callable[[str], bool]) -> list[str]:
+    """把連續失敗的家從接力鏈裡拿掉。**在建腦之前濾**——
+
+    熔斷的意思是「不要打出去」，等打完再判就只是事後記錄，一點都沒省。
+
+    **不准濾成空的**：全部都熔斷時留最後一顆讓它去試。
+    清空會讓使用者拿到「至少要指定一家」這種看不懂的錯誤，
+    而真正的原因（每一家都連續失敗了）完全沒被講出來——
+    寧可撞牆一次拿到真的錯誤訊息。
+    """
+    家們 = [家.strip() for 家 in 來源.split(",") if 家.strip()]
+    留 = [家 for 家 in 家們 if not 熔斷了(家)]
+    return 留 or 家們[-1:]
+
+
+def _建腦(
+    來源: str,
+    執行檔: Path | None,
+    帳: 帳本,
+    *,
+    熔斷了: Callable[[str], bool] = lambda _: False,
+) -> 語言模型:
     """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。
 
     **記帳包在接力鏈裡面**——包在外面的話換腦這件事整個消失。
+
+    `熔斷了` 在**建腦之前**把連續失敗的家濾掉。預設不熔斷任何一家：
+    這一層是機構，判斷誰熔斷了是呼叫端的事（它才知道要讀哪個專案的帳本）。
     """
-    家們 = [家.strip() for 家 in 來源.split(",") if 家.strip()]
+    家們 = _濾掉熔斷的(來源, 熔斷了)
     if not 家們:
         訊息 = "至少要指定一家"
         raise ValueError(訊息)
@@ -287,8 +351,7 @@ def _開帳(參數: argparse.Namespace) -> Iterator[帳本]:
     if 參數.不記帳:
         yield 不記帳本()
         return
-    目錄 = Path(參數.帳本目錄) if 參數.帳本目錄 else 預設帳本目錄(在哪跑(None))
-    with 開帳本(目錄) as 帳:
+    with 開帳本(_帳本目錄(參數)) as 帳:
         yield 帳
 
 
@@ -421,7 +484,7 @@ def _子命令_帳本(參數: argparse.Namespace) -> int:
     **有讀取端才算補了證據**——只有寫端的帳本是寫檔案給沒人看。
     """
     # 讀端也要按專案：在哪個專案下指令，就看那個專案的帳。
-    目錄 = Path(參數.帳本目錄) if 參數.帳本目錄 else 預設帳本目錄(在哪跑(None))
+    目錄 = _帳本目錄(參數)
     if 參數.規則:
         return _印規則報表(統計規則(目錄), 目錄)
     檔們 = 列出執行(目錄)
