@@ -37,6 +37,13 @@ def _拆成家們(來源: 腦來源) -> list[str]:
     return 乾淨
 
 
+def _挑權限(*, 可編輯: bool, 全開: bool) -> 權限:
+    """全開蓋過可編輯。兩個都沒給就是唯讀——最嚴的那一邊當預設。"""
+    if 全開:
+        return 權限.全開
+    return 權限.可編輯 if 可編輯 else 權限.唯讀
+
+
 def _找執行檔(家: str, 執行檔: 執行檔來源) -> Path | None:
     """一條路徑＝整串都用它；一個對照表＝每家用自己的。"""
     if isinstance(執行檔, Mapping):
@@ -64,6 +71,7 @@ def 問(  # noqa: PLR0913 —— 公開簽章由門面規格固定
     模型: str | None = None,
     工作目錄: Path | None = None,
     可編輯: bool = False,
+    全開: bool = False,
     隔離設定: bool = True,
     逾時秒: float = 預設逾時秒,
     續接: str | None = None,
@@ -84,7 +92,7 @@ def 問(  # noqa: PLR0913 —— 公開簽章由門面規格固定
         選項=呼叫選項(
             模型=模型,
             工作目錄=工作目錄 or Path.cwd(),
-            權限=權限.可編輯 if 可編輯 else 權限.唯讀,
+            權限=_挑權限(可編輯=可編輯, 全開=全開),
             隔離設定=隔離設定,
             逾時秒=逾時秒,
             續接=續接,

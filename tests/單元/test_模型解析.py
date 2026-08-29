@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from nova.契約.模型回應 import 失敗代碼, 終局
 from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 
 實錄 = Path(__file__).resolve().parents[2] / "tests" / "整合" / "實錄"
@@ -117,3 +118,45 @@ class Test壞掉的輸出要fail_closed:
         """三家一致：不存在的旗標 → 結束碼 2（claude 是 1，見下方個別斷言）。"""
         答 = 解析("unknown flag\n", 2)  # type: ignore[operator]
         assert 答.失敗代碼 == "usage"
+
+
+_claude空回應 = (
+    '{"type":"result","subtype":"success","is_error":false,"result":"",'
+    '"session_id":"x","usage":{"input_tokens":1,"output_tokens":0}}'
+)
+_agy空回應 = (
+    '{"conversation_id":"x","status":"SUCCESS","response":"","error":null,'
+    '"usage":{"input_tokens":1,"output_tokens":0}}'
+)
+_codex沒說話 = (
+    '{"type":"thread.started","thread_id":"x"}\n'
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":0}}'
+)
+
+
+class Test成功但沒話說:
+    """CLI 說成功、卻一個字都沒回，那不是成功，是不知道發生什麼事。
+
+    實測（agy 的 `generate_image`）：模型呼叫工具、工具 `state: ERROR`，
+    而 envelope 仍然是 `status: SUCCESS`、`error: null`、`response: ""`。
+    診斷被整個吞掉。當成功會讓上游以為事情辦完了。
+    """
+
+    def test_claude空回應降成未知(self) -> None:
+        答 = 解析claude(_claude空回應, 0)
+        assert 答.終局 is 終局.結果未知
+        assert 答.失敗代碼 is 失敗代碼.未知
+
+    def test_agy空回應降成未知(self) -> None:
+        assert 解析agy(_agy空回應, 0).終局 is 終局.結果未知
+
+    def test_codex沒說話也降成未知(self) -> None:
+        assert 解析codex(_codex沒說話, 0).終局 is 終局.結果未知
+
+    def test_空白字元不算有說話(self) -> None:
+        只有空白 = _agy空回應.replace('"response":""', '"response":"  "')
+        assert 解析agy(只有空白, 0).終局 is 終局.結果未知
+
+    def test_有說話就照常成功(self) -> None:
+        有話 = _agy空回應.replace('"response":""', '"response":"好"')
+        assert 解析agy(有話, 0).終局 is 終局.成功

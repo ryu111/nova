@@ -30,6 +30,39 @@ from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 _claude可編輯工具 = "Read,Write,Edit,Bash,Grep,Glob"
 
 
+def _claude權限參數(選項: 呼叫選項) -> list[str]:
+    """三級權限各自要哪幾條旗標。抽出來是為了讓 `_claude組參數` 的分支數壓在門檻內。
+
+    可編輯這一級**三條缺一不可**，每一條都是被實測咬出來的：
+
+    | 旗標 | 少了它會怎樣 |
+    |---|---|
+    | `--tools <清單>` | 沒有 Write／Edit 可用 |
+    | `--allowedTools <同一份清單>` | 隔離設定之下卡在「pending approval」，一個字都寫不出來 |
+    | `--restricted --add-dir <工作目錄>` | 自己猜路徑，實測寫進了 nova 的 repo 根目錄 |
+
+    `--restricted` 的 help 原文寫明它 **refuses bypassPermissions**，
+    所以全開那一級不能帶它。
+    """
+    if 選項.權限 is 權限.唯讀:
+        return ["--tools", ""]  # help 原文：Use "" to disable all tools
+    if 選項.權限 is 權限.全開:
+        return ["--tools", _claude可編輯工具, "--dangerously-skip-permissions"]
+    界線 = ["--restricted"]
+    if 選項.工作目錄 is not None:
+        # 沒有工作目錄就沒有正確的值可填——寧可不加，也不要拿 cwd 去猜。
+        界線 += ["--add-dir", str(選項.工作目錄)]
+    return [
+        *界線,
+        "--tools",
+        _claude可編輯工具,
+        "--allowedTools",
+        _claude可編輯工具,
+        "--permission-mode",
+        "acceptEdits",
+    ]
+
+
 def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     """--bare 跳過 hooks／auto-memory／CLAUDE.md 自動探索；--system-prompt "" 拿掉自帶人格。
 
@@ -46,10 +79,7 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         參數 += ["--setting-sources", ""]
     if 選項.續接:
         參數 += ["--resume", 選項.續接]
-    if 選項.權限 is 權限.唯讀:
-        參數 += ["--tools", ""]  # help 原文：Use "" to disable all tools
-    else:
-        參數 += ["--tools", _claude可編輯工具, "--permission-mode", "acceptEdits"]
+    參數 += _claude權限參數(選項)
     參數 += ["--system-prompt", ""]  # 順便終結上面的變長參數，不要調換順序
     if 選項.模型:
         參數 += ["--model", 選項.模型]
@@ -83,11 +113,17 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         共通 += ["--ephemeral"]  # 不落地就續接不到
     if 選項.權限 is 權限.唯讀:
         共通 += ["--sandbox", "read-only"]
+    elif 選項.權限 is 權限.可編輯:
+        # **不要換成 `--approve-for-me`**（那兩條互斥，一起給會 exit 2）。
+        # 它的 help 原文是「Route approval requests through automatic review using
+        # the workspace-write sandbox」——**自動審核**，不是不准：實測叫它
+        # `printf > ~/x.txt`，模型說「這在工作區外需要額外權限」然後自己核准，exit 0。
+        # `--sandbox workspace-write` 才是真邊界（同一條指令 operation not permitted），
+        # 而且是三家裡唯一的 OS 層邊界。代價是沙箱同時關掉網路——裝套件要用全開。
+        共通 += ["--sandbox", "workspace-write"]
     else:
-        # 實測：`--sandbox` 與 `--approve-for-me` **互斥**，一起給會 exit 2。
-        # --approve-for-me 自己就是「用 workspace-write 沙箱自動核准」（help 原文）。
-        # 不用 --dangerously-bypass-approvals-and-sandbox——那條連沙箱都拿掉。
-        共通 += ["--approve-for-me"]
+        # 全開才用這條——它連沙箱都拿掉。
+        共通 += ["--dangerously-bypass-approvals-and-sandbox"]
     return ["exec", *共通, 提示]
 
 
@@ -99,6 +135,21 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     # agy 查不到設定隔離的旗標（見設計文件 02 缺口），所以 隔離設定 對它是 no-op。
     模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
     參數 = ["--output-format", "json", "--mode", 模式]
+    if 選項.權限 is 權限.全開:
+        參數 += ["--dangerously-skip-permissions"]
+    if 選項.權限 is not 權限.唯讀 and 選項.工作目錄 is not None:
+        # `--add-dir` 決定 agy 動得到哪個目錄，**而不是 cwd**。實測三件事：
+        #
+        # 1. 不給它：檔案工具寫到 `~/.gemini/antigravity-cli/scratch/`，而且照樣
+        #    回報 SUCCESS——模型沒說謊，它真的寫了，只是寫到別的地方。
+        # 2. 不給它而叫它讀 cwd 的檔案：工具被 headless 的權限系統 auto-deny，
+        #    回一個空的 response（`_成功但沒話說算未知` 會把它降成結果未知）。
+        # 3. 給它：讀寫都進 cwd。**但 `--mode plan` 擋不住寫**（實測，見設計文件 02）。
+        #
+        # 3 的意思是 agy 沒有真正的唯讀。所以唯讀這一級**故意不給 --add-dir**——
+        # nova 能保證的是「動不到工作目錄」，那條保證由 1 與 2 背書。
+        # 代價寫在 `test_agy唯讀不給add_dir是刻意的` 的 docstring 裡。
+        參數 += ["--add-dir", str(選項.工作目錄)]
     參數 += ["--model", 選項.模型 or agy預設模型]
     if 選項.續接:
         參數 += ["--conversation", 選項.續接]
