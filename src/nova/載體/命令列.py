@@ -37,6 +37,7 @@ from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
 from nova.載體.派工表 import 怎麼派
+from nova.載體.生圖 import 生圖, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
@@ -341,12 +342,55 @@ def _一次的細節(摘: 摘要) -> str:
     return "\n".join(行們)
 
 
+def _子命令_生圖(參數: argparse.Namespace) -> int:
+    """叫 agy 生一張圖，並且**自己確認檔案真的在**。
+
+    沒有權限旗標是刻意的：可編輯下這條路會靜默假成功
+    （見 `src/nova/載體/生圖.py` 的模組 docstring）。
+    """
+    描述 = " ".join(參數.描述) if 參數.描述 else sys.stdin.read()
+    if not 描述.strip():
+        print("沒有描述可以生（用參數給，或從 stdin 餵）", file=sys.stderr)
+        return 阻擋
+    目錄 = 在哪跑(參數.工作目錄)
+    try:
+        with _開帳(參數) as 帳:
+            果 = 生圖(
+                描述,
+                工作目錄=目錄,
+                執行檔=Path(參數.執行檔) if 參數.執行檔 else None,
+                逾時秒=參數.逾時,
+                帳=帳,
+            )
+    except (ValueError, FileNotFoundError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    for 圖 in 果.圖檔:
+        print(圖)
+    print(_摘要(生圖那家, 果.答), file=sys.stderr)
+    if not 果.圖檔:
+        print(果.答.文字.splitlines()[0], file=sys.stderr)
+    return _終局的退出碼[果.答.終局]
+
+
 def 建剖析器() -> argparse.ArgumentParser:
-    """建出 nova 的參數剖析器。抽出來是為了讓測試能不啟動程序就檢查介面。"""
+    """建出 nova 的參數剖析器。抽出來是為了讓測試能不啟動程序就檢查介面。
+
+    子命令按用途分三組加進去：**拆開不是為了好看，是 ruff `PLR0915` 會紅**
+    （一個函式 50 個語句），而那條規則說的是對的——一長串平鋪的
+    `add_argument` 沒有人讀得完。
+    """
     剖析器 = argparse.ArgumentParser(prog="nova", description="nova：把規則降到載體層執行")
     剖析器.add_argument("--根目錄", default=".", help="要檢查的 repo 根目錄")
     子 = 剖析器.add_subparsers(dest="子命令", required=True)
+    _加檢查類(子)
+    _加委派類(子)
+    _加觀測類(子)
+    return 剖析器
 
+
+def _加檢查類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """閘、檢查指令、檢查提交訊息——**不叫模型**的那些。"""
     閘剖析 = 子.add_parser("閘", help="在某個執行點上跑規則")
     閘剖析.add_argument("閘點", help="提交 或 ci")
     閘剖析.add_argument(
@@ -363,6 +407,9 @@ def 建剖析器() -> argparse.ArgumentParser:
     訊息剖析.add_argument("檔案", help="commit 訊息檔（git 會傳 .git/COMMIT_EDITMSG）")
     訊息剖析.set_defaults(執行=_子命令_檢查提交訊息)
 
+
+def _加委派類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """問、工作流——把事情交給別家 LLM CLI。"""
     問剖析 = 子.add_parser("問", help="把一件事委派給別家 LLM CLI（分擔額度）")
     問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
     問剖析.add_argument(
@@ -435,13 +482,25 @@ def 建剖析器() -> argparse.ArgumentParser:
     流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
     流剖析.set_defaults(執行=_子命令_工作流)
 
+
+def _加觀測類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    """帳本、生圖——看紀錄，以及只有 agy 有的那個能力。"""
     帳剖析 = 子.add_parser("帳本", help="看執行紀錄：誰被叫了、花多少、怎麼收場")
     帳剖析.add_argument("執行識別碼", nargs="?", default=None, help="不給就列出最近幾次")
     帳剖析.add_argument("--帳本目錄", default=None, help="從哪裡讀。預設 ~/.local/state/nova/帳本")
     帳剖析.add_argument("--最近", type=int, default=10, help="列出幾次（預設 10）")
     帳剖析.set_defaults(執行=_子命令_帳本)
 
-    return 剖析器
+    圖剖析 = 子.add_parser("生圖", help="叫 agy 生一張圖（三家裡只有它有）")
+    圖剖析.add_argument("描述", nargs="*", help="要生什麼。不給就從 stdin 讀")
+    圖剖析.add_argument("--工作目錄", default=None, help="圖要落在哪。預設是現在這個目錄")
+    圖剖析.add_argument("--執行檔", default=None, help="agy CLI 的絕對路徑")
+    圖剖析.add_argument("--逾時", type=float, default=預設逾時秒, help="秒。生圖比問話慢很多")
+    圖剖析.add_argument(
+        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
+    )
+    圖剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    圖剖析.set_defaults(執行=_子命令_生圖)
 
 
 def 主程式(argv: list[str] | None = None) -> int:
