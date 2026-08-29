@@ -10,6 +10,8 @@ import argparse
 import dataclasses
 import json
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -27,13 +29,16 @@ from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
+from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目錄
 from nova.載體.模型.接力 import 接力腦
+from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
 from nova.載體.閘 import 跑閘
+from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 
@@ -126,28 +131,27 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     這是統一介面的第一個真實呼叫端——用 codex／agy 接手工作，
     分擔 Claude 的壓力與使用額度。
     """
-    try:
-        模型 = _建腦(參數.用, Path(參數.執行檔) if 參數.執行檔 else None)
-    except (ValueError, FileNotFoundError) as 錯:
-        print(str(錯), file=sys.stderr)
-        return 阻擋
     提示 = " ".join(參數.提示) if 參數.提示 else sys.stdin.read()
     if not 提示.strip():
         print("沒有提示可以問（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
-
-    答 = 模型.詢問(
-        提示,
-        選項=呼叫選項(
-            模型=參數.模型,
-            工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
-            逾時秒=參數.逾時,
-            權限=_挑權限(參數),
-            隔離設定=not 參數.不隔離設定,
-            續接=參數.續接,
-            保留對話=參數.保留對話 or bool(參數.續接),
-        ),
-    )
+    try:
+        with _開帳(參數) as 帳:
+            答 = _建腦(參數.用, Path(參數.執行檔) if 參數.執行檔 else None, 帳).詢問(
+                提示,
+                選項=呼叫選項(
+                    模型=參數.模型,
+                    工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
+                    逾時秒=參數.逾時,
+                    權限=_挑權限(參數),
+                    隔離設定=not 參數.不隔離設定,
+                    續接=參數.續接,
+                    保留對話=參數.保留對話 or bool(參數.續接),
+                ),
+            )
+    except (ValueError, FileNotFoundError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
     if 參數.json:
         # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
         證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
@@ -165,19 +169,43 @@ def _挑權限(參數: argparse.Namespace) -> 權限:
     return 權限.可編輯 if 參數.可編輯 else 權限.唯讀
 
 
-def _建腦(來源: str, 執行檔: Path | None) -> 語言模型:
-    """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。"""
+def _建腦(來源: str, 執行檔: Path | None, 帳: 帳本) -> 語言模型:
+    """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。
+
+    **記帳包在接力鏈裡面**——包在外面的話換腦這件事整個消失。
+    """
     家們 = [家.strip() for 家 in 來源.split(",") if 家.strip()]
     if not 家們:
         訊息 = "至少要指定一家"
         raise ValueError(訊息)
-    腦們 = tuple(建立(cast(家族, 家), 執行檔=執行檔) for 家 in 家們)
+    原始 = tuple(建立(cast(家族, 家), 執行檔=執行檔) for 家 in 家們)
+    腦們 = 記帳每一顆(原始, 帳)
     return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
 
 
-def _建角色(來源: str, 執行檔: str | None, 系統提示: str, 可以做什麼: 權限) -> 固定提示角色:
-    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None)
+def _建角色(
+    來源: str, 執行檔: str | None, 系統提示: str, 可以做什麼: 權限, 帳: 帳本
+) -> 固定提示角色:
+    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None, 帳)
     return 固定提示角色(名稱=腦.名稱, 系統提示=系統提示, 腦=腦, 權限=可以做什麼)
+
+
+@contextmanager
+def _開帳(參數: argparse.Namespace) -> Iterator[帳本]:
+    """CLI **預設記帳**：它是程式不是函式庫，程式留執行紀錄是正常的。
+
+    而且 opt-in 的帳本等於沒有帳本——真的需要事後追查的那次，
+    通常就是沒想到要先打開它的那次。用 `--不記帳` 關掉。
+
+    預設落在 `預設帳本目錄()`，**刻意不在任何 repo 裡**：落在工作目錄的話，
+    被 nova 驅動的模型會順手把它 commit 進去。
+    """
+    if 參數.不記帳:
+        yield 不記帳本()
+        return
+    目錄 = Path(參數.帳本目錄) if 參數.帳本目錄 else 預設帳本目錄()
+    with 開帳本(目錄) as 帳:
+        yield 帳
 
 
 def _邊跑邊印(內層: 執行器) -> 執行器:
@@ -213,21 +241,21 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
         return 阻擋
 
     try:
-        執行 = 建TDD執行器(
-            測試=_建角色(參數.用, 參數.執行檔, 角色提示.測試員, 權限.可編輯),
-            實作=_建角色(參數.用, 參數.執行檔, 角色提示.實作員, 權限.可編輯),
-            審查=_建角色(參數.審查用, None, 角色提示.審查員, 權限.唯讀),
-            跑判準=建判準(判準指令(參數.判準)),
-        )
+        with _開帳(參數) as 帳:
+            執行 = 建TDD執行器(
+                測試=_建角色(參數.用, 參數.執行檔, 角色提示.測試員, 權限.可編輯, 帳),
+                實作=_建角色(參數.用, 參數.執行檔, 角色提示.實作員, 權限.可編輯, 帳),
+                審查=_建角色(參數.審查用, None, 角色提示.審查員, 權限.唯讀, 帳),
+                跑判準=建判準(判準指令(參數.判準)),
+            )
+            果 = 跑工作流(
+                任務(描述=描述, 工作目錄=工作目錄),
+                執行一步=記帳執行器(_邊跑邊印(執行), 帳),
+                停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
+            )
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
-
-    果 = 跑工作流(
-        任務(描述=描述, 工作目錄=工作目錄),
-        執行一步=_邊跑邊印(執行),
-        停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
-    )
     for 步 in 果.軌跡:
         print(f"[{步.階段.value}] {步.終局.value}\n{步.證據}\n")
     print(f"\n{果.結束.代碼.value}：{果.結束.原因}", file=sys.stderr)
@@ -295,6 +323,10 @@ def 建剖析器() -> argparse.ArgumentParser:
         action="store_true",
         help="讓它讀使用者家目錄的設定。claude 的 --bare 連 keychain 都不讀，訂閱登入要靠這個",
     )
+    問剖析.add_argument(
+        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
+    )
+    問剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
     問剖析.set_defaults(執行=_子命令_問)
 
     流剖析 = 子.add_parser("工作流", help="跑一輪 TDD：測試→驗證紅→實作→驗證綠→審查")
@@ -315,6 +347,10 @@ def 建剖析器() -> argparse.ArgumentParser:
         default=預設最多token,
         help="停止條件：累計花到這麼多 token 就不再發下一次呼叫",
     )
+    流剖析.add_argument(
+        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
+    )
+    流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
     流剖析.set_defaults(執行=_子命令_工作流)
 
     return 剖析器
