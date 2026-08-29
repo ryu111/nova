@@ -59,9 +59,13 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
   <h2>看哪一段</h2>
   <div class="鈕組" id="預設鈕"></div>
 
-  <h2>狀態</h2>
+  <h2>做到哪</h2>
   <div id="狀態勾"></div>
   <div class="統計" id="統計"></div>
+
+  <h2>現在能不能推</h2>
+  <div id="排勾"></div>
+  <div class="統計" id="排統計"></div>
 
   <h2>層</h2>
   <div id="層勾"></div>
@@ -223,11 +227,11 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "w": 160,
    "h": 46,
    "層": "閘",
-   "態": "半",
+   "態": "好",
    "檔": [
     ".claude/settings.json"
    ],
-   "註": "寫好了但本 session 沒生效——這正是「宣稱有把關卻沒有」"
+   "註": "三條禁令（--no-verify、--admin、gh pr merge 缺 --delete-branch）都由 nova 判，hook 只負責叫它。<b>fail-closed</b>：nova 起不來時 hook 回 2（擋），不是回 1（Claude Code 會當成非阻斷錯誤然後照跑）——那個洞踩過一次，由 tests/驗收/test_禁令不准fail_open.py 背書"
   },
   {
    "id": "人",
@@ -251,6 +255,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "觸發",
    "態": "無",
+   "排": "可做",
    "檔": []
   },
   {
@@ -263,6 +268,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "觸發",
    "態": "無",
+   "排": "可做",
    "檔": []
   },
   {
@@ -275,6 +281,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "觸發",
    "態": "無",
+   "排": "可做",
    "檔": []
   },
   {
@@ -287,6 +294,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "觸發",
    "態": "無",
+   "排": "押後",
    "檔": []
   },
   {
@@ -299,6 +307,8 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "核",
    "態": "無",
+   "排": "卡住",
+   "卡在": "任何一個無人觸發",
    "檔": []
   },
   {
@@ -311,6 +321,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "核",
    "態": "半",
+   "排": "可做",
    "檔": [
     "src/nova/契約/工作流.py"
    ],
@@ -326,6 +337,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "核",
    "態": "半",
+   "排": "決定",
    "檔": [
     "src/nova/載體/熔斷.py",
     "src/nova/載體/命令列.py"
@@ -358,6 +370,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 52,
    "層": "核",
    "態": "無",
+   "排": "可做",
    "檔": []
   },
   {
@@ -370,6 +383,8 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 52,
    "層": "核",
    "態": "半",
+   "排": "卡住",
+   "卡在": "③ 遮罩",
    "檔": [
     "src/nova/載體/帳本.py",
     "src/nova/載體/模型/記帳.py",
@@ -404,6 +419,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "核",
    "態": "半",
+   "排": "可做",
    "檔": [],
    "註": "欄位有了，但只印出來、沒落盤；而且只有 claude 給成本"
   },
@@ -471,6 +487,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "h",
    "態": "無",
+   "排": "押後",
    "檔": [],
    "註": "SDK 可以當 h（執行者），不能當載體（持有 ctx 的那層）。差別不在用不用，在 ctx 歸誰。<b>刻意不做</b>，跟圖層同一種押後：CLI 與 SDK 是同一個位置的兩種走法，CLI 是程序邊界、SDK 是行程內函式庫，而 SDK 只有 Anthropic 一家——給 claude 一個不同形狀的介面，三家同形的保證會開始長例外，而且現在沒有呼叫端（YAGNI）。<b>觸發條件</b>：nova 要自己接管工具派發（內圈），不再把整個內圈交給 claude 自己的迴圈跑。那才是 ctx 真的歸 nova 的完全形。注意這條鏈是單向的：你 → Claude Code（也是載體，只是別人的）→ nova → h → 模型，<b>沒有任何東西會叫回 UI</b>"
   },
@@ -484,6 +501,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "h",
    "態": "無",
+   "排": "可做",
    "檔": [],
    "註": "介面的基準形狀就是它——只有腦。它跑得動，才證明真的沒綁定任何一家"
   },
@@ -555,6 +573,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "落盤",
    "態": "半",
+   "排": "可做",
    "檔": [
     "src/nova/載體/熔斷.py"
    ],
@@ -891,6 +910,19 @@ const 節點 = 資料.節點, 連線 = 資料.連線;
 const 狀 = {好:"已完成", 半:"部分", 無:"未做"};
 const 色 = {好:"#4ADE80", 半:"#FBBF24", 無:"#F87171"};
 
+// **兩個軸，不是六種狀態。**「做到哪」與「現在能不能推」是獨立的：
+// 一格「部分」可能是可做，也可能卡在別人身上。混成一個欄位就分不出
+// 「還沒輪到」與「推不動」，而那兩件事該做的處置完全不同。
+const 排 = {可做:"可以做", 卡住:"還不能做", 押後:"刻意排後面", 決定:"這樣就是對的"};
+const 排色 = {可做:"#4ADE80", 卡住:"#F87171", 押後:"#9B938B", 決定:"#60A5FA"};
+const 排記 = {可做:"▶", 卡住:"⛔", 押後:"⏳", 決定:"✓"};
+const 排解 = {
+  可做:"沒有前置擋著，現在就能動手",
+  卡住:"有前置沒完成，卡在誰寫在格子裡",
+  押後:"不管能不能做都排到後面，觸發條件寫在格子裡",
+  決定:"停在這裡是人的決定，不是缺口——要動要先改主意",
+};
+
 const 線色 = {流:"#60A5FA", 事件:"#F87171", 呼叫:"#4ADE80"};
 const 線樣 = {流:"", 事件:"5 4", 呼叫:"8 4"};
 
@@ -912,12 +944,13 @@ const 預設 = {
   "已完成的殼": {層:["閘","契約"],                         態:["好","半","無"]},
 };
 
-const 態 = {層:{}, 態:{}, 註:[], 預設:"全部", 倍:1};
+const 態 = {層:{}, 態:{}, 排:{}, 註:[], 預設:"全部", 倍:1};
 層清單.forEach(l=>態.層[l.鍵]=true);
 Object.keys(狀).forEach(k=>態.態[k]=true);
+Object.keys(排).forEach(k=>態.排[k]=true);
 
 const 找 = id => 節點.find(n=>n.id===id);
-const 看得到 = n => 態.層[n.層] && 態.態[n.態];
+const 看得到 = n => 態.層[n.層] && 態.態[n.態] && (!n.排 || 態.排[n.排]);
 
 function 建側欄(){
   const 預設鈕 = document.getElementById("預設鈕");
@@ -926,6 +959,9 @@ function 建側欄(){
   document.getElementById("狀態勾").innerHTML = Object.entries(狀).map(([k,v])=>
     `<label class="勾"><input type="checkbox" ${態.態[k]?"checked":""} onchange="態.態['${k}']=this.checked;態.預設='';畫()">
      <span class="點" style="background:${色[k]}"></span>${v}</label>`).join("");
+  document.getElementById("排勾").innerHTML = Object.entries(排).map(([k,v])=>
+    `<label class="勾" title="${排解[k]}"><input type="checkbox" ${態.排[k]?"checked":""} onchange="態.排['${k}']=this.checked;態.預設='';畫()">
+     <span class="點" style="background:${排色[k]}"></span>${排記[k]} ${v}</label>`).join("");
   document.getElementById("層勾").innerHTML = 層清單.map(l=>
     `<label class="勾"><input type="checkbox" ${態.層[l.鍵]?"checked":""} onchange="態.層['${l.鍵}']=this.checked;態.預設='';畫()">${l.名}</label>`).join("");
 }
@@ -934,6 +970,8 @@ function 套預設(k){
   const p = 預設[k]; 態.預設 = k;
   層清單.forEach(l=>態.層[l.鍵] = p.層.includes(l.鍵));
   Object.keys(狀).forEach(s=>態.態[s] = p.態.includes(s));
+  // 預設只選層與態；排一律全開，不然切預設會莫名少格子。
+  Object.keys(排).forEach(k=>態.排[k] = true);
   建側欄(); 畫();
 }
 
@@ -990,6 +1028,7 @@ function 畫(){
       <circle cx="${n.x+13}" cy="${n.y+15}" r="4.5" fill="${c}"/>
       <text x="${n.x+26}" y="${n.y+19}" fill="#E8E3DD" font-size="12.5" font-weight="600">${n.標}</text>
       <text x="${n.x+12}" y="${n.y+36}" fill="#9B938B" font-size="10.5">${n.副}</text>
+      ${n.排 ? `<text x="${n.x+n.w-9}" y="${n.y+19}" text-anchor="end" fill="${排色[n.排]}" font-size="11" font-weight="700">${排記[n.排]}</text>` : ""}
     </g>`;
   });
 
@@ -1004,13 +1043,17 @@ function 更新統計(){
   const 數 = k => 全.filter(n=>n.態===k).length;
   document.getElementById("統計").innerHTML = Object.entries(狀).map(([k,v])=>
     `<div><b style="color:${色[k]}">${數(k)}</b>${v}</div>`).join("");
+  const 排數 = k => 全.filter(n=>n.排===k).length;
+  document.getElementById("排統計").innerHTML = Object.entries(排).map(([k,v])=>
+    `<div title="${排解[k]}"><b style="color:${排色[k]}">${排數(k)}</b>${v}</div>`).join("");
 }
 
 let 目前 = null;
 function 開窗(id){
   目前 = 找(id);
   document.getElementById("窗標").textContent = 目前.標;
-  document.getElementById("窗副").textContent = 目前.副 + (目前.註 ? " ── " + 目前.註 : "");
+  const 排字 = 目前.排 ? `${排記[目前.排]} ${排[目前.排]}` + (目前.卡在 ? `（卡在：${目前.卡在}）` : "") + " ── " : "";
+  document.getElementById("窗副").textContent = 排字 + 目前.副 + (目前.註 ? " ── " + 目前.註 : "");
   const 舊 = 態.註.find(z=>z.目標===id);
   document.getElementById("窗文").value = 舊 ? 舊.文 : "";
   document.getElementById("罩").classList.add("開");
