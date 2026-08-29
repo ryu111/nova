@@ -14,10 +14,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from nova.契約.帳本 import 一家的帳, 事件種類, 摘要
+from nova.契約.帳本 import 一家的帳, 一條規則的帳, 事件種類, 摘要
 
-_開始的 = {事件種類.呼叫開始.value, 事件種類.階段開始.value}
-_結束的 = {事件種類.呼叫結束.value, 事件種類.階段結束.value}
+_開始的 = {事件種類.呼叫開始.value, 事件種類.階段開始.value, 事件種類.規則開始.value}
+_結束的 = {事件種類.呼叫結束.value, 事件種類.階段結束.value, 事件種類.規則結束.value}
 _認得的 = _開始的 | _結束的
 
 
@@ -145,3 +145,28 @@ class _收集器:
             壞掉的行=self.壞行,
             總token=sum(家.輸入token + 家.輸出token for 家 in 各家),
         )
+
+
+def 統計規則(目錄: Path) -> tuple[一條規則的帳, ...]:
+    """把目錄裡所有帳本的規則事件跨執行加總。
+
+    **只算結束事件**：開始事件不代表跑完了，兩邊都算會讓次數變兩倍。
+
+    這是「這條規則有沒有在守東西」唯一的資料來源。在此之前 nova 的 9 條規則
+    一條都沒有觸發率資料——只能憑印象。
+    """
+    跑過: Counter[tuple[str, str]] = Counter()
+    紅過: Counter[tuple[str, str]] = Counter()
+    for 檔 in 列出執行(目錄):
+        for 行 in 檔.read_text(encoding="utf-8").splitlines():
+            事 = _解析(行)
+            if 事 is None or 事["event"] != 事件種類.規則結束.value:
+                continue
+            鍵 = (str(事.get("rule", "")), str(事.get("gate_point", "")))
+            跑過[鍵] += 1
+            if 事.get("gate_green") is False:
+                紅過[鍵] += 1
+    return tuple(
+        一條規則的帳(規則=規則, 閘點=閘點, 跑過=次, 紅過=紅過[規則, 閘點])
+        for (規則, 閘點), 次 in sorted(跑過.items())
+    )

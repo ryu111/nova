@@ -35,6 +35,10 @@ class 事件種類(StrEnum):
     呼叫結束 = "call_finished"
     階段開始 = "stage_started"
     階段結束 = "stage_finished"
+    #: 閘跑一條規則。**這是「哪條規則在守東西」唯一的資料來源**——
+    #: 從來不紅的規則是刪除候選，常紅的是該補指引的地方。
+    規則開始 = "rule_started"
+    規則結束 = "rule_finished"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +64,10 @@ class 事件:
     #: 與「同一顆被叫了兩次」。
     接力第幾顆: int | None = None
     階段: str | None = None
+    #: 閘跑的那條規則的代碼。
+    規則: str | None = None
+    #: 哪個閘點（提交／ci）。同一條規則在兩個閘點的觸發率可以差很多。
+    閘點: str | None = None
     終局: str | None = None
     失敗代碼: str | None = None
     輸入token: int | None = None
@@ -92,6 +100,8 @@ class 事件:
     "權限": "permission",
     "接力第幾顆": "attempt",
     "階段": "stage",
+    "規則": "rule",
+    "閘點": "gate_point",
     "終局": "outcome",
     "失敗代碼": "failure_code",
     "輸入token": "input_tokens",
@@ -129,6 +139,23 @@ class 一家的帳:
     未知: int
     輸入token: int
     輸出token: int
+
+
+@dataclass(frozen=True, slots=True)
+class 一條規則的帳:
+    """一條規則**跨執行**的紀錄。
+
+    一次執行看不出觸發率——每條規則一趟只跑一次。要跨執行加總才有意義：
+    從來不紅的是刪除候選，常紅的是該補指引的地方。
+
+    `閘點` 一起當鍵：同一條規則在提交閘與 CI 的觸發率可以差很多，
+    混在一起就看不出來。
+    """
+
+    規則: str
+    閘點: str
+    跑過: int
+    紅過: int
 
 
 @dataclass(frozen=True, slots=True)

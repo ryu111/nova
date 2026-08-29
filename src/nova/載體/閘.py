@@ -9,8 +9,11 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from time import monotonic
 
+from nova.契約.帳本 import 事件, 事件種類
 from nova.契約.檢查結果 import 檢查結果
+from nova.載體.帳本 import 不記帳本, 帳本
 
 檢查函式 = Callable[[], tuple[bool, str]]
 
@@ -49,6 +52,7 @@ def 跑閘(
     規則表: Sequence[規則],
     *,
     提前停止: bool = False,
+    帳: 帳本 | None = None,
 ) -> list[檢查結果]:
     """跑掛在這個閘點上的規則，依階段序列執行，回傳每一條的判定。
 
@@ -65,12 +69,26 @@ def 跑閘(
     適用 = [條 for 條 in 規則表 if 閘點 in 條.閘點]
     適用.sort(key=lambda 條: 條.階段)
 
+    記帳 = 帳 or 不記帳本()
     結果表: list[檢查結果] = []
     for 條 in 適用:
+        編號 = 記帳.新呼叫編號()
+        記帳.記一筆(事件(種類=事件種類.規則開始, 呼叫編號=編號, 規則=條.代碼, 閘點=閘點))
+        起 = monotonic()
         try:
             通過, 證據 = 條.檢查()
         except Exception as 錯:  # noqa: BLE001 —— 任何例外都算紅，這是刻意的
             通過, 證據 = False, f"規則自己爆了：{錯}"
+        記帳.記一筆(
+            事件(
+                種類=事件種類.規則結束,
+                呼叫編號=編號,
+                規則=條.代碼,
+                閘點=閘點,
+                判準綠=通過,
+                耗時毫秒=round((monotonic() - 起) * 1000),
+            )
+        )
         結果表.append(
             檢查結果(
                 代碼=條.代碼,
