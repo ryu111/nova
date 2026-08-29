@@ -17,6 +17,28 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def 不准摸到真的CLI(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """沒標 `真cli` 的測試不准解析到真的執行檔。**autouse，沒有例外。**
+
+    這是被一個真缺陷逼出來的：`--工作` 的互斥檢查一旦失效，
+    測試就會往下走到真的建腦——`reasoning` 那條會真的叫 sol。
+    實測拿掉那個檢查跑兩支測試要 22.5 秒，而且出了網路、燒了 token。
+    **測試在防護退化時的行為也是行為**，不能只看它平常綠不綠。
+
+    擋的是 `找執行檔`（找不到就往 PATH 撈的那條路），不是 `--執行檔`——
+    測試本來就該自己注入假 CLI；忘了注入才會掉到這裡。
+    """
+    if request.node.get_closest_marker("真cli"):
+        return
+
+    def 擋(家: str, **_: object) -> Path:
+        訊息 = f"測試不准去找真的 {家}：要嘛自己給執行檔，要嘛標 @pytest.mark.真cli"
+        raise FileNotFoundError(訊息)
+
+    monkeypatch.setattr("nova.載體.模型.轉接.找執行檔", 擋)
+
+
+@pytest.fixture(autouse=True)
 def 帳本不准寫到家目錄(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """把 `預設帳本目錄()` 整個導到暫存區。**autouse，沒有例外。**
 
