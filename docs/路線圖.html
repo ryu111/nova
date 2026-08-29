@@ -519,10 +519,12 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "w": 160,
    "h": 46,
    "層": "h",
-   "態": "無",
-   "排": "可做",
-   "檔": [],
-   "註": "介面的基準形狀就是它——只有腦。它跑得動，才證明真的沒綁定任何一家"
+   "態": "好",
+   "檔": [
+    "src/nova/載體/模型/本地.py",
+    "tests/整合/test_本地模型.py"
+   ],
+   "註": "介面的基準形狀就是它——只有腦。<b>它裝得進來就證明 語言模型 Protocol 是模型形狀不是 CLI 形狀</b>：形狀是 OpenAI 相容的 HTTP 端點（omlx-server／llama.cpp／ollama），走 urllib 不加相依。<b>做不到的事一律明講</b>——沒有工具就不准默默接受可編輯，那會讓工作流以為檔案改好了。成本回 0 不是 None：本地跑沒有 API 帳單，那是事實不是估算。實測 <code>nova 問 --用 local</code> 對真的 omlx-server 通了"
   },
   {
    "id": "回應",

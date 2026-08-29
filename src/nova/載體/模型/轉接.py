@@ -18,9 +18,14 @@ from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設選項
 from nova.載體.模型.執行 import 執行逾時, 跑cli
 from nova.載體.模型.接力 import 缺席腦
+from nova.載體.模型.本地 import 家族名 as 本地家族名
+from nova.載體.模型.本地 import 本地腦, 網址環境變數, 預設本地網址
 from nova.載體.模型.解析 import 撿對話識別碼, 解析agy, 解析claude, 解析codex
 
-家族 = Literal["claude", "codex", "agy"]
+#: `local` 是本機的 OpenAI 相容端點（omlx-server／llama.cpp／ollama），
+#: 形狀跟另外三家完全不同：它只有腦，沒有 CLI、沒有工具、沒有 session。
+#: **它裝得進來，就證明 `語言模型` Protocol 是模型形狀不是 CLI 形狀。**
+家族 = Literal["claude", "codex", "agy", "local"]
 預設候選目錄 = (Path.home() / ".local" / "bin",)
 
 組參數型 = Callable[[str, 呼叫選項], list[str]]
@@ -307,10 +312,30 @@ class 命令列模型:
         return _補上認證提示(答, self.名稱, 選項)
 
 
-def 建立(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
-    """做一個轉接器。`執行檔` 不給就照 `找執行檔` 的順序找。"""
+def 建立(家: 家族, *, 執行檔: Path | None = None) -> 語言模型:
+    """做一個轉接器。`執行檔` 不給就照 `找執行檔` 的順序找。
+
+    `local` 走的是 HTTP 不是子程序，所以它不吃 `執行檔`——
+    **不准為了三家對稱而假裝它有執行檔**，那會讓 `--執行檔` 看起來有效卻沒效。
+    """
+    if 家 == 本地家族名:
+        if 執行檔 is not None:
+            訊息 = f"{本地家族名} 走 HTTP 不吃 --執行檔，網址請用 {網址環境變數}"
+            raise ValueError(訊息)
+        return 本地腦(網址=預設本地網址())
+    return 建命令列(家, 執行檔=執行檔)
+
+
+def 建命令列(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
+    """只做 CLI 那三家。**回的是具體型別不是 Protocol。**
+
+    `命令列模型.詢問` 比 `語言模型` 多收一個 `環境`（整份取代子程序的環境），
+    而那是 CLI 才有的概念——本地模型走 HTTP，沒有子程序可以給環境。
+    需要那個參數（或 `組參數`）的呼叫端要明講自己要的是 CLI 這一種形狀，
+    **不要用 cast 從 `建立` 的回傳值硬轉**：那等於把型別檢查關掉。
+    """
     if 家 not in _規格:
-        可用 = "、".join(sorted(_規格))
+        可用 = "、".join(sorted([*_規格, 本地家族名]))
         訊息 = f"不認得的 LLM CLI：{家}（可用：{可用}）"
         raise ValueError(訊息)
     組, 析 = _規格[家]
