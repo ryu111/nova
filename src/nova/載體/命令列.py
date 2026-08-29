@@ -21,6 +21,7 @@ from nova.契約.工作流 import (
     執行器,
     步驟結果,
     結束代碼,
+    階段代碼,
     階段定義,
     預設最多token,
     預設最多步數,
@@ -292,6 +293,7 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
                 任務(描述=描述, 工作目錄=工作目錄),
                 執行一步=記帳執行器(_邊跑邊印(執行), 帳),
                 停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
+                起點=階段代碼(參數.起點),
             )
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
@@ -534,6 +536,12 @@ def _加委派類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
         "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
     )
     流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    流剖析.add_argument(
+        "--起點",
+        default=階段代碼.測試.value,
+        choices=[代碼.value for 代碼 in 階段代碼],
+        help="從哪個階段開始。refactor ＝ 只走重構流程（前提是本來就全綠）",
+    )
     流剖析.set_defaults(執行=_子命令_工作流)
 
 
