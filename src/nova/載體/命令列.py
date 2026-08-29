@@ -36,6 +36,7 @@ from nova.載體.帳本讀取 import 列出執行, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
+from nova.載體.殘骸 import 加上寫檔指示, 撿回殘骸
 from nova.載體.派工表 import 怎麼派
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
@@ -144,6 +145,13 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     if 挑法 is None:
         return 阻擋
     用, 模 = 挑法
+    可以做什麼 = _挑權限(參數)
+    屍 = Path(參數.輸出檔) if 參數.輸出檔 else None
+    if 屍 is not None:
+        if 可以做什麼 is 權限.唯讀:
+            print("--輸出檔 要它寫檔，就得給 --可編輯（或 --全開）", file=sys.stderr)
+            return 阻擋
+        提示 = 加上寫檔指示(提示, 屍)
     try:
         with _開帳(參數) as 帳:
             答 = _建腦(用, Path(參數.執行檔) if 參數.執行檔 else None, 帳).詢問(
@@ -152,7 +160,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
                     模型=模,
                     工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
                     逾時秒=參數.逾時,
-                    權限=_挑權限(參數),
+                    權限=可以做什麼,
                     隔離設定=not 參數.不隔離設定,
                     續接=參數.續接,
                     保留對話=參數.保留對話 or bool(參數.續接),
@@ -161,6 +169,8 @@ def _子命令_問(參數: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
+    if 屍 is not None:
+        答 = 撿回殘骸(答, 屍)
     if 參數.json:
         # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
         證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
@@ -459,6 +469,11 @@ def _加委派類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
         "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
     )
     問剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    問剖析.add_argument(
+        "--輸出檔",
+        default=None,
+        help="叫它邊做邊寫進這個檔。逾時被殺之後還撿得回進度（要搭 --可編輯）",
+    )
     問剖析.set_defaults(執行=_子命令_問)
 
     流剖析 = 子.add_parser("工作流", help="跑一輪 TDD：測試→驗證紅→實作→驗證綠→審查")
