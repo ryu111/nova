@@ -32,6 +32,27 @@ def test_job名稱是gates() -> None:
     assert "gates" in _載入()["jobs"]
 
 
+def test_CI要快取python安裝檔() -> None:
+    """`setup-uv` 的 `cache-python` 預設是 `false`，所以每一趟都重新下載直譯器。
+
+    實測（2026-08-29，隨便挑一個 run 的 log）：
+
+    ```
+    Downloading cpython-3.13.15-linux-x86_64-gnu (download) (33.2MiB)
+    ```
+
+    每趟約 0.8 秒，純粹是浪費——版本由 `.python-version` 釘死，根本不會變。
+    這條規則守的是「別人 bump 了 action 版本或重排設定時不要靜默掉回預設」。
+    """
+    步驟們 = _載入()["jobs"]["gates"]["steps"]
+    裝uv的 = [步 for 步 in 步驟們 if "setup-uv" in str(步.get("uses", ""))]
+    assert len(裝uv的) == 1, "應該只有一個地方裝 uv"
+    設定 = 裝uv的[0].get("with", {})
+    assert 設定.get("cache-python") is True, (
+        f"setup-uv 的 cache-python 預設是 false，每趟會重下 33 MiB 的 CPython。實際值：{設定!r}"
+    )
+
+
 def test_CI把測試數基準指到base_branch() -> None:
     基準 = _閘步驟().get("env", {}).get(基準環境變數, "")
     assert 基準.startswith("origin/"), (

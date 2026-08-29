@@ -18,6 +18,10 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
+          # 預設是 false，於是每一趟都重新下載 33.2 MiB 的 CPython
+          # （log 原文：`Downloading cpython-3.13.15-linux-x86_64-gnu (download) (33.2MiB)`）。
+          # 版本由 .python-version 釘死，根本不會變——重下純粹是浪費。
+          cache-python: true
 
       - name: 安裝相依（鎖檔為準）
         run: uv sync --locked
