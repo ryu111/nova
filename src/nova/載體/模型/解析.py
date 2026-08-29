@@ -11,6 +11,7 @@
 """
 
 import json
+import re
 from dataclasses import replace
 from typing import Any
 
@@ -33,14 +34,19 @@ _模型關鍵詞 = (
 )
 _認證關鍵詞 = ("authentication", "unauthorized", "invalid api key", "not logged in")
 
-#: 額度／配額用完的字樣。出處：openai/codex issue #38603 貼出實際重現指令與輸出。
+#: 額度／配額用完的字樣，三家都查證過（出處逐條寫在
+#: `tests/單元/test_模型解析.py::Test額度字串三家都要涵蓋` 的 docstring）。
 #:
-#: **只挑穩定片段**——原文帶著「try again at Sep 13th, 2026 7:11 PM」這種
-#: 動態日期，整句拿來比對永遠不會命中。
+#: **只挑穩定片段**——原文帶著「try again at Sep 13th, 2026 7:11 PM」、
+#: 「Resets in 143h57m55s」這種動態時間，整句拿來比對永遠不會命中。
 #:
-#: **claude 與 agy 的字串還沒查到**（那份研究只跑完 codex 就停了）。
-#: 空著比編一個好：編出來的規則讓分類器看起來有在守，而其實永遠不命中。
-_額度關鍵詞 = ("hit your usage limit", "usage limit reached", "quota exceeded")
+#: `hit your \w+ limit` 為什麼是樣式不是字串：claude 那組的中間字是
+#: **方案期間或型號名**（session／weekly／Opus／Sonnet），而型號會長出新的。
+#: 寫死四個，出第五個就靜默失效——**靜默失效的分類器比沒有更糟**。
+#:
+#: `individual quota reached` 帶著 `429` 但**不是**暫時限流（agy 那條要等 143 小時），
+#: 所以它必須排在 HTTP 狀態分類前面。
+_額度樣式 = r"hit your \w+ limit|usage limit reached|quota exceeded|individual quota reached"
 
 #: 權限／沙箱擋下來的字樣。**每一條都有實跑證據**，不是想像出來的：
 #:
@@ -59,15 +65,29 @@ _權限關鍵詞 = (
     "permission denied",
 )
 
+
 #: 關鍵詞 → 失敗代碼。**加一種分類＝加一列，不是回來改 if 鏈**（開放封閉）。
 #:
 #: **順序有意義**：先命中的先贏。認證擺在額度前面，因為「額度用完」的訊息
 #: 有時候也帶著帳號字樣，而認證是更靠近源頭的判斷。
-_關鍵詞表: tuple[tuple[tuple[str, ...], 失敗代碼], ...] = (
-    (_模型關鍵詞, 失敗代碼.模型不存在),
-    (_認證關鍵詞, 失敗代碼.認證),
-    (_額度關鍵詞, 失敗代碼.額度耗盡),
-    (_權限關鍵詞, 失敗代碼.權限被擋),
+def _任一個(詞們: tuple[str, ...]) -> re.Pattern[str]:
+    """一串固定字樣 → 一個樣式。用 `escape` 是因為裡面有 `(`、`.` 這種字元。"""
+    return re.compile("|".join(re.escape(詞) for 詞 in 詞們))
+
+
+#: 樣式 → 失敗代碼。**加一種分類＝加一列，不是回來改 if 鏈**（開放封閉）。
+#:
+#: **順序有意義**：先命中的先贏。認證擺在額度前面，因為「額度用完」的訊息
+#: 有時候也帶著帳號字樣，而認證是更靠近源頭的判斷。
+#:
+#: 統一用樣式不用字串比對：多數分類其實只要固定字樣（`_任一個` 幫它們轉），
+#: 但額度那組的變體是**會長出來的**，非樣式不可。兩種機制並存會讓下一個人
+#: 加規則時得先問「這條該加哪一邊」——一種就好。
+_樣式表: tuple[tuple[re.Pattern[str], 失敗代碼], ...] = (
+    (_任一個(_模型關鍵詞), 失敗代碼.模型不存在),
+    (_任一個(_認證關鍵詞), 失敗代碼.認證),
+    (re.compile(_額度樣式), 失敗代碼.額度耗盡),
+    (_任一個(_權限關鍵詞), 失敗代碼.權限被擋),
 )
 
 # HTTP 狀態與「旗標用錯」的結束碼。抽成常數是 ruff PLR2004 要求，
@@ -115,8 +135,8 @@ def _分類(結束碼: int, http狀態: int | None, 訊息: str) -> 失敗代碼
     if 結束碼 == _旗標用錯的結束碼:
         return 失敗代碼.用法錯誤
     低 = 訊息.lower()
-    for 詞們, 代碼 in _關鍵詞表:
-        if any(詞 in 低 for 詞 in 詞們):
+    for 樣式, 代碼 in _樣式表:
+        if 樣式.search(低):
             return 代碼
     if http狀態 is not None:
         return _由http狀態分類(http狀態)
