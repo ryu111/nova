@@ -18,15 +18,27 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.排程 import 不能當執行檔, 排程設定
+from nova.載體.排程 import 不能當執行檔, 排程設定, 排程預算
+from nova.載體.預算 import 上限 as 預算上限
 
 
-def _設定(**改: object) -> str:
+def _設定(
+    *,
+    預算token: int | None = None,
+    預算美金: float | None = None,
+    預算幾小時: float | None = None,
+    **改: object,
+) -> str:
+    """預算那三個攤平著給。
+
+    測試裡讀起來才是「使用者會打的那三個旗標」。
+    """
     參 = {
         "執行檔": Path("/Users/someone/nova/.venv/bin/nova"),
         "專案": Path("/Users/someone/nova"),
         "狀態根": Path("/Users/someone/.local/state/nova"),
         "每幾分": 15,
+        "預算": 排程預算(上限=預算上限(token=預算token, 美金=預算美金), 幾小時=預算幾小時),
     }
     參.update(改)
     return 排程設定(**參)  # type: ignore[arg-type]
@@ -110,3 +122,56 @@ def test_執行檔名字不對就當場炸() -> None:
     """印出一份裝下去會看不出是誰的 plist，比不印更糟。"""
     with pytest.raises(ValueError, match="uv"):
         _設定(執行檔=Path("/opt/homebrew/bin/uv"))
+
+
+class Test預算旗標要進得了排程:
+    """**預算鎖存在的理由就是排程。**
+
+    `nova 問` 一次只發一個請求，單看那次永遠沒超支——一天兩百次是另一回事，
+    而那正是時鐘自己跑之後會發生的事。
+
+    `ProgramArguments` 寫死的話，鎖剛好在它存在的理由上不存在：
+    人在終端機打的每一次都擋得住，時鐘自己跑的那幾百次一次都擋不住。
+    """
+
+    def test_不給預算時不長出旗標(self) -> None:
+        """**預設關閉**：「我主要是要看帳，但不要讓帳去把流程關閉。」"""
+        參數 = plistlib.loads(_設定().encode("utf-8"))["ProgramArguments"]
+
+        assert not [旗 for 旗 in 參數 if 旗.startswith("--預算")]
+
+    def test_token上限會進到指令裡(self) -> None:
+        參數 = plistlib.loads(_設定(預算token=500_000).encode("utf-8"))["ProgramArguments"]
+
+        assert "--預算token" in 參數
+        assert 參數[參數.index("--預算token") + 1] == "500000"
+
+    def test_成本上限會進到指令裡(self) -> None:
+        參數 = plistlib.loads(_設定(預算美金=5.0).encode("utf-8"))["ProgramArguments"]
+
+        assert "--預算美金" in 參數
+        assert float(參數[參數.index("--預算美金") + 1]) == 5.0
+
+    def test_有給上限才帶窗口(self) -> None:
+        """光給窗口不給上限的話，那個旗標一點作用都沒有。
+
+        **帶著它會讓人以為有鎖。**
+        """
+        沒鎖 = plistlib.loads(_設定(預算幾小時=6.0).encode("utf-8"))["ProgramArguments"]
+        有鎖 = plistlib.loads(_設定(預算token=100, 預算幾小時=6.0).encode("utf-8"))[
+            "ProgramArguments"
+        ]
+
+        assert "--預算幾小時" not in 沒鎖
+        assert 有鎖[有鎖.index("--預算幾小時") + 1] == "6.0"
+
+    def test_每一格都是獨立的字串(self) -> None:
+        """**`ProgramArguments` 不經過 shell。**
+
+        `"--預算token 500000"` 塞成一格的話，argparse 會拿到一個叫
+        「--預算token 500000」的旗標然後當場報用法錯誤——而那是在 launchd 的
+        log 裡，沒有人會看到。
+        """
+        參數 = plistlib.loads(_設定(預算token=500_000).encode("utf-8"))["ProgramArguments"]
+
+        assert all(" " not in 格 for 格 in 參數), 參數

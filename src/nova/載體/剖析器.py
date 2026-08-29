@@ -242,6 +242,17 @@ def _加觀測類(
     排程剖析 = 子.add_parser("排程", help="印出 launchd 設定，讓時鐘定時把收件匣撈起來（只印不裝）")
     排程剖析.set_defaults(執行=處理們["排程"])
     排程剖析.add_argument("--每幾分", type=int, default=15, help="多久跑一次（預設 15 分）")
+    # **時鐘自己跑的那幾百次才是預算鎖存在的理由。** 旗標到不了這裡的話，
+    # 人在終端機打的每一次都擋得住，排程一次都擋不住。
+    排程剖析.add_argument(
+        "--預算token", type=int, default=None, help="時鐘那條路徑的 token 上限（預設不鎖）"
+    )
+    排程剖析.add_argument(
+        "--預算美金", type=float, default=None, help="時鐘那條路徑的成本上限（預設不鎖）"
+    )
+    排程剖析.add_argument(
+        "--預算幾小時", type=float, default=24.0, help="預算的時間窗口（預設 24 小時）"
+    )
 
     收件剖析 = 子.add_parser("收件", help="看收件匣：丟一個檔進去就是派一次工")
     收件剖析.set_defaults(執行=處理們["收件"])

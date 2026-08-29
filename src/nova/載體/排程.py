@@ -22,7 +22,10 @@ background item 一旦 load 下去就清不乾淨。
 
 import plistlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
+
+from nova.載體.預算 import 上限 as 預算上限
 
 _一分鐘幾秒 = 60
 
@@ -94,7 +97,34 @@ def 不能當執行檔(路徑: Path) -> bool:
     return 名 in _不准的執行檔名 or 名.startswith("python3.")
 
 
-def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: int) -> str:
+@dataclass(frozen=True, slots=True)
+class 排程預算:
+    """時鐘那條路徑要帶的跨執行預算。**上限跟窗口綁在一起**——
+
+    光給窗口不給上限的話那個旗標一點作用都沒有，而帶著它會讓人以為有鎖。
+    """
+
+    上限: 預算上限 = 預算上限()
+    幾小時: float | None = None
+
+    def 旗標(self) -> list[str]:
+        """攤成 `ProgramArguments` 的格子。沒設上限就是空的——**預設關閉**。"""
+        旗: list[str] = []
+        if self.上限.token is not None:
+            旗 += ["--預算token", str(self.上限.token)]
+        if self.上限.美金 is not None:
+            旗 += ["--預算美金", str(self.上限.美金)]
+        if 旗 and self.幾小時 is not None:
+            旗 += ["--預算幾小時", str(self.幾小時)]
+        return 旗
+
+
+#: 不鎖。做成模組層的單例是因為 `排程預算()` 不准寫在參數預設值裡（ruff B008）——
+#: 它是 frozen 的所以其實安全，但那條規則沒有例外，而名字讀起來也更清楚。
+不鎖 = 排程預算()
+
+
+def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: int, 預算: 排程預算 = 不鎖) -> str:
     """產生一份 launchd plist。**執行檔名字不對就當場炸。**
 
     印出一份裝下去會看不出是誰的 plist，比不印更糟——裝了之後
@@ -112,7 +142,12 @@ def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: i
     設定 = {
         "Label": 標籤,
         # 時鐘不生工作，只是把收件匣撈起來。四種事件源收斂到同一個入口。
-        "ProgramArguments": [str(執行檔), "工作流", "--從收件匣"],
+        # **預算旗標要進得了這裡**：預算鎖存在的理由就是時鐘自己跑的那幾百次。
+        # 寫死的話，人在終端機打的每一次都擋得住，排程一次都擋不住。
+        # 每一格是獨立的字串——`ProgramArguments` 不經過 shell，
+        # `"--預算token 500000"` 塞成一格會變成一個沒人認得的旗標，
+        # 而報錯是在 launchd 的 log 裡，沒有人會看到。
+        "ProgramArguments": [str(執行檔), "工作流", "--從收件匣", *預算.旗標()],
         "WorkingDirectory": str(專案),
         "StartInterval": 每幾分 * _一分鐘幾秒,
         "RunAtLoad": False,
