@@ -94,11 +94,17 @@ class Test問:
         assert 答.文字 == "ok"
 
     def test_預設唯讀(self, 做假CLI: 做假CLI型) -> None:
-        """忘了給 可編輯 不會變成放行。"""
+        """忘了給 可編輯 不會變成放行。
+
+        驗的是**白名單裡沒有會改東西的工具**，不是「工具清單剛好等於某個字串」——
+        後者會在唯讀白名單從 `""` 改成 `Read,Grep,Glob` 這種正確的改動上假紅。
+        """
         假, 紀錄 = 做假CLI()
         nova.問("在嗎", 用="claude", 執行檔=假)
         參數 = json.loads(紀錄.read_text(encoding="utf-8"))["argv"]
-        assert 參數[參數.index("--tools") : 參數.index("--tools") + 2] == ["--tools", ""]
+        工具 = 參數[參數.index("--tools") + 1]
+        assert not ({"Write", "Edit", "Bash"} & set(工具.split(","))), f"預設放行了：{工具}"
+        assert "--permission-mode" not in 參數
 
     def test_可編輯要明講(self, 做假CLI: 做假CLI型) -> None:
         假, 紀錄 = 做假CLI()

@@ -257,6 +257,8 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | 新增失敗代碼卻不進 `_終局表` | `test_每個失敗代碼都要有明確的終局` 紅（原本那支不會紅，靠負控才發現） |
 | `_成功但沒話說算未知` 改成直接 `return 答` | `Test成功但沒話說` 四支紅（空回應又被當成功） |
 | codex 可編輯換回 `--approve-for-me` | `test_codex的可編輯有真的邊界` 紅（真跑 CLI，檔案寫進家目錄） |
+| claude 唯讀工具白名單改回 `""` | `test_唯讀看得到工作目錄裡的檔案[claude]` 紅（連 Read 都沒了） |
+| agy 唯讀不給 `--add-dir` | `test_agy三種權限都要給add_dir` 紅；真跑則是審查員看不到檔案 |
 | `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
 | gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
 | gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |

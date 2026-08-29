@@ -129,8 +129,8 @@ class Test把各家載體關到最小:
 
     def test_claude關掉工具與家目錄設定(self) -> None:
         參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
-        assert 參數[參數.index("--tools") : 參數.index("--tools") + 2] == ["--tools", ""], (
-            "--tools '' 才會關掉全部內建工具（claude --help 原文：Use \"\" to disable all tools）"
+        assert "Write" not in 參數[參數.index("--tools") + 1], (
+            "唯讀不准有 Write——工具白名單就是「載體被關到多小」的那一格"
         )
         assert 參數[參數.index("--setting-sources") : 參數.index("--setting-sources") + 2] == [
             "--setting-sources",
@@ -186,10 +186,30 @@ class Test權限是漏出的:
         """忘了設不會變成放行。"""
         assert 呼叫選項().權限 is 權限.唯讀
 
-    def test_claude可編輯時才給工具(self) -> None:
+    def test_claude唯讀是讀得到但寫不了(self) -> None:
+        """**`--tools ""` 不是唯讀，是把它關進小黑屋。**
+
+        help 原文「Use "" to disable all tools」的 all 是真的 all——連 Read 都沒了。
+        實測叫它讀工作目錄裡的一個檔案，回的是
+        「I can't do this one — I don't have any file access tools available」。
+
+        唯讀的意思是**看得到但不准改**，所以走白名單 `Read,Grep,Glob`：
+        實測讀得到檔案內容，而叫它寫檔會回「我只有唯讀類的工具，沒有 Write、Edit、
+        Bash」——**擋在工具層，不是靠模型自律**。
+
+        （這一輪順帶看到 `--tools` 管不到 MCP 工具：那次回應說它還有 Context7 可用。
+        要一起關掉得再加 `--strict-mcp-config`，還沒做，見設計文件 02 的已知缺口。）
+        """
+        唯讀 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(工作目錄=Path("/w")))
+        工具 = 唯讀[唯讀.index("--tools") + 1].split(",")
+        assert set(工具) == {"Read", "Grep", "Glob"}, f"唯讀的工具白名單不對：{工具}"
+        assert "--restricted" in 唯讀, "唯讀也要把 Read 關在工作目錄裡"
+        assert 唯讀[唯讀.index("--add-dir") : 唯讀.index("--add-dir") + 2] == ["--add-dir", "/w"]
+
+    def test_claude可編輯時才給寫的工具(self) -> None:
         唯讀 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         可寫 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
-        assert 唯讀[唯讀.index("--tools") : 唯讀.index("--tools") + 2] == ["--tools", ""]
+        assert "Write" not in 唯讀[唯讀.index("--tools") + 1]
         assert "Write" in 可寫[可寫.index("--tools") + 1]
         assert 可寫[可寫.index("--permission-mode") : 可寫.index("--permission-mode") + 2] == [
             "--permission-mode",
@@ -285,36 +305,34 @@ class Test權限是漏出的:
         assert 可寫[可寫.index("--add-dir") : 可寫.index("--add-dir") + 2] == ["--add-dir", "/w"]
         # 唯讀那一級刻意不給——理由見 test_agy唯讀不給add_dir是刻意的
 
-    def test_agy唯讀不給add_dir是刻意的(self) -> None:
-        """agy **沒有真正的唯讀**，所以 nova 只能保證比較弱的那一條。
+    def test_agy三種權限都要給add_dir(self) -> None:
+        """**唯讀的意思是「看得到但不准改」，不是「什麼都看不到」。**
 
-        實測（`--mode plan`、`--sandbox`、兩條一起，三種都試過）：只要給了
-        `--add-dir`，模型照樣把檔案寫進工作目錄——嘴上還說「請確認計畫後我才開始」，
-        而檔案當下已經建好了。**plan 模式擋不住寫。**
+        這一條改過一次，過程值得留著：原本唯讀刻意不給 `--add-dir`，理由是
+        agy 的 `--mode plan` 擋不住寫（`--sandbox`、兩條一起，三種都實測過），
+        不給 `--add-dir` 至少能保證它動不到工作目錄。
 
-        所以唯讀這一級不給 `--add-dir`。nova 換到一條真的成立的保證：
-        **唯讀的 agy 動不到工作目錄**（實測：檔案落到
-        `~/.gemini/antigravity-cli/scratch/`，或工具被 headless 權限系統 auto-deny）。
+        那個保證是真的，但**它把唯讀的用途一起換掉了**：唯讀的 agy 連讀都讀不到
+        （工具被 headless 權限系統 auto-deny，回一個空的 response）。而 nova 唯一
+        的唯讀呼叫端是**工作流的審查員**——一個「請指出具體的檔案與行號」卻看不到
+        檔案的審查員，只會回空回應、把工作流卡在結果未知。
 
-        代價要講清楚：**唯讀的 agy 也讀不到工作目錄的檔案**，會回一個空的
-        response，被 `_成功但沒話說算未知` 降成結果未知。要讓 agy 看專案檔案，
-        就得給可編輯——這是 agy 的限制，不是 nova 的設計選擇。
+        所以換回來：三種權限都給 `--add-dir`，而
+        **agy 的唯讀明確標成加速器不是保證**（`test_agy的唯讀擋不住寫檔這是已知事實`
+        斷言的就是「擋不住」）。誠實標示比假保證好，也比一個看不見東西的審查員好。
 
-        哪天 agy 修好了 plan 模式，這支要跟著改；在那之前，
-        「宣稱有把關卻沒有」比沒有更糟。
+        升級路徑（尚未做）：唯讀模式下由 nova 自己在跑完之後比對工作目錄有沒有被
+        改動，有的話把終局降成結果未知——偵測型保證，不是預防型，但那是 nova
+        自己拿得出來的東西，不必等 agy。
         """
-        唯讀 = 建立("agy", 執行檔=Path("/x")).組參數(
-            "提示", 呼叫選項(權限=權限.唯讀, 工作目錄=Path("/w"))
-        )
-        assert "--add-dir" not in 唯讀
-        for 可以做什麼 in (權限.可編輯, 權限.全開):
+        for 可以做什麼 in (權限.唯讀, 權限.可編輯, 權限.全開):
             參數 = 建立("agy", 執行檔=Path("/x")).組參數(
                 "提示", 呼叫選項(權限=可以做什麼, 工作目錄=Path("/w"))
             )
             assert 參數[參數.index("--add-dir") : 參數.index("--add-dir") + 2] == [
                 "--add-dir",
                 "/w",
-            ], f"{可以做什麼} 少了 --add-dir，檔案會落到 agy 的 scratch 目錄"
+            ], f"{可以做什麼} 少了 --add-dir：寫檔會落到 agy 的 scratch 目錄，讀檔會被 auto-deny"
 
     def test_沒給工作目錄就不要亂加add_dir(self) -> None:
         """`--add-dir` 的值是路徑，沒有工作目錄時沒有正確的值可填——寧可不加。"""

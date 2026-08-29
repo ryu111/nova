@@ -116,7 +116,7 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 | | claude | codex | agy |
 |---|---|---|---|
-| 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan`＋**刻意不給 `--add-dir`** |
+| 唯讀 | `--restricted --add-dir <工作目錄> --tools Read,Grep,Glob` | `--sandbox read-only` | `--mode plan --add-dir <工作目錄>`（**擋不住寫，見下**） |
 | 可編輯 | `--restricted --add-dir <工作目錄> --tools <清單> --allowedTools <同一份> --permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits --add-dir <工作目錄>` |
 | 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
 | 生圖 | ❌ 沒有 | ❌ 沒有 | 有 `generate_image` 工具，但 **headless 下不可用且會假回報成功**（見下節） |
@@ -132,7 +132,13 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 實測後找到 `--setting-sources ""`：**設定檔與 CLAUDE.md 都讀不到，而且訂閱登入照樣能用**。
 所以 `隔離設定=True` 走這一條，**不要換回 `--bare`**。
-`test_claude隔離設定之後讀不到CLAUDE_md` 同時守兩件事：真的讀不到、而且認證沒被弄壞。
+`test_claude隔離設定之後拿不到自動注入的指引` 同時守兩件事：
+自動注入的指引真的拿不到、而且認證沒被弄壞。
+
+**「自動注入」與「主動讀取」是兩件事。** 唯讀的工具白名單從 `""` 改成
+`Read,Grep,Glob` 之後，模型會自己用 Read 去讀工作目錄裡的 CLAUDE.md——
+那不是隔離破了，那正是唯讀該有的行為。所以那支測試改成在一個乾淨的 tmp 目錄裡
+問「有沒有收到自動注入的指引」：那裡沒有任何 CLAUDE.md 可讀，答案只可能來自注入。
 
 教訓：一個限制寫進文件之後，要標清楚它是**查證過的事實**還是**當下沒找到更好的做法**。
 這一條是後者，而它撐了不到一天。
@@ -228,12 +234,31 @@ JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐
 
 | 問題 | claude | codex | agy |
 |---|---|---|---|
-| 唯讀擋得住寫檔嗎 | ✅ `--tools ""` 根本沒工具 | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下） |
+| 唯讀擋得住寫檔嗎 | ✅ 白名單裡沒有 Write／Edit／Bash | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下） |
+| 唯讀看得到工作目錄嗎 | 要白名單有 Read（見下） | ✅ | 要 `--add-dir`，不給就連讀都被 auto-deny |
 | 可編輯寫得進工作目錄嗎 | 要三條旗標湊齊（見下） | ✅ | 要 `--add-dir`（見下） |
 | 可編輯擋得住寫**工作目錄外面**嗎 | ❌ 檔案工具擋得住，**Bash 繞得過** | ✅ **OS 層拒絕**（operation not permitted） | 走 shell 的工具被 headless 權限系統 auto-deny |
 
 **三家裡只有 codex 有真的邊界。** 這一格決定了「可編輯」在各家的意思不一樣，
 而介面沒辦法抹平它——所以寫成文件與測試，不寫成 `supports()` 布林表。
+
+### claude 的唯讀：`--tools ""` 不是唯讀，是小黑屋
+
+help 原文「Use "" to disable all tools」的 all 是**真的 all**——連 Read 都沒了。
+實測叫它讀工作目錄裡的一個檔案：
+
+```
+I can't do this one — I don't have any file access tools available in this session.
+My only tools here are Context7 documentation lookups...
+```
+
+唯讀的意思是**看得到但不准改**，所以走白名單 `--tools Read,Grep,Glob`：
+實測讀得到檔案內容，而叫它寫檔會回「我只有唯讀類的工具，沒有 Write、Edit、Bash」——
+**擋在工具層，不是靠模型自律**。唯讀也帶 `--restricted --add-dir`，
+把 Read 一起關在工作目錄裡。
+
+順帶看到一件事：那次回應說它還有 **Context7 可用**——`--tools` 管不到 MCP 工具。
+要一起關掉得再加 `--strict-mcp-config`，還沒做（見已知缺口）。
 
 ### claude 的可編輯要三條旗標，缺一不可
 
@@ -299,11 +324,27 @@ agent_message  失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（
    「我已建立執行計畫，請確認後我將開始建立檔案」——而檔案當下已經建好了。
    `--sandbox`、`--mode plan --sandbox` 都試過，一樣擋不住。
 
-所以 agy 的唯讀這一級**故意不給 `--add-dir`**。nova 換到一條真的成立的保證：
-**唯讀的 agy 動不到工作目錄**（由 1 與 2 背書）。
+#### 這一格改過一次，過程比結論值錢
 
-代價要一起講：**唯讀的 agy 也讀不到工作目錄的檔案**。要讓它看專案檔案就得給可編輯。
-這是 agy 的限制，不是 nova 的設計選擇。
+第一版的判斷是：既然 plan 擋不住寫，那唯讀就**不給 `--add-dir`**，換一條真的成立的
+保證——「唯讀的 agy 動不到工作目錄」（由 1 與 2 背書）。形狀很漂亮，而且測得出來。
+
+**它把唯讀的用途一起換掉了。** 唯讀的 agy 連讀都讀不到，而 nova 唯一的唯讀呼叫端是
+**工作流的審查員**——一個被要求「指出具體的檔案與行號」卻看不到檔案的審查員，
+只會回一個空 response，被降成結果未知，把整條工作流卡住。
+
+保證的形狀對了、用途沒了，**那不是保證，是把功能關掉**。所以換回來：
+
+- 三種權限都給 `--add-dir`（`test_agy三種權限都要給add_dir`）
+- **agy 的唯讀明確標成加速器不是保證**（`test_agy的唯讀擋不住寫檔這是已知事實`
+  斷言的就是「擋不住」）
+- 唯讀看得到工作目錄變成三家共同的契約（`test_唯讀看得到工作目錄裡的檔案`）
+
+誠實標示比假保證好，也比一個看不見東西的審查員好。
+
+**升級路徑（尚未做）**：唯讀模式下由 nova 自己在跑完之後比對工作目錄有沒有被改動，
+有的話把終局降成結果未知。那是**偵測型**保證不是預防型——檔案已經被改了才發現——
+但它是 nova 自己拿得出來的東西，不必等 agy。
 
 第 3 點特別值得記：那是**假成功裡最難抓的一種**——`status: SUCCESS`、`response` 也有話說、
 內容還說得頭頭是道。`_成功但沒話說算未知` 攔不到它。
@@ -371,6 +412,10 @@ RESULT  status= SUCCESS | response= '' | error= None
    codex 與 agy 怎麼隔離家目錄設定與自帶 system prompt，都還沒查。
    在補齊之前，「換腦但行為一樣」**沒有測試背書**——只是設計意圖。
 3. **成本只有 claude 給。** codex 與 agy 只有 token 數。要成本得自己接價目表，現在不做。
+3.5 **`--tools` 管不到 MCP 工具。** 實測 claude 唯讀（白名單只有 `Read,Grep,Glob`）時，
+   模型自己說它還有 Context7 的 `resolve-library-id` 與 `query-docs` 可用。
+   也就是說「把載體關到最小」目前漏了 MCP 這一層——`--strict-mcp-config` 應該能補，
+   還沒查證也還沒實測。在補齊之前，**隔離設定不涵蓋 MCP**。
 4. **各家的自帶 system prompt 還沒關掉。** 實測「只回覆兩個字：可以」這句十來個字的提示：
 
    | 家 | 輸入 token | 說明 |

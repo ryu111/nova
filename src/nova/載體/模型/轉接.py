@@ -28,6 +28,11 @@ from nova.載體.模型.解析 import 解析agy, 解析claude, 解析codex
 
 #: 可編輯模式下 claude 需要的工具。列白名單不用 "default"——要哪些寫出來。
 _claude可編輯工具 = "Read,Write,Edit,Bash,Grep,Glob"
+#: 唯讀模式的白名單。**不要換回 `--tools ""`**——那條的 help 原文是
+#: 「Use "" to disable all tools」，而 all 是真的 all，連 Read 都沒了。
+#: 實測叫它讀工作目錄裡的檔案，回的是「I don't have any file access tools available」。
+#: 唯讀的意思是**看得到但不准改**，不是什麼都看不到。
+_claude唯讀工具 = "Read,Grep,Glob"
 
 
 def _claude權限參數(選項: 呼叫選項) -> list[str]:
@@ -44,14 +49,16 @@ def _claude權限參數(選項: 呼叫選項) -> list[str]:
     `--restricted` 的 help 原文寫明它 **refuses bypassPermissions**，
     所以全開那一級不能帶它。
     """
-    if 選項.權限 is 權限.唯讀:
-        return ["--tools", ""]  # help 原文：Use "" to disable all tools
     if 選項.權限 is 權限.全開:
         return ["--tools", _claude可編輯工具, "--dangerously-skip-permissions"]
     界線 = ["--restricted"]
     if 選項.工作目錄 is not None:
         # 沒有工作目錄就沒有正確的值可填——寧可不加，也不要拿 cwd 去猜。
         界線 += ["--add-dir", str(選項.工作目錄)]
+    if 選項.權限 is 權限.唯讀:
+        # 唯讀也要 `--restricted`：它把**檔案工具**關在工作目錄裡，Read 也算。
+        # 不給 `--allowedTools`——實測唯讀那三個工具不需要核准就跑得動。
+        return [*界線, "--tools", _claude唯讀工具]
     return [
         *界線,
         "--tools",
@@ -137,7 +144,7 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     參數 = ["--output-format", "json", "--mode", 模式]
     if 選項.權限 is 權限.全開:
         參數 += ["--dangerously-skip-permissions"]
-    if 選項.權限 is not 權限.唯讀 and 選項.工作目錄 is not None:
+    if 選項.工作目錄 is not None:
         # `--add-dir` 決定 agy 動得到哪個目錄，**而不是 cwd**。實測三件事：
         #
         # 1. 不給它：檔案工具寫到 `~/.gemini/antigravity-cli/scratch/`，而且照樣
@@ -146,9 +153,10 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         #    回一個空的 response（`_成功但沒話說算未知` 會把它降成結果未知）。
         # 3. 給它：讀寫都進 cwd。**但 `--mode plan` 擋不住寫**（實測，見設計文件 02）。
         #
-        # 3 的意思是 agy 沒有真正的唯讀。所以唯讀這一級**故意不給 --add-dir**——
-        # nova 能保證的是「動不到工作目錄」，那條保證由 1 與 2 背書。
-        # 代價寫在 `test_agy唯讀不給add_dir是刻意的` 的 docstring 裡。
+        # 三種權限都給。一度為了 3 而讓唯讀不給 `--add-dir`——那條保證是真的
+        # （動不到工作目錄），但它把唯讀的用途一起換掉了：連讀都讀不到，
+        # 而 nova 唯一的唯讀呼叫端是工作流的審查員。理由寫在
+        # `test_agy三種權限都要給add_dir` 的 docstring 裡。
         參數 += ["--add-dir", str(選項.工作目錄)]
     參數 += ["--model", 選項.模型 or agy預設模型]
     if 選項.續接:
