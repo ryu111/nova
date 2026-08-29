@@ -30,7 +30,44 @@ def _全部測試函式名() -> set[str]:
 
 
 def _要檢查的文件() -> list[Path]:
-    return [專案根目錄 / "CLAUDE.md", *sorted((專案根目錄 / "docs" / "設計").glob("*.md"))]
+    """CLAUDE.md、設計文件、決策紀錄、負控紀錄。
+
+    負控紀錄與決策紀錄一定要在這份清單裡：那 40 個測試名原本住 CLAUDE.md、
+    受這支測試保護，**搬家不能把保護搬丟**。
+    """
+    return [
+        專案根目錄 / "CLAUDE.md",
+        專案根目錄 / "docs" / "負控紀錄.md",
+        *sorted((專案根目錄 / "docs" / "設計").glob("*.md")),
+        *sorted((專案根目錄 / "docs" / "決策").glob("*.md")),
+    ]
+
+
+#: CLAUDE.md 的行數上限。**這是 ratchet，不是引用權威**——
+#: Anthropic 官方的 best practices 只說 "keep it short and human-readable"、
+#: "ruthlessly prune"，沒有給數字；網路上流傳的「200 行」是部落格說法。
+#: 所以這個數字釘的是現況（搬完負控表之後 253 行）加上一點餘裕，
+#: 餘裕是留給帳本接線那一段文件的。
+#:
+#: 官方講的成本是真的：「Bloated CLAUDE.md files cause Claude to ignore your
+#: actual instructions」——規則檔變長不只是浪費，是**讓其他規則失效**。
+#: 所以往上調這個數字之前，先問該加的那段是不是屬於 `docs/決策/0001-規則要住哪一層.md`
+#: 的第 ① 或第 ③ 格（閘或 skill），而不是第 ④ 格。
+CLAUDE_MD行數上限 = 270
+
+
+def test_CLAUDE_md不准無限長() -> None:
+    """規則檔不准當流水帳。
+
+    這是使用者立的規則的機械版：「不要把 CLAUDE.md 跟 rule 當流水帳，
+    帳本是另外的」。沒有這個閘，那條規則就只是一句話——而只以文件形式
+    存在的規範等於不存在（宿主反轉判準一）。
+    """
+    行數 = len((專案根目錄 / "CLAUDE.md").read_text(encoding="utf-8").splitlines())
+    assert 行數 <= CLAUDE_MD行數上限, (
+        f"CLAUDE.md 有 {行數} 行，超過上限 {CLAUDE_MD行數上限}。"
+        "先問要加的那段該不該進閘或 skill，見 docs/決策/0001-規則要住哪一層.md"
+    )
 
 
 @pytest.fixture(scope="module")
