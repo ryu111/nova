@@ -16,6 +16,7 @@
 所以這支 runner 的測試不必碰任何 LLM 或子程序。
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from nova.契約.工作流 import (
@@ -91,7 +92,23 @@ def 跑工作流(
     return 工作流結果(結束=收尾, 軌跡=tuple(軌跡))
 
 
-def 建TDD執行器(*, 角色表: dict[階段代碼, 角色], 跑判準: 判準) -> 執行器:
+def _檢查角色表(角色表: Mapping[階段代碼, 角色]) -> None:
+    """少接一格就當場炸，不要等跑到那一階才 `KeyError`——那時 token 已經花掉了。
+
+    **要哪些階段是從 `TDD階段表` 推導的**，不是寫死四個：寫死的話，
+    下次加階段忘了回來改守衛，又回到「跑到一半才發現沒接線」。
+    """
+    缺 = [
+        定義.代碼.value
+        for 定義 in TDD階段表
+        if 定義.種類 is not 種類.判準 and 定義.代碼 not in 角色表
+    ]
+    if 缺:
+        訊息 = f"角色表少了這些階段：{'、'.join(缺)}"
+        raise ValueError(訊息)
+
+
+def 建TDD執行器(*, 角色表: Mapping[階段代碼, 角色], 跑判準: 判準) -> 執行器:
     """把角色表與機械判準接成一個執行器。
 
     這就是 `BaseWorkflow(task, 測試, 實作, 驗證, review)` 的形狀——但**驗證不是角色**，
@@ -100,6 +117,7 @@ def 建TDD執行器(*, 角色表: dict[階段代碼, 角色], 跑判準: 判準)
 
     `審查` 應該給**另一顆腦**——自己審自己等於沒審。這條目前是呼叫端的責任。
     """
+    _檢查角色表(角色表)
 
     def 執行一步(定義: 階段定義, 任: 任務, 軌跡: tuple[步驟結果, ...]) -> 步驟結果:
         if 定義.種類 is 種類.判準:
