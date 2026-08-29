@@ -1,6 +1,6 @@
-"""兩條禁令的機械化版本：不准繞過閘門。
+"""禁令的機械化版本：檢查是否違反禁令。
 
-CLAUDE.md 寫了「不准 --no-verify、不准 --admin」，但寫著不等於擋得住。
+CLAUDE.md 寫了規則（不准 --no-verify、--admin，以及合併必須 --delete-branch），但寫著不等於擋得住。
 """
 
 import pytest
@@ -79,3 +79,50 @@ class Test拆不開的指令:
         通過, 原因 = 檢查指令('gh pr merge --admin -t "沒收尾')
         assert 通過 is False
         assert "拆不開" in 原因, "要讓人知道判定是走退路來的"
+
+
+class Test合併必須帶刪除分支:
+    """PR 合併必須帶 `--delete-branch` 收尾，否則留下一堆遠端殘枝。"""
+
+    def test_沒有帶刪除分支要被擋下(self) -> None:
+        通過, 理由 = 檢查指令("gh pr merge 71 --squash")
+        assert 通過 is False
+        assert "--delete-branch" in 理由, "擋下理由必須提及缺少 --delete-branch"
+
+    def test_有帶刪除分支放行(self) -> None:
+        通過, _ = 檢查指令("gh pr merge 71 --squash --delete-branch")
+        assert 通過 is True
+
+    def test_git_merge_不准誤擋(self) -> None:
+        通過, _ = 檢查指令("git merge main")
+        assert 通過 is True
+
+    @pytest.mark.parametrize("命令", ["gh pr list", "gh pr view 71"])
+    def test_非合併指令不准誤擋(self, 命令: str) -> None:
+        通過, _ = 檢查指令(命令)
+        assert 通過 is True
+
+    def test_管理員旗標又帶刪除分支仍然要被擋下(self) -> None:
+        """帶 --admin 又帶 --delete-branch，仍要被管理員禁令擋下，不能因為有 delete-branch 放行。"""
+        通過, 理由 = 檢查指令("gh pr merge 71 --squash --delete-branch --admin")
+        assert 通過 is False
+        assert "--admin" in 理由
+
+    def test_拆不開的正確合併不准被退路擋掉(self) -> None:
+        """這一條守的是「第三條禁令**不准**進關鍵詞掃描那層」。
+
+        前兩條是**肯定條件**（看到危險字串就擋），退回關鍵詞掃描不會變寬鬆。
+        第三條是**否定條件**（少了某個旗標才擋），關鍵詞掃描判不出「少了什麼」——
+        把 `gh pr merge` 塞進 `_危險詞`，這條帶了 `--delete-branch` 的正確指令
+        會因為引號沒收尾走進退路，然後被字串比對誤擋。
+
+        引號沒收尾是真的會發生的：模組 docstring 記著「實測擋到過一次，
+        而且擋在跟禁令毫無關係的地方」。
+        """
+        通過, _ = 檢查指令('gh pr merge 71 --squash --delete-branch --body "沒收尾')
+        assert 通過 is True, "帶了 --delete-branch 的合併，就算拆不開也不准擋"
+
+    def test_gh的其他子命令帶merge這個詞不准誤擋(self) -> None:
+        """判斷要三個詞同時在。少看 `pr` 的話，job 叫 merge 的指令會被誤擋。"""
+        通過, _ = 檢查指令("gh run view --job merge")
+        assert 通過 is True
