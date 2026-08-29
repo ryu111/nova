@@ -33,6 +33,7 @@ _欄位齊全 = 成果(
     走了幾階=5,
     總token=48213,
     總成本美金=1.25,
+    來源="typed",
 )
 
 
@@ -58,6 +59,7 @@ def test_落盤的欄位名是ASCII() -> None:
         "exit_code",
         "started_at",
         "ended_at",
+        "source",
         "steps",
         "tokens",
         "cost_usd",

@@ -18,7 +18,7 @@ import pytest
 
 from nova.契約.工作流 import 結束, 結束代碼
 from nova.契約.成果 import 成果
-from nova.載體.命令列 import _歸檔成果
+from nova.載體.命令列 import _歸檔成果, _題目
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 預設帳本目錄
 from nova.迴圈.工作流 import 工作流結果
@@ -154,7 +154,7 @@ class Test從摘要接到成果:
         _歸檔成果(
             參數,
             識別=識別,
-            任務="做一件事",
+            題=_題目(描述="做一件事", 收件=None),
             果=工作流結果(結束=結束(結束代碼.完成, "做完了"), 軌跡=()),
             退出碼=0,
         )
