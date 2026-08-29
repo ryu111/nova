@@ -203,6 +203,10 @@ def _加觀測類(
         help="改看跨執行的規則觸發率：從來不紅的是刪除候選",
     )
 
+    排程剖析 = 子.add_parser("排程", help="印出 launchd 設定，讓時鐘定時把收件匣撈起來（只印不裝）")
+    排程剖析.set_defaults(執行=處理們["排程"])
+    排程剖析.add_argument("--每幾分", type=int, default=15, help="多久跑一次（預設 15 分）")
+
     收件剖析 = 子.add_parser("收件", help="看收件匣：丟一個檔進去就是派一次工")
     收件剖析.set_defaults(執行=處理們["收件"])
 

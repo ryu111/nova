@@ -267,9 +267,15 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "w": 160,
    "h": 46,
    "層": "觸發",
-   "態": "無",
-   "排": "可做",
-   "檔": []
+   "態": "好",
+   "檔": [
+    "src/nova/載體/排程.py",
+    "src/nova/載體/單例.py",
+    "tests/單元/test_排程單.py",
+    "tests/整合/test_單例.py",
+    "tests/驗收/test_排程不會疊在一起.py"
+   ],
+   "註": "<code>nova 排程</code> 印出 launchd 設定，<b>只印不裝</b>——裝上去是使用者系統上的狀態（BTM 會留紀錄，unload 也清不乾淨）。時鐘不生工作，它只是跑 <code>工作流 --從收件匣</code>，收斂到同一個入口。<b>真正的坑是疊在一起</b>：排程 15 分鐘一次而一輪可能跑 40 分鐘，沒有 flock 單例鎖就會三個一起燒預算。撞到時排程回 0（安靜讓開）、人手動下的回 2（那是真衝突）"
   },
   {
    "id": "收件",
@@ -311,8 +317,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "h": 46,
    "層": "核",
    "態": "無",
-   "排": "卡住",
-   "卡在": "排程到期",
+   "排": "可做",
    "檔": []
   },
   {
