@@ -21,16 +21,24 @@ nova執行檔 = Path(sys.executable).parent / "nova"
 成功實錄 = {"claude": "claude_ok.json", "codex": "codex_ok2.jsonl", "agy": "agy_ok.json"}
 失敗實錄 = {"claude": "claude_bad.txt", "codex": "codex_bad.txt", "agy": "agy_bad.txt"}
 
-假CLI內容 = """#!/usr/bin/env python3
+#: 走 `sys.executable` 不走 `/usr/bin/env python3`——後者在這台機器上指到系統的
+#: 3.9.6，不是專案釘的 3.13。
+假CLI內容 = f"""#!{sys.executable}
 import os, sys, pathlib
 sys.stdout.write(pathlib.Path(os.environ["假CLI_實錄"]).read_text(encoding="utf-8"))
 sys.exit(int(os.environ.get("假CLI_結束碼", "0")))
 """
 
 
-@pytest.fixture
-def 假CLI(tmp_path: Path) -> Path:
-    路徑 = tmp_path / "假cli"
+@pytest.fixture(scope="session")
+def 假CLI(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """整個 session 一支，不是每支測試重寫一份。
+
+    行為靠環境變數切（`假CLI_實錄`／`假CLI_結束碼`），所以內容本來就一樣。
+    實測（macOS）新寫一份執行檔的第一次執行要 122 毫秒，重複執行只要 14 毫秒——
+    那 100 毫秒是「剛寫出來的新執行檔」的第一次檢查，每支測試白付一次。
+    """
+    路徑 = tmp_path_factory.mktemp("假cli") / "假cli"
     路徑.write_text(假CLI內容, encoding="utf-8")
     路徑.chmod(路徑.stat().st_mode | stat.S_IEXEC)
     return 路徑
