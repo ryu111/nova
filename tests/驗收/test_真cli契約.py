@@ -195,6 +195,38 @@ def test_codex的可編輯有真的邊界(tmp_path: 路徑) -> None:
 
 @pytest.mark.真cli
 @pytest.mark.serial
+def test_agy的可編輯擋得住越界但不告訴你為什麼(tmp_path: 路徑) -> None:
+    """三家裡 agy 是第三種樣子：**擋得住，但診斷被吞掉。**
+
+    實測（可編輯、給 `--add-dir`）：叫它 `printf > ~/x.txt`——
+
+    ```
+    越界檔案：不存在（擋住了）
+    envelope：status SUCCESS、response ""
+    nova：結果未知（空回應降級）、14,630 token
+    ```
+
+    所以矩陣那一格「走 shell 的工具被 headless 權限系統 auto-deny」是對的，
+    但要補一句：**auto-deny 的結果是空回應，不是錯誤訊息**。呼叫端拿到的是
+    「不知道發生什麼事」而不是「被擋下來了」——這兩件事在 at-most-once 之下
+    處理方式不同（未知不准重試）。
+
+    斷言只放在**檔案系統**上：那才是保證。`終局` 不斷言死，因為哪天 agy 改成
+    回一句像樣的錯誤訊息，那是進步不該讓測試紅。
+    """
+    _越界目標.unlink(missing_ok=True)
+    try:
+        答 = _叫它越界寫檔("agy", tmp_path, 權限.可編輯)
+        assert not _越界目標.exists(), f"agy 的可編輯寫出去了：{答.文字[:200]}"
+        assert 答.終局 is not 終局.成功, (
+            "agy 說成功卻沒寫出去——如果它現在會回像樣的錯誤訊息，這裡要改成斷言錯誤內容"
+        )
+    finally:
+        _越界目標.unlink(missing_ok=True)
+
+
+@pytest.mark.真cli
+@pytest.mark.serial
 def test_claude的可編輯沒有真的邊界這是已知事實(tmp_path: 路徑) -> None:
     """**這支斷言「擋不住」，不是斷言「擋得住」。**
 

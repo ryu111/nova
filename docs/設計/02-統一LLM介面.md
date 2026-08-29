@@ -247,7 +247,7 @@ JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐
 | 唯讀擋得住寫檔嗎 | ✅ 白名單裡沒有 Write／Edit／Bash | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下）——連生圖與 brain 目錄裡的 `plan.md`／`walkthrough.md` 都擋不住 |
 | 唯讀看得到工作目錄嗎 | 要白名單有 Read（見下） | ✅ | 要 `--add-dir`，不給就連讀都被 auto-deny |
 | 可編輯寫得進工作目錄嗎 | 要三條旗標湊齊（見下） | ✅ | 要 `--add-dir`（見下） |
-| 可編輯擋得住寫**工作目錄外面**嗎 | ❌ 檔案工具擋得住，**Bash 繞得過** | ✅ **OS 層拒絕**（operation not permitted） | 走 shell 的工具被 headless 權限系統 auto-deny |
+| 可編輯擋得住寫**工作目錄外面**嗎 | ❌ 檔案工具擋得住，**Bash 繞得過** | ✅ **OS 層拒絕**（operation not permitted） | ✅ 擋得住，**但診斷被吞掉**——envelope 回 SUCCESS＋空回應，nova 判結果未知（實測 14,630 token） |
 
 **三家裡只有 codex 有真的邊界。** 這一格決定了「可編輯」在各家的意思不一樣，
 而介面沒辦法抹平它——所以寫成文件與測試，不寫成 `supports()` 布林表。
