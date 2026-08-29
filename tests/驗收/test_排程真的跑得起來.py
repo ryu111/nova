@@ -1,0 +1,108 @@
+"""使用者說的那句話：**照 `nova 排程` 印出來的東西裝下去，它會動。**
+
+CLAUDE.md 判準三：**墊片證明的是轉遞形狀，不是可達性。** 單元測試看得出
+`ProgramArguments` 裡有沒有那幾個字串，看不出那行指令**跑不跑得起來**——
+旗標名打錯一個字、`--預算幾小時` 沒加到 `工作流` 的剖析器上，
+plist 照樣長得一模一樣，而失敗會發生在 launchd 的 log 裡，沒有人會看到。
+
+所以這一支**把 plist 裡的那行指令拿出來真的執行**。
+
+（真的 `launchctl load` 不做：BTM 會留紀錄、unload 也清不乾淨，
+那是使用者系統上的狀態。nova 產生，人安裝。）
+"""
+
+import os
+import plistlib
+import subprocess
+import sys
+from pathlib import Path
+
+nova執行檔 = Path(sys.executable).parent / "nova"
+
+
+def _跑(*參數: str, 狀態: Path, 在: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(nova執行檔), *參數],
+        cwd=在,
+        env={**os.environ, "XDG_STATE_HOME": str(狀態)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _時鐘要跑的那行(*排程參數: str, 狀態: Path, 專案: Path) -> list[str]:
+    """從 `nova 排程` 印出來的 plist 裡把指令挖出來。
+
+    **不要在測試裡自己組那行指令**——自己組的話，plist 怎麼寫都不會紅，
+    而這一支要守的就是「印出來的東西跟跑得起來的東西是同一個」。
+    """
+    印出來 = _跑("排程", *排程參數, 狀態=狀態, 在=專案).stdout
+    設定 = plistlib.loads(印出來.split("</plist>")[0].encode("utf-8") + b"</plist>")
+    參數: list[str] = 設定["ProgramArguments"]
+    return 參數
+
+
+def _沒有預算的時候(tmp_path: Path) -> tuple[Path, Path]:
+    狀態 = tmp_path / "state"
+    專案 = tmp_path / "某個專案"
+    專案.mkdir()
+    return 狀態, 專案
+
+
+def test_印出來的那行指令真的跑得起來(tmp_path: Path) -> None:
+    """空收件匣回 0——**沒有東西可做是正常狀態**，排程多數時候醒來就是這樣。"""
+    狀態, 專案 = _沒有預算的時候(tmp_path)
+    指令 = _時鐘要跑的那行(狀態=狀態, 專案=專案)
+
+    跑完 = subprocess.run(
+        指令,
+        cwd=專案,
+        env={**os.environ, "XDG_STATE_HOME": str(狀態)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert 跑完.returncode == 0, 跑完.stdout + 跑完.stderr
+    assert "unrecognized arguments" not in 跑完.stderr
+
+
+def test_帶了預算旗標之後那行指令還是跑得起來(tmp_path: Path) -> None:
+    """**這一支才是重點。**
+
+    `--預算token` 有沒有加到 `工作流` 的剖析器上，只有真的跑一次才知道。
+    沒加的話 argparse 回「unrecognized arguments」、退出碼 2，
+    而排程從此每 15 分鐘失敗一次——在 launchd 的 log 裡，沒有人會看到。
+    """
+    狀態, 專案 = _沒有預算的時候(tmp_path)
+    指令 = _時鐘要跑的那行(
+        "--預算token", "500000", "--預算美金", "3.5", "--預算幾小時", "6", 狀態=狀態, 專案=專案
+    )
+
+    assert "--預算token" in 指令, 指令
+    跑完 = subprocess.run(
+        指令,
+        cwd=專案,
+        env={**os.environ, "XDG_STATE_HOME": str(狀態)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert "unrecognized arguments" not in 跑完.stderr, 跑完.stderr
+    assert 跑完.returncode == 0, 跑完.stdout + 跑完.stderr
+
+
+def test_每一格都是獨立的字串(tmp_path: Path) -> None:
+    """`ProgramArguments` **不經過 shell**。
+
+    `"--預算token 500000"` 塞成一格的話，argparse 會拿到一個叫
+    「--預算token 500000」的旗標。**這一支在 plist 這一層就擋下來**，
+    不必等到 launchd 才發現。
+    """
+    狀態, 專案 = _沒有預算的時候(tmp_path)
+
+    指令 = _時鐘要跑的那行("--預算token", "500000", 狀態=狀態, 專案=專案)
+
+    assert all(" " not in 格 for 格 in 指令[1:]), 指令
