@@ -152,65 +152,76 @@ def _加委派類(
     流剖析.set_defaults(執行=處理們["工作流"])
     流剖析.add_argument("任務", nargs="*", help="要做完的事。不給就從 stdin 讀")
     流剖析.add_argument(
+        "--從收件匣",
+        action="store_true",
+        help="題目從收件匣拿最前面那一件，不從命令列給。做完會把原始請求搬到成果旁邊",
+    )
+    _一輪的旗標(流剖析)
+
+    跑剖析 = 子.add_parser("跑", help="敲一句話就開始做：先落成收件檔，再走 工作流 --從收件匣")
+    跑剖析.set_defaults(執行=處理們["跑"])
+    跑剖析.add_argument("任務", nargs="*", help="要做完的事。不給就從 stdin 讀")
+    # **不給 `--從收件匣`**：`跑` 一定是從收件匣走，那不是選項。
+    _一輪的旗標(跑剖析)
+
+
+def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
+    """一輪工作流認得的旗標。**`工作流` 與 `跑` 共用這一份。**
+
+    抄兩份的話，加一個旗標只加在一邊，症狀是「同樣的指令在 `跑` 上不認得」——
+    而那要使用者真的打了才會發現。`排程` 的 Label 就是這條 bug 的另一個實例。
+    """
+    剖析.add_argument(
         "--用",
         default=None,
         help="測試／實作／重構用哪一家。逗號分隔＝接力。不給就照派工表（例行＝agy 打頭）",
     )
-    流剖析.add_argument(
+    剖析.add_argument(
         "--審查用",
         default=None,
         help="審查員用哪一家。必須跟 --用 不同。不給就照派工表（推理＝sol）",
     )
-    流剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
-    流剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
-    流剖析.add_argument(
+    剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
+    剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
+    剖析.add_argument(
         "--預算token",
         type=int,
         default=None,
         help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
     )
-    流剖析.add_argument(
+    剖析.add_argument(
         "--預算美金",
         type=float,
         default=None,
         help="這段時間內全專案最多花多少美金，超過就停（預設不鎖；算不出成本時一律放行）",
     )
-    流剖析.add_argument(
+    剖析.add_argument(
         "--預算幾小時",
         type=float,
         default=24.0,
         help="預算的時間窗口（預設 24 小時）",
     )
-    流剖析.add_argument(
+    剖析.add_argument(
         "--不記全文",
         action="store_true",
         help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
     )
-    流剖析.add_argument(
-        "--從收件匣",
-        action="store_true",
-        help="題目從收件匣拿最前面那一件，不從命令列給。做完會把原始請求搬到成果旁邊",
-    )
-    流剖析.add_argument("--執行檔", default=None, help="--用 那家 CLI 的絕對路徑")
-    流剖析.add_argument(
-        "--最多步數", type=int, default=預設最多步數, help="停止條件：走幾步就強制停"
-    )
-    流剖析.add_argument(
+    剖析.add_argument("--執行檔", default=None, help="--用 那家 CLI 的絕對路徑")
+    剖析.add_argument("--最多步數", type=int, default=預設最多步數, help="停止條件：走幾步就強制停")
+    剖析.add_argument(
         "--最多token",
         type=int,
         default=預設最多token,
         help="停止條件：累計花到這麼多 token 就不再發下一次呼叫",
     )
-    流剖析.add_argument(
-        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
-    )
-    流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
-    流剖析.add_argument(
+    剖析.add_argument("--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本")
+    剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    剖析.add_argument(
         "--進度檔",
         default=None,
         help="跨輪的記憶：每跑完一階就寫進去，開跑前讀回來當前情。有模型全文，路徑自己挑",
     )
-    流剖析.add_argument(
+    剖析.add_argument(
         "--起點",
         default=階段代碼.測試.value,
         choices=[代碼.value for 代碼 in 階段代碼],

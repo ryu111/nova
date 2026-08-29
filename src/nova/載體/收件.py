@@ -27,13 +27,34 @@
 """
 
 import os
+import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from secrets import token_hex
 
 from nova.載體.帳本 import 專案識別
 from nova.載體.狀態 import 狀態根目錄
 
 _處理中 = "處理中"
+
+#: 誰造了這個收件檔。**ASCII：跨程序 semantic id**，會流進成果帳的 `source` 欄位被 grep。
+#: 對應路線圖觸發層那四格；現在只有前兩個生得出來。
+你敲, 檔案, 時鐘, 協定 = "typed", "file", "schedule", "mcp"
+_認得的來源 = frozenset({你敲, 檔案, 時鐘, 協定})
+
+#: 檔名開頭的時戳。**跟帳本的執行識別碼同一個格式**——「`ls` 就是時序」
+#: 靠的是它，兩邊走散的話先進先出會靜默壞掉。
+_檔名時戳 = "%Y%m%dT%H%M%SZ"
+
+#: 檔名裡放不進去的字。題目可能有斜線、換行、引號。
+_檔名不要的 = re.compile(r"[^\w]+", re.UNICODE)
+
+#: 題目擷取幾個字當標籤。太長的檔名在 `ls` 裡會換行，反而看不出佇列。
+_標籤幾個字 = 24
+
+#: 檔名至少要有「時戳-來源」兩段才判得出來源。
+_最少幾段 = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +68,53 @@ class 收件單:
     名稱: str
     任務: str
     處理中路徑: Path
+    #: 誰造了這個收件檔（`typed`／`file`／…）。**不是「誰醒來把它撈起來」**——
+    #: 排程把一個手丟的檔案做掉，那一件的來源仍然是檔案。
+    來源: str = 檔案
 
 
 def 收件目錄(專案: Path | None = None) -> Path:
     """收件匣住哪。跟帳本、已處理是同一個專案資料夾底下的三個目錄。"""
     底 = 狀態根目錄()
     return 底 / "收件" if 專案 is None else 底 / "專案" / 專案識別(專案) / "收件"
+
+
+def 丟一件(題目: str, *, 來源: str, 目錄: Path | None = None) -> Path:
+    """把一句話落成一個收件檔，回傳它的位置。**這是「你敲」變成事件的那一步。**
+
+    檔名長成 `<時戳>-<來源>-<標籤>-<亂碼>.md`：時戳讓 `ls` 就是時序（先進先出
+    靠的是它），來源讓成果帳分得出是誰觸發的，亂碼讓同一秒敲兩次不會互相蓋掉。
+    """
+    if 來源 not in _認得的來源:
+        訊息 = f"不認得的來源 {來源!r}——只准 {sorted(_認得的來源)}"
+        raise ValueError(訊息)
+    內容 = 題目.strip()
+    if not 內容:
+        訊息 = "題目是空的，派不出工"
+        raise ValueError(訊息)
+    在哪 = 目錄 or 收件目錄()
+    在哪.mkdir(parents=True, exist_ok=True)
+    當下 = datetime.now(UTC).strftime(_檔名時戳)
+    標籤 = _檔名不要的.sub("-", 內容)[:_標籤幾個字].strip("-") or "工作"
+    落點 = 在哪 / f"{當下}-{來源}-{標籤}-{token_hex(3)}.md"
+    落點.write_text(內容 + "\n", encoding="utf-8")
+    return 落點
+
+
+def 誰造的(檔名: str) -> str:
+    """從檔名讀出來源。讀不出來就是**檔案**——那是手丟進去的，而那也是一種來源。
+
+    判準要夠緊：第一段是時戳、第二段是認得的來源。鬆的話一個剛好叫
+    `2026-typed-x.md` 的手丟檔會被標成你敲。
+    """
+    段 = 檔名.split("-")
+    if len(段) < _最少幾段 or 段[1] not in _認得的來源:
+        return 檔案
+    try:
+        datetime.strptime(段[0], _檔名時戳).replace(tzinfo=UTC)
+    except ValueError:
+        return 檔案
+    return 段[1]
 
 
 def 待處理(目錄: Path | None = None) -> list[Path]:
@@ -106,7 +168,12 @@ def _搶下來(候選: Path, 收件: Path) -> 收件單 | None:
         候選.rename(目標)
     except OSError:
         return None  # 別人先搶到了，或檔案剛好被拿走
-    return 收件單(名稱=候選.stem, 任務=內容.strip(), 處理中路徑=目標)
+    return 收件單(
+        名稱=候選.stem,
+        任務=內容.strip(),
+        處理中路徑=目標,
+        來源=誰造的(候選.name),
+    )
 
 
 def _讀得到嗎(路徑: Path) -> str | None:
