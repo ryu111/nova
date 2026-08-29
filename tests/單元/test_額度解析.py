@@ -15,6 +15,7 @@ from nova.載體.額度 import (
     視窗型,
     解析agy額度,
     解析codex額度,
+    該重抓嗎,
     額度快取路徑,
 )
 
@@ -198,3 +199,31 @@ class Test短窗排前面:
             ]
         )
         assert [視窗["label"] for 視窗 in 排好] == ["5h", "10h"]
+
+
+class Test該重抓嗎:
+    """節流的判斷。
+
+    **這一格原本住在 `~/.claude/settings.json` 的一行 `find -mmin -15` 裡**——
+    設定檔裡的程式碼沒辦法測試，等於沒有保證；而且快取路徑在那裡寫了第二份，
+    nova 哪天搬家，那條 hook 會安靜地一直看舊路徑、永遠判定「還新」、永遠不刷。
+    搬回來就是為了讓它被這幾支守著。
+    """
+
+    def test_快取不在就一定要抓(self) -> None:
+        assert 該重抓嗎(None, 900) is True
+
+    def test_比門檻舊就要抓(self) -> None:
+        assert 該重抓嗎(901, 900) is True
+
+    def test_剛好等於門檻也要抓(self) -> None:
+        """邊界要往「抓」那邊倒：多抓一次只花幾秒，少抓一次是顯示騙人。"""
+        assert 該重抓嗎(900, 900) is True
+
+    def test_比門檻新就不要抓(self) -> None:
+        assert 該重抓嗎(899, 900) is False
+
+    def test_門檻是0就一律要抓(self) -> None:
+        """`nova 額度` 不帶旗標時預設不節流——直接叫它就是要現在的數字。"""
+        assert 該重抓嗎(0, 0) is True
+        assert 該重抓嗎(99999, 0) is True

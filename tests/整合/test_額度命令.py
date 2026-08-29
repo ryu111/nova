@@ -246,3 +246,101 @@ class Test問不到的時候不准卡住:
         assert 視窗清單 == [], "問不到就不准生出任何視窗"
         assert 錯誤 is not None, "問不到必須講出來，不准靜靜地當成空的"
         assert 花了 < 10, f"卡了 {花了:.1f} 秒——截止時間沒有生效"
+
+
+# 假 CLI 的記數版：每被叫一次就往 $額度呼叫紀錄 追加一行。
+# 只看快取檔的 mtime 不夠——那只證明「沒有寫」，證明不了「沒有去問」，
+# 而節流要省的正是「去問」那幾秒。
+假codex記數內容 = f"""#!{sys.executable}
+import json, os, sys
+
+with open(os.environ["額度呼叫紀錄"], "a") as f:
+    f.write("codex\\n")
+
+if len(sys.argv) > 1 and sys.argv[1] == "app-server":
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        try:
+            req = json.loads(line)
+        except Exception:
+            continue
+        if req.get("method") == "account/rateLimits/read":
+            sys.stdout.write(json.dumps({{
+                "jsonrpc": "2.0", "id": req.get("id"),
+                "result": {{"rateLimits": {{"limitId": "codex", "secondary": None,
+                    "primary": {{"usedPercent": 18, "windowDurationMins": 10080,
+                                 "resetsAt": 1788452826}}}}}},
+            }}) + "\\n")
+            sys.stdout.flush()
+"""
+
+假agy記數內容 = f"""#!{sys.executable}
+import os, sys
+
+with open(os.environ["額度呼叫紀錄"], "a") as f:
+    f.write("agy\\n")
+
+sys.stdout.write("Gemini Models\\tFive Hour Limit Remaining\\t80%\\t2026-08-29T18:09:43Z\\n")
+sys.stdout.flush()
+"""
+
+
+class Test節流:
+    """快取還新的時候不准再去問。
+
+    這個判斷原本住在 `~/.claude/settings.json` 的一行 shell 裡——
+    設定檔裡的程式碼沒辦法測試，而且快取路徑在那邊寫了第二份。搬回 nova 才守得住。
+    """
+
+    def _裝記數的假CLI(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        目錄 = tmp_path / "bin"
+        目錄.mkdir(parents=True, exist_ok=True)
+        紀錄 = tmp_path / "呼叫紀錄.txt"
+        monkeypatch.setenv("額度呼叫紀錄", str(紀錄))
+        for 名, 內容 in (("codex", 假codex記數內容), ("agy", 假agy記數內容)):
+            檔 = 目錄 / f"count-{名}"
+            檔.write_text(內容, encoding="utf-8")
+            檔.chmod(檔.stat().st_mode | stat.S_IEXEC)
+        monkeypatch.setattr(
+            "nova.載體.模型.轉接.找執行檔",
+            lambda 家, **_: 目錄 / f"count-{家 if 家 in ('codex', 'agy') else 'codex'}",
+        )
+        return 紀錄
+
+    def test_第二次叫的時候不准再去問(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        紀錄 = self._裝記數的假CLI(tmp_path, monkeypatch)
+
+        assert 主程式(["額度", "--最舊", "900"]) == 0
+        第一次 = 紀錄.read_text(encoding="utf-8").count("\n")
+        assert 第一次 == 2, "第一次沒有快取，兩家都該被問到"
+
+        assert 主程式(["額度", "--最舊", "900"]) == 0
+        assert 紀錄.read_text(encoding="utf-8").count("\n") == 第一次, (
+            "快取還新的時候又去問了一次——節流沒有生效"
+        )
+
+    def test_不給旗標就一律去問(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`nova 額度` 直接叫就是要現在的數字，預設不准節流。"""
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        紀錄 = self._裝記數的假CLI(tmp_path, monkeypatch)
+
+        assert 主程式(["額度"]) == 0
+        assert 主程式(["額度"]) == 0
+        assert 紀錄.read_text(encoding="utf-8").count("\n") == 4, "預設就節流了，不該如此"
+
+    def test_快取還新的時候不准把它蓋掉(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        self._裝記數的假CLI(tmp_path, monkeypatch)
+        assert 主程式(["額度", "--最舊", "900"]) == 0
+
+        快取檔 = tmp_path / "state" / "nova" / "額度" / "快取.json"
+        先前 = 快取檔.stat().st_mtime_ns
+        assert 主程式(["額度", "--最舊", "900"]) == 0
+        assert 快取檔.stat().st_mtime_ns == 先前, "沒去問卻把檔案重寫了一次"

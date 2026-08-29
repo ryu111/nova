@@ -197,3 +197,10 @@ def _加觀測類(
 
     額度剖析 = 子.add_parser("額度", help="向 codex 與 agy 查詢限額並寫入狀態快取")
     額度剖析.set_defaults(執行=處理們["額度"])
+    額度剖析.add_argument(
+        "--最舊",
+        type=float,
+        default=0.0,
+        metavar="秒",
+        help="節流：快取比這麼多秒新就什麼都不做。不給就一律重新去問",
+    )

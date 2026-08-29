@@ -306,6 +306,25 @@ def 短窗排前面(視窗清單: list[視窗型]) -> list[視窗型]:
     return sorted(視窗清單, key=lambda 視窗: _標籤分鐘(視窗["label"]))
 
 
+def 該重抓嗎(快取年紀秒: float | None, 最舊秒: float) -> bool:
+    """快取有多舊、超過多舊就重抓。`快取年紀秒` 是 None 代表快取不在。
+
+    **邊界往「抓」那邊倒**：多抓一次只花幾秒，少抓一次是拿舊數字騙人。
+    `最舊秒` 是 0 就一律重抓——直接叫 `nova 額度` 的人要的是現在的數字。
+    """
+    if 快取年紀秒 is None:
+        return True
+    return 快取年紀秒 >= 最舊秒
+
+
+def _快取年紀(檔: Path, 現在: float) -> float | None:
+    """快取檔幾秒前寫的。不在或讀不到都回 None——讀不到就當沒有，不要猜。"""
+    try:
+        return 現在 - 檔.stat().st_mtime
+    except OSError:
+        return None
+
+
 def _寫入快取檔(家族清單: list[家族型]) -> None:
     """將查詢到的家族額度資料寫入狀態快取檔。"""
     快取檔 = 額度快取路徑()
@@ -317,13 +336,20 @@ def _寫入快取檔(家族清單: list[家族型]) -> None:
     快取檔.write_text(json.dumps(快取資料, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def 執行查詢額度() -> int:
+def 執行查詢額度(*, 最舊秒: float = 0.0) -> int:
     """查詢 codex 與 agy 額度並寫入快取。
 
+    `最舊秒` 是節流：快取比它新就什麼都不做、直接回 0。
+    **這一格刻意住在 nova 而不是叫的人那邊**——快取檔在哪、多久算舊，
+    都是 nova 的知識。散到呼叫端的設定檔裡就變成兩份，而且測不到。
+
     退出碼：
-    - 兩家都成功回 0
+    - 兩家都成功（或快取還新、根本沒去問）回 0
     - 任一家失敗回 1（成功的那家仍寫入快取）
     """
+    if not 該重抓嗎(_快取年紀(額度快取路徑(), time.time()), 最舊秒):
+        return 0
+
     成功家族清單: list[家族型] = []
     全部成功 = True
 
