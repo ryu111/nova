@@ -125,6 +125,10 @@ def 決定逾時秒(選項: 呼叫選項) -> float:
     return 選項.逾時秒
 
 
+#: 開網路的設定鍵。**只對 `workspace-write` 有效**——`read-only` 沒有這個概念。
+codex網路設定 = "sandbox_workspace_write.network_access"
+
+
 #: codex **沒有** `--effort` 旗標（實測 `codex exec --help`），推理強度走設定覆寫。
 #: 值要是合法的 TOML，所以字串得再包一層引號。
 codex推理強度 = "max"
@@ -156,7 +160,10 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         # `printf > ~/x.txt`，模型說「這在工作區外需要額外權限」然後自己核准，exit 0。
         # `--sandbox workspace-write` 才是真邊界（同一條指令 operation not permitted），
         # 而且是三家裡唯一的 OS 層邊界。代價是沙箱同時關掉網路——裝套件要用全開。
-        共通 += ["--sandbox", "workspace-write"]
+        # 沙箱**同時**關掉網路（實測 `curl` 回 `000`）。研究類的委派沒有網路等於廢的，
+        # 而這一條把網路打開之後檔案邊界照樣在（同一條 `printf > ~/x.txt` 還是
+        # operation not permitted）——**這家開網路沒有代價**，所以是預設不是旗標。
+        共通 += ["--sandbox", "workspace-write", "-c", f"{codex網路設定}=true"]
     else:
         # 全開才用這條——它連沙箱都拿掉。
         共通 += ["--dangerously-bypass-approvals-and-sandbox"]
@@ -171,7 +178,13 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     # agy 查不到設定隔離的旗標（見設計文件 02 缺口），所以 隔離設定 對它是 no-op。
     模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
     參數 = ["--output-format", "json", "--mode", 模式]
-    if 選項.權限 is 權限.全開:
+    if 選項.權限 is not 權限.唯讀:
+        # agy 的 `read_url`（網路）被 headless 權限系統 auto-deny，唯一的開關就是這條。
+        #
+        # **代價是真的**：auto-deny 正是 agy 唯一的越界保護
+        # （`--sandbox` 與 `--mode plan` 都擋不住寫，三種組合都實測過）。
+        # 打開它，agy 的可編輯就跟全開一樣沒有邊界——使用者裁定接受這個交換，
+        # 由 `test_agy的可編輯沒有邊界這是已知事實` 誠實釘住，不假裝有保證。
         參數 += ["--dangerously-skip-permissions"]
     if 選項.工作目錄 is not None:
         # `--add-dir` 決定 agy 動得到哪個目錄，**而不是 cwd**。實測三件事：
