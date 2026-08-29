@@ -38,6 +38,7 @@ from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
+from nova.載體.收件 import 完成一件, 待處理, 收下一件, 收件單, 收件目錄
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
@@ -410,6 +411,43 @@ def _工作流前置檢查(參數: argparse.Namespace, 工作目錄: Path, 進�
     return None
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _題目:
+    """這一輪要做什麼，以及它是不是從收件匣來的。
+
+    `收件` 不是 None 的話，做完要把原始請求搬到成果旁邊——
+    成果帳本說「這件收在護欄」，你要看得到當初丟進來的是什麼。
+    """
+
+    描述: str
+    收件: 收件單 | None
+
+
+def _這次要做什麼(參數: argparse.Namespace) -> _題目 | int:
+    """決定題目從哪來。**回 int ＝ 沒得做，那個數字就是退出碼。**
+
+    題目可以從收件匣來——檔案就是事件。不另外開一條執行路徑，
+    因為預算、判準、歸檔各一份的話，兩份遲早會不一樣。
+
+    **空收件匣回 0，沒給題目回 2。** 兩者不一樣：排程每小時醒來一次，
+    多數時候收件匣本來就是空的，那是正常狀態不是錯誤；
+    「你什麼都沒給」才是使用者打錯。回同一個碼的話，
+    排程的 log 會被永遠不會有人修的錯誤塞滿。
+    """
+    if 參數.從收件匣:
+        匣 = 收件目錄(在哪跑(None))
+        收件 = 收下一件(匣)
+        if 收件 is None:
+            print(f"收件匣是空的（{匣}）", file=sys.stderr)
+            return 放行
+        return _題目(描述=收件.任務, 收件=收件)
+    描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
+    if not 描述.strip():
+        print("沒有任務可以做（用參數給、從 stdin 餵，或丟進收件匣）", file=sys.stderr)
+        return 阻擋
+    return _題目(描述=描述, 收件=None)
+
+
 def _子命令_工作流(參數: argparse.Namespace) -> int:
     """跑一輪 TDD：測試 → 驗證紅 → 實作 → 驗證綠 → 審查。
 
@@ -421,10 +459,10 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     if 擋住 is not None:
         print(擋住, file=sys.stderr)
         return 阻擋
-    描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
-    if not 描述.strip():
-        print("沒有任務可以做（用參數給，或從 stdin 餵）", file=sys.stderr)
-        return 阻擋
+    題 = _這次要做什麼(參數)
+    if isinstance(題, int):
+        return 題
+    描述, 收件 = 題.描述, 題.收件
     # **兩本帳共用同一個識別碼**：成果上的識別碼就是事件帳本那個
     # `<執行識別碼>.jsonl` 的檔名，走散了就對不回去。
     識別 = 新執行識別碼()
@@ -476,6 +514,10 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     print(f"\n{果.結束.代碼.value}：{果.結束.原因}", file=sys.stderr)
     碼 = _工作流退出碼(果.結束, 果.軌跡)
     _歸檔成果(參數, 識別=識別, 任務=描述, 果=果, 退出碼=碼)
+    if 收件 is not None:
+        # **成果要對得回請求**：兩邊都用執行識別碼當檔名，所以看到
+        # 「這件收在護欄」的時候，旁邊就是當初丟進來的原文。
+        完成一件(收件, 執行識別碼=識別, 已處理=_已處理目錄(參數))
     return 碼
 
 
@@ -582,6 +624,31 @@ def _工作流退出碼(收場: 結束, 軌跡: tuple[步驟結果, ...]) -> int
     if any(步.終局 is 終局.結果未知 for 步 in 軌跡):
         return 未知
     return _收場的退出碼[收場.代碼]
+
+
+def _子命令_收件(參數: argparse.Namespace) -> int:
+    """看收件匣：丟一個檔進去就是派一次工，檔案內容就是題目。
+
+    **這一格只讀不跑。** 要跑是 `nova 工作流 --從收件匣`——另外開一條執行路徑
+    的話，預算、判準、歸檔就會有兩份，而兩份遲早會不一樣。
+    """
+    del 參數
+    目錄 = 收件目錄(在哪跑(None))
+    等著的 = 待處理(目錄)
+    處理中目錄 = 目錄 / "處理中"
+    處理中 = sorted(處理中目錄.glob("*")) if 處理中目錄.is_dir() else []
+    print(f"收件匣：{目錄}")
+    if not 等著的 and not 處理中:
+        print("  （空的。丟一個檔進去就是派一次工，檔案內容就是題目）")
+        return 放行
+    for 路 in 等著的:
+        print(f"  等著  {路.name}")
+    for 路 in 處理中:
+        # 留在這裡的是「收下了但沒收尾」——多半是程序被殺掉。
+        # **不自動放回佇列**：它可能已經做了一半，重跑會把副作用再做一次
+        # （跟退出碼 3「腳本不准重跑」同一條規則）。
+        print(f"  ⚠ 沒收尾  {路.name}（收下了但沒寫下結果，可能做了一半）")
+    return 放行
 
 
 def _子命令_帳本(參數: argparse.Namespace) -> int:
@@ -746,6 +813,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "檢查提交訊息": _子命令_檢查提交訊息,
     "問": _子命令_問,
     "工作流": _子命令_工作流,
+    "收件": _子命令_收件,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
     "生圖": _子命令_生圖,
