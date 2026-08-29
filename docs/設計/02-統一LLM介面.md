@@ -116,7 +116,7 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 | | claude | codex | agy |
 |---|---|---|---|
-| 唯讀 | `--restricted --add-dir <工作目錄> --tools Read,Grep,Glob` | `--sandbox read-only` | `--mode plan --add-dir <工作目錄>`（**擋不住寫，見下**） |
+| 唯讀 | `--restricted --add-dir <工作目錄> --tools Read,Grep,Glob` | `--sandbox read-only` | `--mode plan --add-dir <工作目錄>`（**擋不住寫，也擋不住生圖，見下**） |
 | 可編輯 | `--restricted --add-dir <工作目錄> --tools <清單> --allowedTools <同一份> --permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits --add-dir <工作目錄>` |
 | 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
 | 生圖 | ❌ 沒有 | ❌ 沒有 | `generate_image` **可用**，但只有**全開**權限下檔案才進得了工作目錄；可編輯下圖留在 `~/.gemini/.../brain/` 而 CLI 假回報成功（見下節） |
@@ -234,7 +234,7 @@ JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐
 
 | 問題 | claude | codex | agy |
 |---|---|---|---|
-| 唯讀擋得住寫檔嗎 | ✅ 白名單裡沒有 Write／Edit／Bash | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下） |
+| 唯讀擋得住寫檔嗎 | ✅ 白名單裡沒有 Write／Edit／Bash | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下）——連生圖與 brain 目錄裡的 `plan.md`／`walkthrough.md` 都擋不住 |
 | 唯讀看得到工作目錄嗎 | 要白名單有 Read（見下） | ✅ | 要 `--add-dir`，不給就連讀都被 auto-deny |
 | 可編輯寫得進工作目錄嗎 | 要三條旗標湊齊（見下） | ✅ | 要 `--add-dir`（見下） |
 | 可編輯擋得住寫**工作目錄外面**嗎 | ❌ 檔案工具擋得住，**Bash 繞得過** | ✅ **OS 層拒絕**（operation not permitted） | 走 shell 的工具被 headless 權限系統 auto-deny |
@@ -421,7 +421,7 @@ envelope        → status: SUCCESS、error: null、response: ""
 
 | 權限 | `generate_image` | 檔案落到哪 | nova 回什麼 |
 |---|---|---|---|
-| 唯讀（`--mode plan`） | **沒試**（見下方開放問題） | — | — |
+| 唯讀（`--mode plan`） | ✅ **成功——擋不住** | `~/.gemini/.../brain/<sid>/*.jpg`，外加 `plan.md`／`walkthrough.md` | `成功`（70,047 → 2,334 token） |
 | 可編輯（`--mode accept-edits`） | ✅ 成功 | `~/.gemini/antigravity-cli/brain/<sid>/*.jpg`——**`--add-dir` 管不到它** | `結果未知`（空回應降級擋下） |
 | 全開（`--dangerously-skip-permissions`） | ✅ 成功 | ✅ **工作目錄**（實測 `star.png`、1,070,181 位元組、1024×1024） | `成功`，文字帶檔案路徑與大小 |
 
@@ -439,12 +439,34 @@ envelope        → status: SUCCESS、error: null、response: ""
 **這條保證的正當性沒有因為誤記而動搖，反而被這次驗證了。** 改的只是註解裡
 錯誤的歸屬——誤記會讓下一個人去修錯的地方。
 
-### 開放問題（今晚沒驗）
+### 唯讀擋不擋得住生圖？驗過了：**擋不住**
 
-唯讀（`plan` 模式）擋不擋得住生圖？**傾向擋不住**：圖是寫到
-`~/.gemini/antigravity-cli/brain/` 而不是 workspace，唯讀的白名單管的是
-workspace 內的檔案工具。如果真的擋不住，那就是**唯讀權限的第四個破口**，
-要進 `docs/設計/02` 的權限表而不是這一節。下次驗。
+同一天稍後驗的（`--mode plan`、給 `--add-dir <工作目錄>`）：
+
+```
+提示：用 generate_image 產生一張簡單的圓形圖。做完告訴我圖存在哪個絕對路徑。
+終局：成功（70,047 → 2,334 token）
+工作目錄：空的
+~/.gemini/antigravity-cli/brain/<sid>/ ：
+    simple_circle_1787968408637.jpg   ← 圖真的生出來了
+    plan.md            plan.md.metadata.json
+    walkthrough.md     walkthrough.md.metadata.json
+```
+
+**這是唯讀的第四個破口，而且比生圖本身更大條**：`plan` 模式不只生得出圖，
+還在自己的 brain 目錄裡寫了 `plan.md`、`walkthrough.md` 跟一整包 metadata。
+也就是說 **agy 的「唯讀」只約束 workspace，對它自己的家目錄完全沒有約束。**
+
+這不改任何結論，只是把已經寫過的那句話再釘一次：
+
+> **agy 的唯讀是加速器，不是保證。**
+
+`test_agy的唯讀擋不住寫檔這是已知事實` 斷言的就是「擋不住」——
+現在知道它擋不住的範圍比原本以為的更廣。要真的邊界只有兩條路：
+用 codex（唯一有 OS 層沙箱的一家），或者在 nova 外面再包一層容器。
+
+**沒有連帶風險的部分**：brain 目錄裡的東西不會流進工作目錄，也就不會被受測的
+repo 自己 commit 進去。所以這是「約束不到」，不是「污染」。
 
 ## 已知缺口
 
