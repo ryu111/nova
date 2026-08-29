@@ -5,21 +5,26 @@
 
 import contextlib
 import json
+import queue
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import IO, Any, TypedDict
 
 from nova.載體.模型 import 轉接
 from nova.載體.狀態 import 狀態根目錄
 
-# 顯式 re-export 供呼叫端與測試直接由本模組取用狀態根目錄（mypy strict 需明示）
-__all__ = ["狀態根目錄"]
-
 _一天幾分 = 1440
 _一小時幾分 = 60
+#: codex 的 app-server 要起程序、要連網，實測熱機 4 秒。給 15 秒是留冷啟動的餘裕。
+#: **這個上限不是裝飾**：沒有它，app-server 起得來但不回話時 readline 會永遠卡住。
+_codex截止秒 = 15.0
+#: agy 的 /usage 實測熱機 3.6 秒。10 秒對冷啟動太緊，會把「慢」誤判成「失敗」。
+_agy逾時秒 = 30.0
 _agy欄位數 = 4
 _codex查詢id = 2
 
@@ -162,30 +167,63 @@ def 解析agy額度(文字: str) -> list[視窗型]:
     return 視窗清單
 
 
-def _向codex通訊(程序: subprocess.Popen[str]) -> tuple[dict[str, Any] | None, str | None]:
-    """向 codex app-server 送出 initialize 與 read 請求並等待 id=2 回應。"""
-    if 程序.stdin is None or 程序.stdout is None:
-        return None, "無法建立 stdin/stdout 管道"
+def _收行(輸出: IO[str], 佇: queue.Queue[str | None]) -> None:
+    """把子程序的每一行丟進佇列。讀完（管線關了）就丟一個 None 當結束記號。"""
+    for 行 in 輸出:
+        佇.put(行)
+    佇.put(None)
 
+
+def _送握手(程序: subprocess.Popen[str]) -> str | None:
+    """把 initialize、initialized、rateLimits/read 三則送出去。有問題回錯誤訊息。"""
+    if 程序.stdin is None or 程序.stdout is None:
+        return "無法建立 stdin/stdout 管道"
     try:
         for 訊息 in _codex初始化與查詢訊息們:
             程序.stdin.write(json.dumps(訊息) + "\n")
             程序.stdin.flush()
     except Exception as 錯:
-        return None, f"與 codex 通訊失敗：{錯}"
+        return f"與 codex 通訊失敗：{錯}"
+    return None
 
-    # 用 readline 逐行讀取而非迭代器，避免 stdout 內部緩衝預讀導致阻塞
+
+def _等到那一則(
+    佇: queue.Queue[str | None], 截止秒: float
+) -> tuple[dict[str, Any] | None, str | None]:
+    """在截止時間內等 id=2 那一則。中間夾雜的通知一律略過。"""
+    截止 = time.monotonic() + 截止秒
+    逾時了 = f"等 codex 回應超過 {截止秒:g} 秒"
     while True:
-        行 = 程序.stdout.readline()
-        if not 行:
-            break
+        剩下 = 截止 - time.monotonic()
+        if 剩下 <= 0:
+            return None, 逾時了
         try:
-            收到: object = json.loads(行)
-        except Exception:
-            收到 = None
-        if isinstance(收到, dict) and 收到.get("id") == _codex查詢id:
-            return 收到, None
-    return None, f"未收到 id={_codex查詢id} 之回應"
+            行 = 佇.get(timeout=剩下)
+        except queue.Empty:
+            return None, 逾時了
+        if 行 is None:
+            return None, f"未收到 id={_codex查詢id} 之回應"
+        with contextlib.suppress(Exception):
+            收到 = json.loads(行)
+            if isinstance(收到, dict) and 收到.get("id") == _codex查詢id:
+                return 收到, None
+
+
+def _向codex通訊(
+    程序: subprocess.Popen[str], 截止秒: float
+) -> tuple[dict[str, Any] | None, str | None]:
+    """向 codex app-server 送出請求並等 id=2 回應。
+
+    **讀那一邊一定要另外開執行緒**：`readline` 卡住的時候沒有人叫得動它——
+    子程序還活著、管線也沒關，它就不會回來。主執行緒只等佇列，時間到就放棄。
+    """
+    錯誤 = _送握手(程序)
+    if 錯誤 is not None or 程序.stdout is None:
+        return None, 錯誤 or "無法建立 stdout 管道"
+
+    佇: queue.Queue[str | None] = queue.Queue()
+    threading.Thread(target=_收行, args=(程序.stdout, 佇), daemon=True).start()
+    return _等到那一則(佇, 截止秒)
 
 
 def _終止程序(程序: subprocess.Popen[str]) -> None:
@@ -197,7 +235,7 @@ def _終止程序(程序: subprocess.Popen[str]) -> None:
         程序.kill()
 
 
-def 查詢codex額度() -> tuple[list[視窗型], str | None]:
+def 查詢codex額度(*, 截止秒: float = _codex截止秒) -> tuple[list[視窗型], str | None]:
     """向 codex app-server 查詢限額。回傳 (視窗清單, 錯誤訊息)。"""
     try:
         執行檔 = 轉接.找執行檔("codex")
@@ -205,14 +243,16 @@ def 查詢codex額度() -> tuple[list[視窗型], str | None]:
             [str(執行檔), "app-server"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            # stderr 沒有人讀。開成管線的話，app-server 吐滿緩衝區就換它卡住——
+            # 補了 stdout 的逾時卻在這裡留一條同樣的路，等於沒補。
+            stderr=subprocess.DEVNULL,
             text=True,
         )
     except Exception as 錯:
         return [], f"啟動 codex app-server 失敗：{錯}"
 
     try:
-        回應字典, 錯誤 = _向codex通訊(程序)
+        回應字典, 錯誤 = _向codex通訊(程序, 截止秒)
     finally:
         _終止程序(程序)
 
@@ -238,7 +278,7 @@ def 查詢agy額度() -> tuple[list[視窗型], str | None]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=10,
+            timeout=_agy逾時秒,
         )
     except Exception as 錯:
         return [], f"執行 agy /usage 失敗：{錯}"
@@ -250,6 +290,20 @@ def 查詢agy額度() -> tuple[list[視窗型], str | None]:
     if not 視窗清單:
         return [], "解析 agy 額度為空"
     return 視窗清單, None
+
+
+def _標籤分鐘(標籤: str) -> int:
+    """把 `分鐘轉標籤` 產出的標籤換回分鐘。用來排序，不對外。"""
+    單位 = {"d": _一天幾分, "h": _一小時幾分, "m": 1}
+    return int(標籤[:-1]) * 單位[標籤[-1]]
+
+
+def 短窗排前面(視窗清單: list[視窗型]) -> list[視窗型]:
+    """照視窗長度由短到長排。
+
+    來源順序不能信：agy 吐的是 Weekly 在前，照抄會顯示成「7d 5h」，讀起來是反的。
+    """
+    return sorted(視窗清單, key=lambda 視窗: _標籤分鐘(視窗["label"]))
 
 
 def _寫入快取檔(家族清單: list[家族型]) -> None:
@@ -278,14 +332,14 @@ def 執行查詢額度() -> int:
         ("agy", "ay", 查詢agy額度),
     )
 
-    for 名稱, 標記, 查詢函式 in 查詢清單:
+    for 名稱, 家族代碼, 查詢函式 in 查詢清單:
         視窗清單, 錯誤 = 查詢函式()
         if 錯誤:
             全部成功 = False
             sys.stderr.write(f"[{名稱}] 失敗：{錯誤}\n")
         else:
             sys.stderr.write(f"[{名稱}] 成功取得額度\n")
-            成功家族清單.append({"family": 標記, "windows": 視窗清單})
+            成功家族清單.append({"family": 家族代碼, "windows": 短窗排前面(視窗清單)})
 
     if 成功家族清單:
         _寫入快取檔(成功家族清單)

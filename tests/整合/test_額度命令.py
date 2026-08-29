@@ -6,14 +6,13 @@
 import json
 import stat
 import sys
-from collections.abc import Callable
+import time
 from pathlib import Path
 
 import pytest
 
 from nova.載體.命令列 import 主程式
-
-做假CLI型 = Callable[..., tuple[Path, Path]]
+from nova.載體.額度 import 查詢codex額度
 
 # 假 codex 實作 app-server JSON-RPC 2.0 協議
 假codex內容 = f"""#!{sys.executable}
@@ -142,11 +141,12 @@ class Test額度命令整合:
         assert "ay" in 家族字典
 
         assert 家族字典["cx"] == [{"label": "7d", "used_percent": 18, "resets_at": 1788452826}]
+        # 短窗排前面：agy 原本吐的是 Weekly 在前，直接照抄會顯示成「7d 5h」，讀起來是反的
         assert len(家族字典["ay"]) == 2
-        assert 家族字典["ay"][0]["label"] == "7d"
-        assert 家族字典["ay"][0]["used_percent"] == 11
-        assert 家族字典["ay"][1]["label"] == "5h"
-        assert 家族字典["ay"][1]["used_percent"] == 20
+        assert 家族字典["ay"][0]["label"] == "5h"
+        assert 家族字典["ay"][0]["used_percent"] == 20
+        assert 家族字典["ay"][1]["label"] == "7d"
+        assert 家族字典["ay"][1]["used_percent"] == 11
 
         擷取 = capsys.readouterr()
         assert "codex" in 擷取.err or "cx" in 擷取.err
@@ -196,3 +196,53 @@ class Test額度命令整合:
 
         碼 = 主程式(["額度"])
         assert 碼 == 1
+
+
+# 假 codex：握手照回，但 account/rateLimits/read 永遠不回話，而且不結束。
+# 這模擬的是「app-server 起得來但問不到」——沒有逾時的話 readline 會永遠卡住。
+假codex裝死內容 = f"""#!{sys.executable}
+import json, sys, time
+
+if len(sys.argv) > 1 and sys.argv[1] == "app-server":
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        try:
+            req = json.loads(line)
+        except Exception:
+            continue
+        if req.get("method") == "initialize":
+            sys.stdout.write(
+                json.dumps({{"jsonrpc": "2.0", "id": req.get("id"), "result": {{}}}}) + "\\n"
+            )
+            sys.stdout.flush()
+        elif req.get("method") == "account/rateLimits/read":
+            time.sleep(60)
+"""
+
+
+class Test問不到的時候不准卡住:
+    """codex 的 app-server 起得來但不回話時，必須在截止時間內放棄。
+
+    沒有這一格，狀態列的刷新會永遠掛在 `readline` 上：
+    子程序活著、管線沒關，`readline` 不會回來。
+    """
+
+    def test_codex裝死時要在截止時間內放棄(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        目錄 = tmp_path / "bin"
+        目錄.mkdir(parents=True, exist_ok=True)
+        裝死 = 目錄 / "fake-mute-codex"
+        裝死.write_text(假codex裝死內容, encoding="utf-8")
+        裝死.chmod(裝死.stat().st_mode | stat.S_IEXEC)
+        monkeypatch.setattr("nova.載體.模型.轉接.找執行檔", lambda *_, **__: 裝死)
+
+        開始 = time.monotonic()
+        視窗清單, 錯誤 = 查詢codex額度(截止秒=0.5)
+        花了 = time.monotonic() - 開始
+
+        assert 視窗清單 == [], "問不到就不准生出任何視窗"
+        assert 錯誤 is not None, "問不到必須講出來，不准靜靜地當成空的"
+        assert 花了 < 10, f"卡了 {花了:.1f} 秒——截止時間沒有生效"

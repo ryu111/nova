@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from nova.載體.狀態 import 狀態根目錄
 from nova.載體.額度 import (
     分鐘轉標籤,
-    狀態根目錄,
+    短窗排前面,
+    視窗型,
     解析agy額度,
     解析codex額度,
     額度快取路徑,
@@ -162,3 +164,37 @@ class Test狀態路徑:
         monkeypatch.setenv("XDG_STATE_HOME", "/自訂/狀態")
         assert 狀態根目錄() == Path("/自訂/狀態/nova")
         assert 額度快取路徑() == Path("/自訂/狀態/nova/額度/快取.json")
+
+
+class Test短窗排前面:
+    """來源順序不能信：agy 吐的是 Weekly 在前，照抄會顯示成「7d 5h」，讀起來是反的。"""
+
+    def test_長窗在前也要被排到後面(self) -> None:
+        排好 = 短窗排前面(
+            [
+                {"label": "7d", "used_percent": 11, "resets_at": 2},
+                {"label": "5h", "used_percent": 20, "resets_at": 1},
+            ]
+        )
+        assert [視窗["label"] for 視窗 in 排好] == ["5h", "7d"]
+
+    def test_只有一格就原樣回來(self) -> None:
+        只有一格: list[視窗型] = [{"label": "7d", "used_percent": 18, "resets_at": 3}]
+        assert 短窗排前面(只有一格) == 只有一格
+
+    def test_排序的鍵是視窗長度不是字串(self) -> None:
+        """`"5h" < "7d"` 剛好成立，所以只有這兩格的話，字串比較會矇混過去。
+
+        `10h` 與 `5h` 才分得開：字串比 `"10h" < "5h"`（比的是第一個字元），
+        跟正確答案（5 小時在前）剛好相反。
+
+        **這支是負控逼出來的**：第一版用 90m 與 1h，字串比也剛好給對答案，
+        所以把排序改成比字串它照樣綠——那等於沒有守。
+        """
+        排好 = 短窗排前面(
+            [
+                {"label": "10h", "used_percent": 1, "resets_at": 1},
+                {"label": "5h", "used_percent": 2, "resets_at": 2},
+            ]
+        )
+        assert [視窗["label"] for 視窗 in 排好] == ["5h", "10h"]
