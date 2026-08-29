@@ -76,6 +76,8 @@ class Test派工:
             "verify-red",
             "impl",
             "verify-green",
+            "refactor",
+            "verify-refactor",
             "review",
         ]
 

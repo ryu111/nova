@@ -56,7 +56,7 @@ class Test門面:
         assert [事.get("attempt") for 事 in 事件們] == [1, 1, 2, 2]
         assert [事.get("family") for 事 in 事件們] == ["codex", "codex", "agy", "agy"]
 
-    def test_派工把五個階段都記下來(
+    def test_派工把七個階段都記下來(
         self, tmp_path: Path, 做假CLI: 做假CLI型, 翻牌判準: Path
     ) -> None:
         做事的, _ = 做假CLI("codex")
@@ -73,7 +73,10 @@ class Test門面:
             帳本目錄=帳本目錄,
         )
         階段們 = [事["stage"] for 事 in 讀帳本(帳本目錄) if 事["event"] == "stage_finished"]
-        assert 階段們 == ["test", "verify-red", "impl", "verify-green", "review"]
+        assert 階段們 == [
+            *["test", "verify-red", "impl", "verify-green"],
+            *["refactor", "verify-refactor", "review"],
+        ]
 
     def test_派工的模型呼叫也記到(self, tmp_path: Path, 做假CLI: 做假CLI型, 翻牌判準: Path) -> None:
         """階段與呼叫是兩層，都要有——只記階段就看不出換過腦。"""
