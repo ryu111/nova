@@ -192,10 +192,19 @@ class Test不給用哪家也不准自寫自評:
         assert not (例行 & 推理), f"派工表挑出同一家就是自寫自評：{例行 & 推理}"
 
     def test_跑得起來不會炸(self) -> None:
-        """不給 `--用` 與 `--審查用`，走到派工表那條路而不是 AttributeError。"""
+        """不給 `--用` 與 `--審查用`，走到派工表那條路而不是 `AttributeError`。
+
+        **只斷言不炸，不斷言退出碼**——這一格被 CI 教過一次：
+        CI 沒裝三家 CLI，而推理那條鏈只有一顆（`可以缺席=False`），
+        建角色時就 `FileNotFoundError` 了，退出碼是 2 不是 4。
+        本機綠、CI 紅，差別是**環境**（硬規則 6 的第一層）。
+
+        退出碼的對應由 `test_四種收場四個碼` 用純函式守，不必在這裡重測——
+        在這裡測等於把一條純函式的保證綁在「這台機器裝了什麼」上。
+        """
         結果 = _跑("工作流", "--最多步數", "0", "--判準", "true", "隨便")
         assert "AttributeError" not in 結果.stderr, 結果.stderr[:400]
-        assert 結果.returncode == 護欄碼, f"該是護欄碼：{結果.returncode}／{結果.stderr[:300]}"
+        assert 結果.returncode != 放行, "什麼都沒跑不該回成功"
 
     def test_沒給旗標時哪幾家要問派工表(self) -> None:
         """**負控抓到的洞。**
