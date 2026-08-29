@@ -14,7 +14,19 @@ from nova.契約.角色 import 預設逾時秒
 
 
 class 執行逾時(Exception):
-    """子程序超過時限被殺掉。"""
+    """子程序超過時限被殺掉。**帶著它死之前吐出來的東西。**
+
+    原本這個例外只有一句訊息，部分輸出跟著 `TimeoutExpired` 一起被丟掉——
+    而那裡面有 sid。實測 codex 被殺當下的部分 stdout 有 20,865 字元，
+    第一行就是 `{"type":"thread.started","thread_id":…}`。
+    丟掉它等於把「接續思考」這條路自己封死。
+    """
+
+    def __init__(self, 訊息: str, *, 部分標準輸出: str = "", 部分標準錯誤: str = "") -> None:
+        """`部分*` 預設空字串不是 None——呼叫端不必先判空再用。"""
+        super().__init__(訊息)
+        self.部分標準輸出 = 部分標準輸出
+        self.部分標準錯誤 = 部分標準錯誤
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +60,36 @@ def 跑cli(
             cwd=工作目錄,
             env=dict(環境) if 環境 is not None else None,
             capture_output=True,
+            # **一定要把 stdin 關掉。** 不給的話子程序繼承父程序的 stdin，
+            # 而 codex 看到 stdin 是開著的就會等：實測 stderr 印出
+            # 「Reading additional input from stdin...」然後一直坐著，
+            # 一個 token 都不花，最後被 nova 當成逾時殺掉。
+            #
+            # **「卡在等輸入」跟「想太久」長得一模一樣**——都是逾時、都是 0 token。
+            # sol 那兩次「大題目想不完」的誤診就是這麼來的。
+            stdin=subprocess.DEVNULL,
             text=True,
             timeout=逾時秒,
             check=False,
         )
     except subprocess.TimeoutExpired as 錯:
         訊息 = f"{執行檔.name} 超過 {逾時秒} 秒沒回應"
-        raise 執行逾時(訊息) from 錯
+        raise 執行逾時(
+            訊息,
+            部分標準輸出=_轉字串(錯.stdout),
+            部分標準錯誤=_轉字串(錯.stderr),
+        ) from 錯
     return 執行結果(標準輸出=完成.stdout, 標準錯誤=完成.stderr, 結束碼=完成.returncode)
+
+
+def _轉字串(原始: str | bytes | None) -> str:
+    """`TimeoutExpired.stdout` 的型別看 `text=` 而定，而且可能是 None。
+
+    截斷的位元組一定會有半個字元，所以 `errors="replace"`——
+    為了一個問號把整份證據丟掉不划算。
+    """
+    if 原始 is None:
+        return ""
+    if isinstance(原始, bytes):
+        return 原始.decode("utf-8", errors="replace")
+    return 原始

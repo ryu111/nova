@@ -262,3 +262,30 @@ def 解析codex(標準輸出: str, 結束碼: int) -> 回應:
 def 解析agy(標準輸出: str, 結束碼: int) -> 回應:
     """`agy -p --output-format json`（單一物件）或 `stream-json`（NDJSON）。"""
     return _成功但沒話說算未知(_解析agy(標準輸出, 結束碼))
+
+
+#: 三家對「這段對話」的叫法。同一個東西三個名字，所以掃鍵不挑家。
+_對話識別碼的鍵 = ("thread_id", "conversation_id", "session_id")
+
+
+def 撿對話識別碼(標準輸出: str) -> str | None:
+    """從（可能被截斷的）輸出裡撿出對話識別碼。
+
+    **給逾時那條路用的。** 正常跑完的時候各家的解析器自己會給；
+    但被殺掉的時候走不到那條路（沒有 `turn.completed`），
+    而 sid 就在第一行。
+
+    取**第一個**不是最後一個：一次執行只有一段對話，
+    後面再出現多半是雜訊，開場那個才是真的。
+    """
+    for 物 in _逐行json(標準輸出):
+        for 鍵 in _對話識別碼的鍵:
+            值 = 物.get(鍵)
+            if isinstance(值, str) and 值:
+                return 值
+        巢 = 物.get("init")
+        if isinstance(巢, dict):
+            值 = 巢.get("conversation_id")
+            if isinstance(值, str) and 值:
+                return 值
+    return None
