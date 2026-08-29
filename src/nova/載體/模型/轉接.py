@@ -83,7 +83,13 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     if 選項.隔離設定:
         # 實測：`--setting-sources ""` 讓設定檔與 CLAUDE.md 都讀不到，而且訂閱登入照樣能用。
         # **不要換回 `--bare`**——那條連 keychain 與 OAuth 都不讀，訂閱使用者會直接掛掉。
-        參數 += ["--setting-sources", ""]
+        #
+        # `--strict-mcp-config` 是另一半：設定來源關掉了，**MCP server 還是另一條路**。
+        # `--tools` 的 help 原文是「from the built-in set」——MCP 工具不是 built-in，
+        # 白名單根本沒把它們算進去。`--restricted` 的 help 自己寫明
+        # 「add --strict-mcp-config to skip MCP servers too」。
+        # 不給 `--mcp-config` 就等於零台，正是想要的結果。
+        參數 += ["--setting-sources", "", "--strict-mcp-config"]
     if 選項.續接:
         參數 += ["--resume", 選項.續接]
     參數 += _claude權限參數(選項)
