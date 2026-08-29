@@ -25,14 +25,14 @@ from nova.契約.工作流 import (
     預設最多token,
     預設最多步數,
 )
-from nova.契約.帳本 import 摘要
+from nova.契約.帳本 import 一條規則的帳, 摘要
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目錄
-from nova.載體.帳本讀取 import 列出執行, 讀一次執行
+from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
@@ -73,7 +73,8 @@ def _印結果(結果表: list[檢查結果]) -> int:
 def _子命令_閘(參數: argparse.Namespace) -> int:
     根目錄 = Path(參數.根目錄).resolve()
     try:
-        結果表 = 跑閘(參數.閘點, 建規則表(根目錄), 提前停止=not 參數.全部跑完)
+        with _開帳(參數) as 帳:
+            結果表 = 跑閘(參數.閘點, 建規則表(根目錄), 提前停止=not 參數.全部跑完, 帳=帳)
     except ValueError as 錯:
         print(str(錯), file=sys.stderr)
         return 閘紅
@@ -309,6 +310,8 @@ def _子命令_帳本(參數: argparse.Namespace) -> int:
     **有讀取端才算補了證據**——只有寫端的帳本是寫檔案給沒人看。
     """
     目錄 = Path(參數.帳本目錄) if 參數.帳本目錄 else 預設帳本目錄()
+    if 參數.規則:
+        return _印規則報表(統計規則(目錄), 目錄)
     檔們 = 列出執行(目錄)
     if 參數.執行識別碼:
         對的 = [檔 for 檔 in 檔們 if 檔.stem == 參數.執行識別碼]
@@ -351,6 +354,33 @@ def _一次的細節(摘: 摘要) -> str:
     if 摘.壞掉的行:
         行們.append(f"  ⚠ 有 {摘.壞掉的行} 行讀不動（證據不完整，不等於事情沒發生）")
     return "\n".join(行們)
+
+
+#: 要跑過幾次才敢說「這條從來不紅」。**沒有這個下限，報表第一天就會誤導人**：
+#: 跑過兩次沒紅根本不是證據，而「刪除候選」是個很有份量的標籤。
+#: 20 是保守的起點，不是算出來的——真要調就等有幾百次資料再回頭看分布。
+規則樣本下限 = 20
+
+
+def _印規則報表(條們: tuple[一條規則的帳, ...], 目錄: Path) -> int:
+    """跨執行的規則觸發率。
+
+    **從來不紅的要主動標出來**，不要讓人自己看數字——但**樣本不夠就不准下結論**。
+    """
+    if not 條們:
+        print(f"還沒有任何規則紀錄（會寫在 {目錄}）")
+        return 放行
+    for 條 in sorted(條們, key=lambda 條: (-條.紅過, 條.規則)):
+        print(f"{條.規則:<18}{條.閘點:<6}跑過 {條.跑過:>4} 次 · 紅過 {條.紅過:>4} 次{_評語(條)}")
+    return 放行
+
+
+def _評語(條: 一條規則的帳) -> str:
+    if 條.紅過:
+        return ""
+    if 條.跑過 < 規則樣本下限:
+        return f"  ← 還沒紅過，但只跑過 {條.跑過} 次，不夠下結論"
+    return "  ← 從來沒紅（刪除候選）"
 
 
 def _子命令_生圖(參數: argparse.Namespace) -> int:
@@ -410,6 +440,10 @@ def _加檢查類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
     閘剖析.add_argument(
         "--全部跑完", action="store_true", help="不提前停止，一次看到所有紅的（CI 用）"
     )
+    閘剖析.add_argument(
+        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
+    )
+    閘剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
     閘剖析.set_defaults(執行=_子命令_閘)
 
     指令剖析 = 子.add_parser("檢查指令", help="判斷一條 shell 指令是不是在繞過閘門")
@@ -508,6 +542,11 @@ def _加觀測類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
     帳剖析.add_argument("執行識別碼", nargs="?", default=None, help="不給就列出最近幾次")
     帳剖析.add_argument("--帳本目錄", default=None, help="從哪裡讀。預設 ~/.local/state/nova/帳本")
     帳剖析.add_argument("--最近", type=int, default=10, help="列出幾次（預設 10）")
+    帳剖析.add_argument(
+        "--規則",
+        action="store_true",
+        help="改看跨執行的規則觸發率：從來不紅的是刪除候選",
+    )
     帳剖析.set_defaults(執行=_子命令_帳本)
 
     圖剖析 = 子.add_parser("生圖", help="叫 agy 生一張圖（三家裡只有它有）")
