@@ -45,7 +45,7 @@ from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
-from nova.載體.進度 import 讀進度, 進度執行器
+from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
@@ -353,6 +353,10 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
                 跑判準=建判準(判準指令(參數.判準)),
             )
             進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
+            if 進度檔 is not None:
+                # 模型動得到工作目錄整棵樹。進度檔住在裡面的話，
+                # 它會往裡面寫，而那份東西下一輪會被當成前情餵回去。
+                檢查進度檔位置(進度檔, 工作目錄)
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
             # 拆成兩個旗標的話，一定有人只給其中一個，然後以為自己接上了。
             走過的 = "" if 進度檔 is None else 讀進度(進度檔)

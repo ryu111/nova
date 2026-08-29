@@ -22,6 +22,7 @@ from nova.載體.命令列 import (
     未知,
     護欄碼,
     閘紅,
+    阻擋,
 )
 from nova.載體.派工表 import 怎麼派
 from nova.迴圈.狀態機 import TDD階段表
@@ -221,3 +222,46 @@ class Test不給用哪家也不准自寫自評:
 
     def test_給了旗標就以旗標為準(self) -> None:
         assert _哪幾家("codex,agy", 階段代碼.測試) == {"codex", "agy"}
+
+
+class Test進度檔在工作目錄裡要被擋下來:
+    """純函式擋得住不代表 CLI 擋得住——**要真的有人叫它**。
+
+    這一格是真跑七階段時被種進去的：模型讀了進度檔、照抄格式、
+    接了一段自己的摘要上去。純函式在 `tests/單元/test_進度檔.py` 守，
+    這裡守的是「CLI 有沒有接上」。
+    """
+
+    def test_CLI要真的擋(self, tmp_path: Path) -> None:
+        結果 = _跑(
+            "工作流",
+            "--工作目錄",
+            str(tmp_path),
+            "--進度檔",
+            str(tmp_path / "進度.md"),
+            "--最多步數",
+            "0",
+            "--判準",
+            "true",
+            "隨便",
+        )
+        assert 結果.returncode == 阻擋, f"沒擋下來：{結果.returncode}／{結果.stderr[:200]}"
+        assert "工作目錄" in 結果.stderr
+
+    def test_放外面就放行(self, tmp_path: Path) -> None:
+        """**這支防的是擋過頭**——擋掉全部就沒有進度檔可以用了。"""
+        工作區 = tmp_path / "工作區"
+        工作區.mkdir()
+        結果 = _跑(
+            "工作流",
+            "--工作目錄",
+            str(工作區),
+            "--進度檔",
+            str(tmp_path / "進度.md"),
+            "--最多步數",
+            "0",
+            "--判準",
+            "true",
+            "隨便",
+        )
+        assert 結果.returncode != 阻擋, 結果.stderr[:200]
