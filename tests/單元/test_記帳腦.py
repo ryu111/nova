@@ -47,6 +47,7 @@ def 做回應(
     文字: str = "ok",
     終: 終局 = 終局.成功,
     代碼: 失敗代碼 = 失敗代碼.無,
+    成本: float | None = None,
 ) -> 回應:
     return 回應(
         文字=文字,
@@ -54,7 +55,7 @@ def 做回應(
         失敗代碼=代碼,
         原始結束碼=0,
         對話識別碼=None,
-        用量=用量(輸入token=100, 輸出token=7),
+        用量=用量(輸入token=100, 輸出token=7, 成本美金=成本),
     )
 
 
@@ -126,6 +127,12 @@ class Test記了什麼:
         assert 結束["input_tokens"] == 100
         assert 結束["output_tokens"] == 7
         assert 結束["failure_code"] == 失敗代碼.逾時.value
+
+    def test_記下成本(self) -> None:
+        """只有 claude 給得出來。丟掉它，帳本就永遠答不出「花了多少錢」。"""
+        串流, 帳 = 建()
+        記帳腦(內層=假腦("claude", 做回應(成本=0.0456)), 帳=帳).詢問("在嗎")
+        assert 讀事件(串流)[-1]["cost_usd"] == 0.0456
 
     def test_有耗時(self) -> None:
         """沒有耗時就分不出「一秒就掛」與「跑滿三十分鐘被殺」。"""

@@ -99,6 +99,7 @@ class 記帳腦:
             失敗代碼=答.失敗代碼.value if 答 else None,
             輸入token=答.用量.輸入token if 答 else None,
             輸出token=答.用量.輸出token if 答 else None,
+            成本美金=答.用量.成本美金 if 答 else None,
             耗時毫秒=耗時,
             文字長度=len(答.文字) if 答 else None,
             文字雜湊=_指紋(答.文字) if 答 else None,

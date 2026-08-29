@@ -64,6 +64,9 @@ class 事件:
     失敗代碼: str | None = None
     輸入token: int | None = None
     輸出token: int | None = None
+    #: 只有 claude 給得出來。**不准為了三家對稱而自己估算**——
+    #: 猜出來的成本比沒有成本更危險。給不出來就不落盤。
+    成本美金: float | None = None
     #: 從發出去到回來多久。逾時的診斷靠它——沒有耗時就分不出
     #: 「一秒就掛」與「跑滿 30 分鐘被殺」。
     耗時毫秒: int | None = None
@@ -93,6 +96,7 @@ class 事件:
     "失敗代碼": "failure_code",
     "輸入token": "input_tokens",
     "輸出token": "output_tokens",
+    "成本美金": "cost_usd",
     "耗時毫秒": "duration_ms",
     "判準綠": "gate_green",
     "審查結論": "verdict",

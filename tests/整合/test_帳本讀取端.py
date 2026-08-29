@@ -60,6 +60,22 @@ def test_目錄不存在就是空的(tmp_path: Path) -> None:
     assert 列出執行(tmp_path / "沒有這個") == []
 
 
+def test_一筆都沒寫也認得出是哪次執行(tmp_path: Path) -> None:
+    """**執行一開始就被殺**的那次，帳本是空檔——但檔名就是執行識別碼。
+
+    不補的話那次執行在讀取端變成無名氏，而「開了檔卻一筆都沒寫」
+    正是最需要被看見的那種死法（例如子程序卡在讀 stdin）。
+    """
+    檔 = 寫一份(tmp_path, "20260829T000000Z-死得早", [])
+    assert 讀一次執行(檔).執行識別碼 == "20260829T000000Z-死得早"
+
+
+def test_檔名補的識別碼不准蓋掉檔案裡的(tmp_path: Path) -> None:
+    """檔案裡有就以檔案裡的為準——那才是寫的人記下的東西。"""
+    檔 = 寫一份(tmp_path, "檔名", 一次成功)
+    assert 讀一次執行(檔).執行識別碼 == "r1"
+
+
 class TestCLI:
     def test_不給識別碼就列出最近的(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
