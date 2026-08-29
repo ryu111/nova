@@ -36,6 +36,7 @@ uv run nova 問 --工作 routine "提示"                   # 照派工表挑：
 uv run nova 問 --工作 reasoning "提示"                 # 照派工表挑：推理給 sol
 uv run nova 帳本                                       # 看執行紀錄（誰被叫、花多少）
 uv run nova 生圖 "描述"                                # 只有 agy 有；驗收看檔案不看模型
+uv run nova 問 --可編輯 --輸出檔 進度.md "..."     # 逾時被殺也撿得回進度
 uv run nova 問 --用 codex --模型 gpt-5.6-sol "提示"     # 高階推理（預設是 gpt-5.6-luna）
 uv run nova 問 --用 codex --保留對話 "提示"             # 留下 sid
 uv run nova 問 --用 codex --續接 <sid> "接下去問"       # 持久對話
