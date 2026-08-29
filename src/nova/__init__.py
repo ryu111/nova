@@ -10,7 +10,15 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from nova.契約.工作流 import 任務, 執行器, 步驟結果, 階段定義
+from nova.契約.工作流 import (
+    任務,
+    停止條件,
+    執行器,
+    步驟結果,
+    階段定義,
+    預設最多token,
+    預設最多步數,
+)
 from nova.契約.模型回應 import 回應, 失敗代碼, 終局
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 建判準
@@ -108,7 +116,8 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
     審查用: 腦來源,
     工作目錄: Path | None = None,
     判準指令: Sequence[str] | None = None,
-    最多步數: int = 12,
+    最多步數: int = 預設最多步數,
+    最多token: int = 預設最多token,
     執行檔: 執行檔來源 = None,
     審查執行檔: 執行檔來源 = None,
     每步: Callable[[階段定義, 步驟結果], None] | None = None,
@@ -122,6 +131,9 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
     兩個都是給測試注入假 CLI 用的，正式使用不給，由 `找執行檔` 自己找。
 
     `每步` 每跑完一個階段被呼叫一次，讓呼叫端能邊跑邊回報進度。
+
+    兩個停止條件都有預設值：`最多步數` 擋來回幾次，`最多token` 擋花多少。
+    **忘了傳不等於沒有上限**——沒有預設的保證是懇求，不是保證。
     """
     做事的, 審查的 = _拆成家們(用), _拆成家們(審查用)
     if set(做事的) & set(審查的):
@@ -140,7 +152,7 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
     return 跑工作流(
         任務(描述=任務描述, 工作目錄=目錄),
         執行一步=_邊跑邊回報(執行, 每步),
-        最多步數=最多步數,
+        停止=停止條件(最多步數=最多步數, 最多token=最多token),
     )
 
 

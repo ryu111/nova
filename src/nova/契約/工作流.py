@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from nova.契約.模型回應 import 終局
+from nova.契約.模型回應 import 用量, 終局
 
 
 class 階段代碼(StrEnum):
@@ -102,6 +102,40 @@ class 步驟結果:
     #: **欄位名不能跟型別名一樣**：dataclass 的 annotation 在 class 內部求值，
     #: 同名會讓 `審查判定 | None` 變成 `None | None`，當場 TypeError。
     審查結論: "審查判定 | None" = None
+    #: 這一步花了多少。判準階段不叫模型，所以是 None——
+    #: 補一個零上去會讓「沒花錢」跟「沒問到」長得一樣。
+    花費: "用量 | None" = None
+
+
+#: 預設走幾步就強制停。
+預設最多步數 = 12
+#: 預設的 token 上限。**忘了傳不能等於沒有上限**——沒有預設的保證是懇求，不是保證。
+#:
+#: 這個數字的來源：02 實測十來字的提示，codex 一次要 17,341 input token、
+#: agy 14,515（三家都自帶 system prompt，關不掉）。TDD 一輪最多 12 步、其中
+#: 至多 8 步會叫模型，真實任務的提示又比實測大，所以抓每次 ~60k、共 500k。
+#: 這是「跑得完正常一輪、擋得住失控」的量，不是精算。要改就在呼叫端明講。
+預設最多token = 500_000
+
+
+@dataclass(frozen=True, slots=True)
+class 停止條件:
+    """迴圈七欄位裡的 stop rule（§3.2）。缺它的不是迴圈，是成本漏洞。
+
+    **兩個不同的洞，所以是兩個旋鈕**：步數擋「來回幾次」，token 擋「花多少」。
+    一步可以很貴，光有步數上限對成本沒有任何保證。
+
+    包成一個資料類別不是為了好看——stop rule 是契約的一部分，
+    要能整包印進 journal、整包換掉，而不是散在函式簽章上的兩個 int。
+    """
+
+    最多步數: int = 預設最多步數
+    最多token: int = 預設最多token
+
+
+#: 不傳就是這個。frozen 且沒有可變欄位，所以共用一份是安全的
+#: （ruff B008 不准把建構式寫進參數預設值，理由就是可變的預設會被共享）。
+預設停止 = 停止條件()
 
 
 @dataclass(frozen=True, slots=True)
