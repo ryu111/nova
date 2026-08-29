@@ -45,17 +45,21 @@ def _要檢查的文件() -> list[Path]:
     ]
 
 
-#: CLAUDE.md 的行數上限。**這是 ratchet，不是引用權威**——
-#: Anthropic 官方的 best practices 只說 "keep it short and human-readable"、
-#: "ruthlessly prune"，沒有給數字；網路上流傳的「200 行」是部落格說法。
-#: 所以這個數字釘的是現況（搬完負控表之後 253 行）加上一點餘裕，
-#: 餘裕是留給帳本接線那一段文件的。
+#: CLAUDE.md 的行數上限。**這是 ratchet：它只准往下調。**
 #:
-#: 官方講的成本是真的：「Bloated CLAUDE.md files cause Claude to ignore your
-#: actual instructions」——規則檔變長不只是浪費，是**讓其他規則失效**。
-#: 所以往上調這個數字之前，先問該加的那段是不是屬於 `docs/決策/0001-規則要住哪一層.md`
-#: 的第 ① 或第 ③ 格（閘或 skill），而不是第 ④ 格。
-CLAUDE_MD行數上限 = 270
+#: 270 → 150 那次砍掉的是「方法論」與「設計文件的摘要」，留下的只有**坑**——
+#: 看檔案看不出來、踩到會很貴、下次還會再踩的那些。判準來自
+#: Anthropic 的〈The new rules of context engineering for Claude 5 generation
+#: models〉：「Keep your CLAUDE.md lightweight」「spend most of the tokens on
+#: gotchas inside of the codebase」「Avoid stating 'the obvious' things Claude
+#: should know by looking at your file system」。同一篇說他們砍掉 Claude Code
+#: 系統提示 80% 以上，coding eval 沒有可測量的損失。
+#:
+#: 代價是真的：「Bloated CLAUDE.md files cause Claude to ignore your actual
+#: instructions」——規則檔變長不只是浪費，是**讓其他規則失效**。
+#: 所以要加東西之前先問三題：Claude 看檔案就知道嗎（刪掉）？機械判準抓得到嗎
+#: （寫成閘）？只有某些任務要嗎（寫成 skill）？三題都否才進這裡。
+CLAUDE_MD行數上限 = 150
 
 
 def test_CLAUDE_md不准無限長() -> None:
