@@ -258,7 +258,7 @@ My only tools here are Context7 documentation lookups...
 把 Read 一起關在工作目錄裡。
 
 順帶看到一件事：那次回應說它還有 **Context7 可用**——`--tools` 管不到 MCP 工具。
-要一起關掉得再加 `--strict-mcp-config`，還沒做（見已知缺口）。
+這條後來查證並補上了 `--strict-mcp-config`，見下方「白名單漏了 MCP」。
 
 ### claude 的可編輯要三條旗標，缺一不可
 
@@ -468,6 +468,54 @@ envelope        → status: SUCCESS、error: null、response: ""
 **沒有連帶風險的部分**：brain 目錄裡的東西不會流進工作目錄，也就不會被受測的
 repo 自己 commit 進去。所以這是「約束不到」，不是「污染」。
 
+## 白名單漏了 MCP：`--tools` 只管 built-in
+
+`--tools Read,Grep,Glob` 這條唯讀白名單**沒有把 MCP 工具算進去**。
+`claude --help` 的原文說得很清楚：
+
+```
+--tools <tools...>    Specify the list of available tools from the built-in
+                      set. Use "" to disable all tools, "default" to use all
+                      tools, or specify tool names (e.g. "Bash,Edit,Read").
+```
+
+**from the built-in set**——MCP 工具不是 built-in。而 `--restricted` 的 help
+自己寫明了補法：
+
+```
+--restricted    ... and ignores user, project and local settings files
+                (managed settings and --settings still apply;
+                 add --strict-mcp-config to skip MCP servers too). ...
+```
+
+### 實測前後對照（同一個提示、同一個唯讀權限）
+
+問的是「你現在有哪些工具可以用？逐一列出來」。
+
+| | 模型自己列出來的工具 |
+|---|---|
+| **沒有** `--strict-mcp-config` | Glob、Grep、Read、`mcp__claude_ai_Context7__resolve-library-id`、`mcp__claude_ai_Context7__query-docs` |
+| **有** `--strict-mcp-config` | Glob、Grep、Read。**就這三個** |
+
+這次漏出來的剛好是唯讀的查文件工具（Context7），沒有實害。
+但**這是運氣不是設計**——任何一台會寫東西的 MCP server 都會用同一條路徑漏進來，
+而白名單看起來仍然是「只有三個唯讀工具」。
+
+> **白名單的形狀對了、涵蓋範圍沒對，那不是保證。**
+
+### 旗標放哪：共通段，不是權限段
+
+```python
+if 選項.隔離設定:
+    參數 += ["--setting-sources", "", "--strict-mcp-config"]
+```
+
+放在 `_claude組參數` 的共通段，**不放 `_claude權限參數`**——因為全開那一級
+根本沒有 `--restricted`，塞進權限段會漏掉它。
+`test_claude隔離設定要連mcp一起關掉` 對三級權限各驗一次就是為了守這件事。
+
+不給 `--mcp-config` 就等於零台 MCP server，正是想要的結果。
+
 ## 已知缺口
 
 1. **真 CLI 的 contract test 不接進 CI。** agy 的 CI 認證環境變數查不到（用 Google OAuth，
@@ -479,10 +527,7 @@ repo 自己 commit 進去。所以這是「約束不到」，不是「污染」�
    codex 與 agy 怎麼隔離家目錄設定與自帶 system prompt，都還沒查。
    在補齊之前，「換腦但行為一樣」**沒有測試背書**——只是設計意圖。
 3. **成本只有 claude 給。** codex 與 agy 只有 token 數。要成本得自己接價目表，現在不做。
-3.5 **`--tools` 管不到 MCP 工具。** 實測 claude 唯讀（白名單只有 `Read,Grep,Glob`）時，
-   模型自己說它還有 Context7 的 `resolve-library-id` 與 `query-docs` 可用。
-   也就是說「把載體關到最小」目前漏了 MCP 這一層——`--strict-mcp-config` 應該能補，
-   還沒查證也還沒實測。在補齊之前，**隔離設定不涵蓋 MCP**。
+3.5 ~~**`--tools` 管不到 MCP 工具。**~~ **已補**（見下方「白名單漏了 MCP」一節）。
 4. **各家的自帶 system prompt 還沒關掉。** 實測「只回覆兩個字：可以」這句十來個字的提示：
 
    | 家 | 輸入 token | 說明 |

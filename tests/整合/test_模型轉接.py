@@ -402,6 +402,27 @@ class Test隔離設定是漏出的:
         assert "--bare" not in 隔離, "--bare 會弄壞訂閱登入"
         assert "--setting-sources" not in 不隔離
 
+    def test_claude隔離設定要連mcp一起關掉(self) -> None:
+        """`--setting-sources ""` 只管設定檔，**MCP server 是另一條路進來的**。
+
+        `claude --help` 的 `--tools` 原文是「Specify the list of available tools
+        **from the built-in set**」——MCP 工具不是 built-in，所以唯讀白名單
+        `Read,Grep,Glob` 根本沒把它們算進去。`--restricted` 的原文更直接：
+        「ignores user, project and local settings files（managed settings and
+        --settings still apply; **add --strict-mcp-config to skip MCP servers too**）」。
+
+        也就是說：不加這條的話，一個「唯讀」的 claude 仍然可能透過 MCP 拿到
+        會寫東西的工具。**白名單的形狀對了、涵蓋範圍沒對，那不是保證。**
+
+        旗標放在共通段不是權限段——全開那一級沒有 `--restricted`，
+        塞進權限段會漏掉它。
+        """
+        for 可以做什麼 in 權限:
+            參數 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=可以做什麼))
+            assert "--strict-mcp-config" in 參數, f"{可以做什麼.value} 漏了 MCP 隔離"
+        不隔離 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(隔離設定=False))
+        assert "--strict-mcp-config" not in 不隔離, "說不隔離就整包不隔離"
+
     def test_codex隔離才擋使用者設定(self) -> None:
         隔離 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         不隔離 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(隔離設定=False))
