@@ -129,7 +129,7 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 | 唯讀 | `--restricted --add-dir <工作目錄> --tools Read,Grep,Glob` | `--sandbox read-only` | `--mode plan --add-dir <工作目錄>`（**擋不住寫，也擋不住生圖，見下**） |
 | 可編輯 | `--restricted --add-dir <工作目錄> --tools <清單> --allowedTools <同一份> --permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits --add-dir <工作目錄>` |
 | 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
-| 生圖 | ❌ 沒有 | ❌ 沒有 | `generate_image` **可用**，但只有**全開**權限下檔案才進得了工作目錄；可編輯下圖留在 `~/.gemini/.../brain/` 而 CLI 假回報成功（見下節） |
+| 生圖 | ❌ 沒有 | ❌ 沒有 | `generate_image` **可用**，但只有**全開**權限下檔案才進得了工作目錄；可編輯下圖留在 `~/.gemini/.../brain/` 而 CLI 假回報成功（見下節）。**續接可用**：帶上一輪的 sid 就能接著改同一張圖（實測：黃星 → 藍星，構圖不變） |
 | 隔離設定 | `--setting-sources ""` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
 | 續接對話 | `--resume <id>` | `exec resume <id>`（**子指令**，不吃 `--sandbox`） | `--conversation <id>` |
 | 對話落地 | 一律留 | 預設 `--ephemeral` 不留，**要續接得先關掉** | 一律留 |

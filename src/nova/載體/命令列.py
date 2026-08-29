@@ -37,7 +37,7 @@ from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
 from nova.載體.派工表 import 怎麼派
-from nova.載體.生圖 import 生圖, 生圖那家
+from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
@@ -358,9 +358,12 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
             果 = 生圖(
                 描述,
                 工作目錄=目錄,
-                執行檔=Path(參數.執行檔) if 參數.執行檔 else None,
-                逾時秒=參數.逾時,
                 帳=帳,
+                選項=生圖選項(
+                    執行檔=Path(參數.執行檔) if 參數.執行檔 else None,
+                    逾時秒=參數.逾時,
+                    續接=參數.續接,
+                ),
             )
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
@@ -500,6 +503,7 @@ def _加觀測類(子: "argparse._SubParsersAction[argparse.ArgumentParser]") ->
         "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
     )
     圖剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    圖剖析.add_argument("--續接", default=None, help="接著改上一張圖（給上一次 stderr 印出的 sid）")
     圖剖析.set_defaults(執行=_子命令_生圖)
 
 
