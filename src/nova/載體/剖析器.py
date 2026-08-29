@@ -171,7 +171,7 @@ def _加觀測類(
     子: "argparse._SubParsersAction[argparse.ArgumentParser]",
     處理們: Mapping[str, 處理型],
 ) -> None:
-    """帳本、生圖、額度——看紀錄、生圖能力與查詢訂閱限額。"""
+    """帳本、已處理、生圖、額度——看紀錄、看成果、生圖能力與查詢訂閱限額。"""
     帳剖析 = 子.add_parser("帳本", help="看執行紀錄：誰被叫了、花多少、怎麼收場")
     帳剖析.set_defaults(執行=處理們["帳本"])
     帳剖析.add_argument("執行識別碼", nargs="?", default=None, help="不給就列出最近幾次")
@@ -182,6 +182,10 @@ def _加觀測類(
         action="store_true",
         help="改看跨執行的規則觸發率：從來不紅的是刪除候選",
     )
+
+    成果剖析 = 子.add_parser("已處理", help="看成果帳本：哪幾件工作做完了、收在哪種結局")
+    成果剖析.set_defaults(執行=處理們["已處理"])
+    成果剖析.add_argument("--最近", type=int, default=10, help="列出幾筆（預設 10）")
 
     圖剖析 = 子.add_parser("生圖", help="叫 agy 生一張圖（三家裡只有它有）")
     圖剖析.set_defaults(執行=處理們["生圖"])
