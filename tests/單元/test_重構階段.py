@@ -42,11 +42,11 @@ class Test重構在哪:
 
 
 class Test弄壞了怎麼辦:
-    def test_驗證重構紅了要中止(self) -> None:
+    def test_驗證重構紅了要停下來不准往前除錯(self) -> None:
         """SOP：嚴禁 fix-forward。而且退回重構是無界回頭邊。"""
         下 = 下一步(查階段(階段代碼.驗證重構), 做結果(階段代碼.驗證重構, 綠=False))
         assert isinstance(下, 結束)
-        assert 下.代碼 is 結束代碼.中止
+        assert 下.代碼 is 結束代碼.護欄
 
     def test_重構做不出來也是中止(self) -> None:
         下 = 下一步(查階段(階段代碼.重構), 做結果(階段代碼.重構, 終=終局.確定失敗))
