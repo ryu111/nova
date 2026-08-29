@@ -116,8 +116,8 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 
 | | claude | codex | agy |
 |---|---|---|---|
-| 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan` |
-| 可編輯 | `--tools Read,Write,... --permission-mode acceptEdits` | `--approve-for-me`（**不能同時給 `--sandbox`**） | `--mode accept-edits` |
+| 唯讀 | `--tools ""` | `--sandbox read-only` | `--mode plan`＋**刻意不給 `--add-dir`** |
+| 可編輯 | `--restricted --add-dir <工作目錄> --tools <清單> --allowedTools <同一份> --permission-mode acceptEdits` | `--sandbox workspace-write` | `--mode accept-edits --add-dir <工作目錄>` |
 | 全開（跳權限＋關沙箱） | `--dangerously-skip-permissions` | `--dangerously-bypass-approvals-and-sandbox` | `--dangerously-skip-permissions` |
 | 生圖 | ❌ 沒有 | ❌ 沒有 | 有 `generate_image` 工具，但 **headless 下不可用且會假回報成功**（見下節） |
 | 隔離設定 | `--setting-sources ""` | `--ignore-user-config --ignore-rules` | ❌ 查不到 |
@@ -218,6 +218,96 @@ JSON 規格說字串裡的控制字元必須跳脫，但真實工具會直接吐
 解不動的下場是 fail-closed 回**結果未知**，而結果未知在可編輯模式下**不准重試**——
 一個顯示層的小瑕疵會變成整條工作流停擺。所以解析器改用
 `json.JSONDecoder(strict=False)`：寬鬆解析的風險遠小於誤判成結果未知。
+
+## 可編輯與唯讀：三家的強度差很多，而且都不是我原本以為的那樣
+
+這一節整段都是**實測**，每一行都真的跑過。起因是加了一支
+`test_可編輯真的寫得出檔案`——只看檔案系統、不看模型怎麼說——三家立刻紅了兩家。
+
+### 實測矩陣
+
+| 問題 | claude | codex | agy |
+|---|---|---|---|
+| 唯讀擋得住寫檔嗎 | ✅ `--tools ""` 根本沒工具 | ✅ `--sandbox read-only` | ❌ **`--mode plan` 擋不住**（見下） |
+| 可編輯寫得進工作目錄嗎 | 要三條旗標湊齊（見下） | ✅ | 要 `--add-dir`（見下） |
+| 可編輯擋得住寫**工作目錄外面**嗎 | ❌ 檔案工具擋得住，**Bash 繞得過** | ✅ **OS 層拒絕**（operation not permitted） | 走 shell 的工具被 headless 權限系統 auto-deny |
+
+**三家裡只有 codex 有真的邊界。** 這一格決定了「可編輯」在各家的意思不一樣，
+而介面沒辦法抹平它——所以寫成文件與測試，不寫成 `supports()` 布林表。
+
+### claude 的可編輯要三條旗標，缺一不可
+
+| 旗標 | 少了它會怎樣 |
+|---|---|
+| `--tools Read,Write,Edit,Bash,Grep,Glob` | 沒有 Write／Edit 可用 |
+| `--allowedTools <同一份清單>` | **隔離設定之下卡在「pending approval」，一個字都寫不出來** |
+| `--restricted --add-dir <工作目錄>` | 自己猜路徑——實測寫進了 **nova 的 repo 根目錄**，還順手在 `/tmp/claude-workdir/` 另建一份 |
+
+第二條的原文回應是：
+「I need permission to create the file — the write request is pending approval on your end.」
+拿掉 `--setting-sources ""`（不隔離）就寫得出來——推測 `acceptEdits` 要靠
+「這個目錄已被信任」那份使用者設定，隔離之後那份讀不到。
+
+第三條的 `--restricted` 是**加速器不是保證**：它的 help 原文說會
+「confine the file tools to the working directories」，實測也真的擋下 Write 越界。
+但同一次實測裡改叫它用 Bash 重導向，檔案就寫出去了。
+claude CLI **沒有任何 OS 層沙箱旗標**（`--help` 查證過，只有說明文字提到
+「recommended only for sandboxes」——也就是預期由外面的人提供沙箱）。
+
+`test_claude的可編輯沒有真的邊界這是已知事實` 釘住這一條：它斷言的是**擋不住**。
+哪天 claude 補了沙箱，那支會紅，逼我們回來改這份文件。
+
+### codex：`--approve-for-me` 的邊界是假的，`--sandbox workspace-write` 才是真的
+
+`--approve-for-me` 的 help 原文：
+「Route approval requests through automatic review using the workspace-write sandbox」——
+**自動審核**，不是不准。實測叫它 `printf '芒果乾' > ~/x.txt`：
+
+```
+agent_message     這個目標路徑位於目前工作區外，需要額外權限才能寫入。
+command_execution /bin/zsh -lc "printf '芒果乾' > /Users/sbu/nova-越界測試.txt"
+                  exit_code: 0
+agent_message     成功，已寫入。
+```
+
+模型自己說了「在工作區外」，然後自動審核把它核准了。
+
+換成 `--sandbox workspace-write`，同一條指令：
+
+```
+agent_message  失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（operation not permitted）
+```
+
+而寫 cwd 照樣成功。所以**可編輯改用 `--sandbox workspace-write`**。
+代價要講清楚：這個沙箱同時關掉網路與工作區外的寫入，所以可編輯這一級**裝不了套件**。
+要那個就用全開。
+
+（測試越界時**不能拿 `/tmp` 當「工作目錄外」**——codex 的 workspace-write
+把它也算成可寫的，實測寫得進去。`test_codex的可編輯有真的邊界` 因此寫家目錄。）
+
+### agy：沒有唯讀這一級，而 `--add-dir` 決定檔案落到哪
+
+三件實測，一件比一件反直覺：
+
+1. **不給 `--add-dir`**：檔案工具寫到 `~/.gemini/antigravity-cli/scratch/`，
+   而且照樣回報 `SUCCESS`。追 `--output-format stream-json` 才看到
+   `write_to_file` 的 `TargetFile` 指到那裡——**模型沒說謊，它真的寫了，只是寫到別的地方**。
+2. **不給 `--add-dir` 而叫它讀 cwd 的檔案**：工具被 headless 的權限系統 auto-deny
+   （`a tool required the "command" permission that headless mode cannot prompt for`），
+   回一個空的 `response`。`_成功但沒話說算未知` 會把它降成結果未知。
+3. **給 `--add-dir` 而且 `--mode plan`**：檔案**照樣寫進 cwd**。模型嘴上說
+   「我已建立執行計畫，請確認後我將開始建立檔案」——而檔案當下已經建好了。
+   `--sandbox`、`--mode plan --sandbox` 都試過，一樣擋不住。
+
+所以 agy 的唯讀這一級**故意不給 `--add-dir`**。nova 換到一條真的成立的保證：
+**唯讀的 agy 動不到工作目錄**（由 1 與 2 背書）。
+
+代價要一起講：**唯讀的 agy 也讀不到工作目錄的檔案**。要讓它看專案檔案就得給可編輯。
+這是 agy 的限制，不是 nova 的設計選擇。
+
+第 3 點特別值得記：那是**假成功裡最難抓的一種**——`status: SUCCESS`、`response` 也有話說、
+內容還說得頭頭是道。`_成功但沒話說算未知` 攔不到它。
+**只有真的去看檔案系統才會紅。**
 
 ## 權限的第三級：全開
 

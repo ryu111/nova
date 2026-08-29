@@ -180,17 +180,130 @@ class Test權限是漏出的:
         ]
         assert "--permission-mode" not in 唯讀, "唯讀模式不該帶權限模式旗標"
 
-    def test_codex可編輯時不給sandbox(self) -> None:
-        """實測：`--sandbox` 與 `--approve-for-me` 互斥，一起給會 exit 2。"""
+    def test_codex可編輯用真沙箱而不是自動核准(self) -> None:
+        """`--approve-for-me` 的邊界是假的。**需求變了，不是測試配合實作。**
+
+        help 原文：「Route approval requests through automatic review using the
+        workspace-write sandbox」——**自動審核**，不是不准。實測叫它
+        `printf '芒果乾' > ~/x.txt`：模型先說「這個路徑在工作區外，需要額外權限」，
+        然後自己核准了，`exit_code: 0`，檔案真的出現在家目錄。
+
+        `--sandbox workspace-write` 才是真邊界：同一條指令回
+        「系統拒絕寫入（operation not permitted）」，而寫 cwd 照樣成功。
+        **三家裡只有 codex 有 OS 層邊界**——claude 的 `--restricted` 只擋檔案工具
+        （Bash 繞得過，實測繞過去了），agy 連 plan 模式都擋不住寫。
+
+        代價：workspace-write 沙箱同時關掉網路與工作區外的寫入，所以
+        「可編輯」這一級裝不了套件。要那個就用全開。
+        """
         唯讀 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項())
         可寫 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
-        assert "read-only" in 唯讀
-        assert "--approve-for-me" in 可寫
-        assert "--sandbox" not in 可寫
+        assert 唯讀[唯讀.index("--sandbox") : 唯讀.index("--sandbox") + 2] == [
+            "--sandbox",
+            "read-only",
+        ]
+        assert 可寫[可寫.index("--sandbox") : 可寫.index("--sandbox") + 2] == [
+            "--sandbox",
+            "workspace-write",
+        ]
+        assert "--approve-for-me" not in 可寫, "自動核准會把「升級到工作區外」一起核准掉"
 
     def test_agy可編輯時換成accept_edits(self) -> None:
         可寫 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
         assert 可寫[可寫.index("--mode") : 可寫.index("--mode") + 2] == ["--mode", "accept-edits"]
+
+    def test_claude可編輯要同時給白名單(self) -> None:
+        """`--permission-mode acceptEdits` **一個人不夠**。
+
+        實測：隔離設定（`--setting-sources ""`）之下只給 acceptEdits，claude 會回
+        「I need permission to create the file — pending approval on your end」，
+        檔案一個都沒寫。把 `--allowedTools` 補上同一份清單就寫得出來了。
+
+        推測是 acceptEdits 要靠「這個目錄已被信任」那份使用者設定，而隔離之後
+        那份讀不到。**這是實測結論，不是推測出來的用法**——
+        `test_可編輯真的寫得出檔案[claude]` 就是被它咬紅過的那支。
+        """
+        可寫 = 建立("claude", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert "--allowedTools" in 可寫, "只給 acceptEdits 會卡在 pending approval"
+        assert 可寫[可寫.index("--allowedTools") + 1] == 可寫[可寫.index("--tools") + 1], (
+            "白名單與工具清單要是同一份，不然會出現「有工具但不准用」的空隙"
+        )
+
+    def test_claude可編輯要把檔案工具關在工作目錄裡(self) -> None:
+        """`--restricted --add-dir <工作目錄>`：檔案工具只准動工作目錄。
+
+        實測踩過：沒有這兩條時 claude 自己猜路徑，把檔案寫進了 **nova 的 repo 根目錄**
+        （而且它還在 `/tmp/claude-workdir/` 另外建了一份）。加上之後兩次實跑都乖乖
+        寫在 cwd，而且叫它寫工作目錄外面會被檔案工具擋下來。
+
+        **這是加速器不是保證**：同一次實測裡，改叫它用 Bash 重導向就照樣寫出去了。
+        claude 沒有 OS 層沙箱（codex 的 `--sandbox` 才有）。要硬保證得靠外面。
+        """
+        可寫 = 建立("claude", 執行檔=Path("/x")).組參數(
+            "提示", 呼叫選項(權限=權限.可編輯, 工作目錄=Path("/w"))
+        )
+        assert "--restricted" in 可寫
+        assert 可寫[可寫.index("--add-dir") : 可寫.index("--add-dir") + 2] == ["--add-dir", "/w"]
+
+    def test_claude全開不准帶restricted(self) -> None:
+        """`--restricted` 的 help 原文寫明它 **refuses bypassPermissions**——兩條互斥。"""
+        全開 = 建立("claude", 執行檔=Path("/x")).組參數(
+            "提示", 呼叫選項(權限=權限.全開, 工作目錄=Path("/w"))
+        )
+        assert "--restricted" not in 全開
+
+    def test_agy有工作目錄就要加進workspace(self) -> None:
+        """沒有 `--add-dir`，agy 的檔案工具會寫到 `~/.gemini/antigravity-cli/scratch/`。
+
+        實測：`--mode accept-edits` 跑完回「好了」、cwd 卻空的。追 stream-json 才看到
+        `write_to_file` 的 `TargetFile` 指到那個 scratch 目錄——**模型沒說謊，
+        它真的寫了，只是寫到別的地方**。`--add-dir <工作目錄>` 之後就寫進 cwd 了。
+
+        這種假成功比報錯難抓：`status: SUCCESS`、`response` 也有話說，
+        `_成功但沒話說算未知` 攔不到它。只有真的去看檔案系統才會紅。
+        """
+        可寫 = 建立("agy", 執行檔=Path("/x")).組參數(
+            "提示", 呼叫選項(權限=權限.可編輯, 工作目錄=Path("/w"))
+        )
+        assert 可寫[可寫.index("--add-dir") : 可寫.index("--add-dir") + 2] == ["--add-dir", "/w"]
+        # 唯讀那一級刻意不給——理由見 test_agy唯讀不給add_dir是刻意的
+
+    def test_agy唯讀不給add_dir是刻意的(self) -> None:
+        """agy **沒有真正的唯讀**，所以 nova 只能保證比較弱的那一條。
+
+        實測（`--mode plan`、`--sandbox`、兩條一起，三種都試過）：只要給了
+        `--add-dir`，模型照樣把檔案寫進工作目錄——嘴上還說「請確認計畫後我才開始」，
+        而檔案當下已經建好了。**plan 模式擋不住寫。**
+
+        所以唯讀這一級不給 `--add-dir`。nova 換到一條真的成立的保證：
+        **唯讀的 agy 動不到工作目錄**（實測：檔案落到
+        `~/.gemini/antigravity-cli/scratch/`，或工具被 headless 權限系統 auto-deny）。
+
+        代價要講清楚：**唯讀的 agy 也讀不到工作目錄的檔案**，會回一個空的
+        response，被 `_成功但沒話說算未知` 降成結果未知。要讓 agy 看專案檔案，
+        就得給可編輯——這是 agy 的限制，不是 nova 的設計選擇。
+
+        哪天 agy 修好了 plan 模式，這支要跟著改；在那之前，
+        「宣稱有把關卻沒有」比沒有更糟。
+        """
+        唯讀 = 建立("agy", 執行檔=Path("/x")).組參數(
+            "提示", 呼叫選項(權限=權限.唯讀, 工作目錄=Path("/w"))
+        )
+        assert "--add-dir" not in 唯讀
+        for 可以做什麼 in (權限.可編輯, 權限.全開):
+            參數 = 建立("agy", 執行檔=Path("/x")).組參數(
+                "提示", 呼叫選項(權限=可以做什麼, 工作目錄=Path("/w"))
+            )
+            assert 參數[參數.index("--add-dir") : 參數.index("--add-dir") + 2] == [
+                "--add-dir",
+                "/w",
+            ], f"{可以做什麼} 少了 --add-dir，檔案會落到 agy 的 scratch 目錄"
+
+    def test_沒給工作目錄就不要亂加add_dir(self) -> None:
+        """`--add-dir` 的值是路徑，沒有工作目錄時沒有正確的值可填——寧可不加。"""
+        for 家 in ("claude", "agy"):
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+            assert "--add-dir" not in 參數, f"{家} 在沒有工作目錄時加了 --add-dir"
 
     def test_危險旗標只准出現在全開(self) -> None:
         """需求變了：不再是「一律不准」，而是「只准在明講全開時出現」。
