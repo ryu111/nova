@@ -210,3 +210,83 @@ class Test診斷不准被自己的罐頭句擋掉:
         ):
             答 = 解析(輸出, 0, "某家的診斷字樣ABC")
             assert "某家的診斷字樣ABC" in 答.文字, f"{解析.__name__} 沒把 stderr 當證據"
+
+
+class Test權限被擋要分得出來:
+    """`unknown` 是三種完全不同處境的垃圾桶，處理方式卻相反。
+
+    真實案例（PR #57 撿回 stderr 之後才看得到的那一行）：
+
+        jetski: no output produced — a tool required the "read_url" permission
+        that headless mode cannot prompt for, so it was auto-denied.
+
+    這條的處置跟其他 `unknown` 相反：**換一顆腦沒有用**——
+    下一顆撞的是同一堵牆（同一套沙箱、同一份權限旗標），
+    只是多燒一次 token。要動的是沙箱設定或授權，不是模型。
+
+    所以它必須先分得出來，`接力腦` 才有辦法不去換。
+    """
+
+    def test_agy的auto_deny要分成權限被擋(self) -> None:
+        信封 = json.dumps({"status": "SUCCESS", "response": ""})
+        診斷 = (
+            'jetski: no output produced — a tool required the "read_url" permission '
+            "that headless mode cannot prompt for, so it was auto-denied."
+        )
+        assert 解析agy(信封, 0, 診斷).失敗代碼 is 失敗代碼.權限被擋
+
+    def test_codex的沙箱拒絕要分成權限被擋(self) -> None:
+        """實測原文（設計文件 02 有貼）：
+
+        失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（operation not permitted）
+        """
+        assert (
+            解析codex("", 1, "write failed: operation not permitted").失敗代碼 is 失敗代碼.權限被擋
+        )
+
+    def test_一般的空回應還是未知(self) -> None:
+        """**這支防的是分過頭。** 沒有權限字樣就不准說是權限問題——
+
+        誤判成權限會讓接力停止換腦，而那可能正是換腦能救的一次。
+        """
+        信封 = json.dumps({"status": "SUCCESS", "response": ""})
+        assert 解析agy(信封, 0, "").失敗代碼 is 失敗代碼.未知
+
+
+class Test額度用完要分得出來:
+    """額度用完是**接力鏈存在的理由**，而它現在不會觸發。
+
+    今天的行為：codex 額度用完 → stderr 有 `You've hit your usage limit`
+    → 分類成 `unknown` → 終局`結果未知` → 可編輯模式下接力不換腦 → 整條鏈停住。
+    **一條 `--用 codex,agy` 的鏈，在最該換手的時候不換。**
+
+    字串出處（不是想像的）：openai/codex issue #38603 貼出實際重現——
+    `codex exec --sandbox read-only --skip-git-repo-check "Reply with exactly: OK"`
+    的輸出是
+
+        ERROR: You've hit your usage limit. Upgrade to Plus to continue using
+        Codex (https://chatgpt.com/explore/plus), or try again at Sep 13th, 2026 7:11 PM.
+
+    **日期是動態的，所以比對只能挑穩定片段。**
+
+    為什麼是`確定失敗`不是`結果未知`：這是請求被拒，模型一個字都沒跑，
+    沒有任何副作用——那正是「可以安全換下一家」的定義。
+    """
+
+    def test_codex額度用完(self) -> None:
+        訊息 = (
+            "ERROR: You've hit your usage limit. Upgrade to Plus to continue "
+            "using Codex (https://chatgpt.com/explore/plus), or try again at "
+            "Sep 13th, 2026 7:11 PM."
+        )
+        答 = 解析codex("", 1, 訊息)
+        assert 答.失敗代碼 is 失敗代碼.額度耗盡
+        assert 答.終局 is 終局.確定失敗, "沒做事就沒有副作用，可以安全換下一家"
+
+    def test_暫時限流不算額度用完(self) -> None:
+        """**這支防的是把兩件事混在一起。** 429 是等一下就好，額度用完是要等重置。
+
+        原文（同一份研究）：`code: "rate_limit_exceeded"`、`429 Too Many Requests`。
+        """
+        答 = 解析codex("", 1, 'error: code "rate_limit_exceeded", 429 Too Many Requests')
+        assert 答.失敗代碼 is not 失敗代碼.額度耗盡
