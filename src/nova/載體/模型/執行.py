@@ -5,13 +5,14 @@ shim，走 shim 跑 `codex exec --json` 會多吐兩條垃圾事件，直接跑�
 理由和 `規則表._外部指令` 同源——PATH 會讓不同機器跑到不同東西。
 """
 
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from nova.契約.角色 import 預設逾時秒
-from nova.載體.程序 import 收割整棵
+from nova.載體.程序 import 具名啟動, 收割整棵
 
 
 class 執行逾時(Exception):
@@ -51,14 +52,19 @@ def 跑cli(
 
     `環境` 是整份取代，不是疊加——呼叫端要什麼就明講什麼，
     避免「本機有某個環境變數所以會過、CI 沒有所以會紅」這種不可重現的失敗。
+    唯一的例外是 `APP_ROLE`：那是 nova 自己蓋的識別章，值只由執行檔的檔名決定，
+    不會因為執行環境不同而變，所以不會破壞可重現性。
+
+    活動監視器上顯示的名字與 `APP_ROLE` 都由執行檔的檔名決定，見 `具名啟動`。
     """
     if not 執行檔.exists():
         訊息 = f"找不到執行檔：{執行檔}"
         raise FileNotFoundError(訊息)
+    啟動列, 角色標記 = 具名啟動(執行檔, 參數)
     程序 = subprocess.Popen(  # noqa: S603 —— 執行檔與參數由轉接器組出，不吃使用者自由字串
-        [str(執行檔), *參數],
+        啟動列,
         cwd=工作目錄,
-        env=dict(環境) if 環境 is not None else None,
+        env=_帶上角色(環境, 角色標記),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         # **一定要把 stdin 關掉。** 不給的話子程序繼承父程序的 stdin，
@@ -88,6 +94,13 @@ def 跑cli(
             部分標準錯誤=_轉字串(錯.stderr),
         ) from 錯
     return 執行結果(標準輸出=標準輸出, 標準錯誤=標準錯誤, 結束碼=程序.returncode)
+
+
+def _帶上角色(環境: Mapping[str, str] | None, 角色標記: str) -> dict[str, str]:
+    """`環境=None` 代表沿用父程序的環境，所以要先把 `os.environ` 抄下來再蓋。"""
+    底 = dict(os.environ) if 環境 is None else dict(環境)
+    底["APP_ROLE"] = 角色標記
+    return 底
 
 
 def _轉字串(原始: str | bytes | None) -> str:

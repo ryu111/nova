@@ -13,6 +13,7 @@ from pathlib import Path
 
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
+from nova.載體.程序 import 具名啟動
 from nova.載體.語言 import 檢查繁體中文
 from nova.載體.閘 import 型別, 測試, 規則, 靜態
 
@@ -97,9 +98,16 @@ def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str
 
     def 檢查() -> tuple[bool, str]:
         執行檔 = 工具目錄 / 指令[0]
-        完整 = [str(執行檔) if 執行檔.exists() else 指令[0], *指令[1:]]
+        # pytest 與 mypy 是 python shebang 腳本，直接跑會在活動監視器上顯示成
+        # python3.13，跟其他每一支 python 程序分不開。角色就用工具自己的名字。
+        完整, 角色標記 = 具名啟動(執行檔 if 執行檔.exists() else Path(指令[0]), 指令[1:])
         結果 = subprocess.run(  # noqa: S603 —— 指令由本表寫死，不吃外部輸入
-            完整, cwd=根目錄, capture_output=True, text=True, check=False
+            完整,
+            cwd=根目錄,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "APP_ROLE": 角色標記},
         )
         輸出 = (結果.stdout + 結果.stderr).strip()
         return 結果.returncode == 0, 輸出
