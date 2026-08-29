@@ -18,10 +18,38 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from nova.契約.模型回應 import 回應, 用量, 終局
+from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設選項
 
 _證據上限 = 3000
+
+
+@dataclass(frozen=True, slots=True)
+class 缺席腦:
+    """一顆**沒裝**的腦。被叫到就回確定失敗，讓接力換下一顆。
+
+    存在的理由：`建立()` 會當場 `找執行檔()`，所以一串裡少裝一家，
+    整條鏈在建構期就 `FileNotFoundError`——**連裝好的那家都不會被叫到**。
+    接力鏈存在的理由就是「這顆不行換下一顆」，卻在建構期先自己垮了。
+
+    回**確定失敗**不是結果未知：請求根本沒出門，沒有副作用，
+    所以可以安全地換下一顆。判成結果未知的話，可編輯模式下接力當場停。
+    """
+
+    名稱: str
+    原因: str
+
+    def 詢問(self, 提示: str, *, 選項: 呼叫選項 = 預設選項) -> 回應:
+        """不會真的問任何東西。簽章要跟 `語言模型` 一樣才塞得進鏈上。"""
+        del 提示, 選項
+        return 回應(
+            文字=self.原因,
+            終局=終局.確定失敗,
+            失敗代碼=失敗代碼.未安裝,
+            原始結束碼=-1,
+            對話識別碼=None,
+            用量=用量(輸入token=0, 輸出token=0),
+        )
 
 
 def 可以換下一顆(終: 終局, 可以做什麼: 權限) -> bool:

@@ -35,7 +35,7 @@ from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目�
 from nova.載體.帳本讀取 import 列出執行, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
-from nova.載體.模型.轉接 import 家族, 建立
+from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.殘骸 import 加上寫檔指示, 撿回殘骸
 from nova.載體.派工表 import 怎麼派
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
@@ -215,7 +215,8 @@ def _建腦(來源: str, 執行檔: Path | None, 帳: 帳本) -> 語言模型:
     if not 家們:
         訊息 = "至少要指定一家"
         raise ValueError(訊息)
-    原始 = tuple(建立(cast(家族, 家), 執行檔=執行檔) for 家 in 家們)
+    # 少裝一家不該讓整串垮掉（見 `缺席腦`）。只指定一家卻沒裝則當場炸。
+    原始 = tuple(建立或缺席(cast(家族, 家), 執行檔=執行檔, 可以缺席=len(家們) > 1) for 家 in 家們)
     腦們 = 記帳每一顆(原始, 帳)
     return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
 
