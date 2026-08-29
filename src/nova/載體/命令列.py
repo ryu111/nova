@@ -25,11 +25,13 @@ from nova.契約.工作流 import (
     預設最多token,
     預設最多步數,
 )
+from nova.契約.帳本 import 摘要
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設逾時秒
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本, 預設帳本目錄
+from nova.載體.帳本讀取 import 列出執行, 讀一次執行
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立
@@ -265,6 +267,56 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     return 未知 if 有未知 else 閘紅
 
 
+def _子命令_帳本(參數: argparse.Namespace) -> int:
+    """看帳本：不給識別碼就列出最近幾次，給了就看那一次。
+
+    **有讀取端才算補了證據**——只有寫端的帳本是寫檔案給沒人看。
+    """
+    目錄 = Path(參數.帳本目錄) if 參數.帳本目錄 else 預設帳本目錄()
+    檔們 = 列出執行(目錄)
+    if 參數.執行識別碼:
+        對的 = [檔 for 檔 in 檔們 if 檔.stem == 參數.執行識別碼]
+        if not 對的:
+            print(f"找不到 {參數.執行識別碼}（在 {目錄}）", file=sys.stderr)
+            return 阻擋
+        print(_一次的細節(讀一次執行(對的[0])))
+        return 放行
+    if not 檔們:
+        print(f"還沒有任何帳本（會寫在 {目錄}）")
+        return 放行
+    for 檔 in 檔們[: 參數.最近]:
+        print(_一行摘要(讀一次執行(檔)))
+    return 放行
+
+
+def _一行摘要(摘: 摘要) -> str:
+    家們 = "、".join(f"{家.供應商}×{家.次數}" for 家 in 摘.各家) or "沒有模型呼叫"
+    警告 = ""
+    if 摘.沒收尾的呼叫:
+        警告 += f" ⚠ {len(摘.沒收尾的呼叫)} 筆沒收尾"
+    if 摘.壞掉的行:
+        警告 += f" ⚠ {摘.壞掉的行} 行讀不動"
+    return f"{摘.執行識別碼}  {家們}  {摘.總token} token{警告}"
+
+
+def _一次的細節(摘: 摘要) -> str:
+    行們 = [f"執行 {摘.執行識別碼}", f"  時間  {摘.起} → {摘.迄}"]
+    行們.extend(
+        f"  {家.供應商:<8}{家.次數} 次（成功 {家.成功} / 失敗 {家.失敗} / 未知 {家.未知}）"
+        f" · {家.輸入token}→{家.輸出token} token"
+        for 家 in 摘.各家
+    )
+    if 摘.階段們:
+        行們.append("  階段  " + " → ".join(摘.階段們))
+    行們.append(f"  總計  {摘.總token} token")
+    if 摘.沒收尾的呼叫:
+        編號 = "、".join(str(號) for 號 in 摘.沒收尾的呼叫)
+        行們.append(f"  ⚠ 沒收尾的呼叫：{編號}——發出去了但沒寫下結果，可能做了一半")
+    if 摘.壞掉的行:
+        行們.append(f"  ⚠ 有 {摘.壞掉的行} 行讀不動（證據不完整，不等於事情沒發生）")
+    return "\n".join(行們)
+
+
 def 建剖析器() -> argparse.ArgumentParser:
     """建出 nova 的參數剖析器。抽出來是為了讓測試能不啟動程序就檢查介面。"""
     剖析器 = argparse.ArgumentParser(prog="nova", description="nova：把規則降到載體層執行")
@@ -352,6 +404,12 @@ def 建剖析器() -> argparse.ArgumentParser:
     )
     流剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
     流剖析.set_defaults(執行=_子命令_工作流)
+
+    帳剖析 = 子.add_parser("帳本", help="看執行紀錄：誰被叫了、花多少、怎麼收場")
+    帳剖析.add_argument("執行識別碼", nargs="?", default=None, help="不給就列出最近幾次")
+    帳剖析.add_argument("--帳本目錄", default=None, help="從哪裡讀。預設 ~/.local/state/nova/帳本")
+    帳剖析.add_argument("--最近", type=int, default=10, help="列出幾次（預設 10）")
+    帳剖析.set_defaults(執行=_子命令_帳本)
 
     return 剖析器
 
