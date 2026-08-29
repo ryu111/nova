@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from nova import 家族額度, 額度
 from nova.契約.工作流 import (
     任務,
     停止條件,
@@ -49,7 +50,6 @@ from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
-from nova.載體.額度 import 執行查詢額度
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 
@@ -600,7 +600,15 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
 
 def _子命令_額度(參數: argparse.Namespace) -> int:
     """查詢 codex 與 agy 額度並寫入快取。"""
-    return 執行查詢額度(最舊秒=參數.最舊)
+
+    def _回報(家: 家族額度) -> None:
+        if 家.失敗原因:
+            sys.stderr.write(f"[{家.家}] 失敗：{家.失敗原因}\n")
+        else:
+            sys.stderr.write(f"[{家.家}] 成功取得額度\n")
+
+    快照 = 額度(最舊秒=參數.最舊, 每家=_回報)
+    return 0 if all(家.失敗原因 is None for 家 in 快照.家族們) else 1
 
 
 #: 子命令 → 處理函式。**唯一的登記來源**：名字在剖析器宣告、處理函式在這裡，
