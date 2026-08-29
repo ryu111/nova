@@ -78,13 +78,17 @@ def 專案根() -> Path:
 #:
 #: 環境變數名走 ASCII（跨程序，CLAUDE.md 的例外條款），用執行檔自己的名字當
 #: key——同一份內容擺三個檔名，才有辦法在同一支測試裡同時當 codex 與 agy。
+#:
+#: **`env` 也記下來**：載體交給子程序什麼環境是行為的一部分（載入秘密、`APP_ROLE`、
+#: 把各家自帶的載體關到最小），而那些只有從子程序這一側看得到。
 假CLI內容 = f"""#!{sys.executable}
 import json, os, pathlib, sys
 名 = pathlib.Path(sys.argv[0]).name.replace("fake-", "").upper()
 紀錄 = os.environ.get(f"NOVA_FAKE_{{名}}_RECORD")
 if 紀錄:
     pathlib.Path(紀錄).write_text(
-        json.dumps({{"argv": sys.argv[1:], "who": sys.argv[0]}}), encoding="utf-8")
+        json.dumps({{"argv": sys.argv[1:], "who": sys.argv[0], "env": dict(os.environ)}}),
+        encoding="utf-8")
 sys.stdout.write(
     pathlib.Path(os.environ[f"NOVA_FAKE_{{名}}_TRANSCRIPT"]).read_text(encoding="utf-8"))
 """

@@ -17,6 +17,7 @@ trufflehog 的 `pkg/detectors`），只收**有明確固定前綴或結構**的�
 
 import pytest
 
+from nova.載體.秘密 import 已載入的鍵環境變數
 from nova.載體.遮罩 import 遮罩
 
 #: 拼樣本用的填充字串。**每一個假樣本都是在執行期拼出來的，
@@ -182,3 +183,64 @@ def test_空字串不會炸() -> None:
 
     assert 果.文字 == ""
     assert 果.遮掉幾處 == 0
+
+
+class Test自己載進去的不必猜:
+    """**`遮罩` 靠鍵名的特徵猜哪些環境變數是祕密**（KEY／TOKEN／SECRET…）。
+
+    猜得中一般情況，猜不中 `MY_THING=sk-...`。但 nova 自己從祕密檔載進去的東西，
+    是不是祕密**不必猜**——`載入到` 會把鍵名記進 `NOVA_LOADED_SECRETS`，
+    這裡照著遮。
+
+    **這是「載入秘密」不外洩那條線的第二段。** 第一段（記名單）在
+    `tests/整合/test_秘密落盤.py`，第三段（真的跑一次帳本裡是 0 次）在
+    `tests/驗收/test_載進去的秘密不進帳本.py`。
+    """
+
+    def test_名單上的鍵不管叫什麼都要遮(self) -> None:
+        原文 = "拿到的是 這串值有夠長不要外流 這串"
+
+        果 = 遮罩(
+            原文,
+            環境={
+                "MY_THING": "這串值有夠長不要外流",
+                已載入的鍵環境變數: "MY_THING",
+            },
+        )
+
+        assert "這串值有夠長不要外流" not in 果.文字
+        assert 果.遮掉幾處 == 1
+
+    def test_不在名單上的一般變數還是不遮(self) -> None:
+        """**這一支防的是擋過頭。** 遮掉 `PWD` 的話帳本會變成一片馬賽克。"""
+        原文 = "在 /Users/sbu/nova 底下跑"
+
+        果 = 遮罩(原文, 環境={"PWD": "/Users/sbu/nova", 已載入的鍵環境變數: "MY_THING"})
+
+        assert "/Users/sbu/nova" in 果.文字
+
+    def test_名單指到不存在的鍵不會炸(self) -> None:
+        """子程序繼承得到這個名單，但不一定繼承得到那些值。"""
+        果 = 遮罩("沒事", 環境={已載入的鍵環境變數: "根本沒有這個"})
+
+        assert 果.文字 == "沒事"
+
+    def test_名單上的值太短還是不遮(self) -> None:
+        """`A=1` 這種值遮下去會把帳本裡每一個 `1` 都吃掉。"""
+        果 = 遮罩("重試 3 次", 環境={"MY_THING": "3", 已載入的鍵環境變數: "MY_THING"})
+
+        assert "3" in 果.文字
+
+    def test_名單本身不是祕密(self) -> None:
+        """`NOVA_LOADED_SECRETS` 這個名字撞得上「鍵名看起來是祕密」那條規則。
+
+        不排除的話它的值（一串鍵名）也會被遮，而且遮出來的標記會巢狀套進
+        其他標記裡。**鍵名不是祕密**，被遮掉只會讓帳本更難讀。
+        """
+        果 = 遮罩(
+            "載入了 MY_THING 跟 OTHER_THING",
+            環境={已載入的鍵環境變數: "MY_THING,OTHER_THING"},
+        )
+
+        assert 果.文字 == "載入了 MY_THING 跟 OTHER_THING"
+        assert 果.遮掉幾處 == 0

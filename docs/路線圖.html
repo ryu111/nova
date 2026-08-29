@@ -316,9 +316,14 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "w": 170,
    "h": 46,
    "層": "核",
-   "態": "無",
-   "排": "可做",
-   "檔": []
+   "態": "好",
+   "檔": [
+    "src/nova/載體/秘密.py",
+    "tests/單元/test_秘密.py",
+    "tests/整合/test_秘密落盤.py",
+    "tests/驗收/test_載進去的秘密不進帳本.py"
+   ],
+   "註": "祕密檔住 <狀態根>/專案/<識別>/祕密.env（專案外面、用專案當鍵），出生前載進 os.environ 讓子程序繼承。權限比 0600 鬆就整個不出生。載入的鍵名記進 NOVA_LOADED_SECRETS，遮罩照著遮——所以鍵名不叫 KEY/TOKEN 也遮得掉。真的跑過：本地模型把祕密原封不動講回來，帳本裡 0 次"
   },
   {
    "id": "預算",
