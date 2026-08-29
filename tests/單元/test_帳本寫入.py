@@ -10,12 +10,13 @@
 
 import io
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from nova.契約.帳本 import 事件, 事件種類, 落盤時加的鍵
-from nova.載體.帳本 import 不記帳本, 建帳本
+from nova.載體.帳本 import 不記帳本, 建帳本, 預設帳本目錄
 
 
 class 會爆的串流(io.StringIO):
@@ -161,3 +162,47 @@ class Test成本:
         帳 = 建帳本(串流, 執行識別碼="r1", 現在=lambda: "t")
         帳.記一筆(事件(種類=事件種類.呼叫結束, 供應商="agy"))
         assert "cost_usd" not in 讀出來(串流)[0]
+
+
+class Test帳本要按專案分:
+    """「屬於某個專案」跟「存在那個專案裡面」是兩件事。
+
+    帳本原本是全域的：`~/.local/state/nova/帳本/`，所有專案的執行混在一起。
+    實測 2026-08-29，86 次執行躺在同一個目錄裡，分不出哪次是在哪個專案跑的。
+
+    **存在專案外面是對的**（模型摸不到，而且帳本裡有不該進版控的東西），
+    但那只解了完整性那條軸，沒解歸屬那條：
+    nova 用到新專案時，那個專案的紀錄應該歸那個專案。
+
+    解法是把「屬於哪個專案」當成**索引**問題而不是**存放位置**問題——
+    存在專案外面、用專案當鍵，兩件事同時成立。
+    """
+
+    def test_不同專案的帳本不會混在一起(self, tmp_path: Path) -> None:
+        甲 = 預設帳本目錄(tmp_path / "專案甲")
+        乙 = 預設帳本目錄(tmp_path / "專案乙")
+        assert 甲 != 乙
+
+    def test_同一個專案永遠是同一個目錄(self, tmp_path: Path) -> None:
+        """不然每跑一次就開一個新目錄，等於沒有跨執行的歷史。"""
+        assert 預設帳本目錄(tmp_path / "甲") == 預設帳本目錄(tmp_path / "甲")
+
+    def test_相對路徑與絕對路徑指同一個專案(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**沒解析成絕對路徑就等於沒分對**——`.` 跟完整路徑會被當成兩個專案。"""
+        專案 = tmp_path / "甲"
+        專案.mkdir()
+        monkeypatch.chdir(專案)
+        assert 預設帳本目錄(Path()) == 預設帳本目錄(專案)
+
+    def test_目錄名看得出是哪個專案(self, tmp_path: Path) -> None:
+        """純雜湊看不出是誰的帳。**要人查得動**——那是帳本存在的理由。"""
+        專案 = tmp_path / "某個專案"
+        assert "某個專案" in str(預設帳本目錄(專案))
+
+    def test_不落在專案裡面(self, tmp_path: Path) -> None:
+        """**歸屬換了，完整性不准跟著換掉。** 落在專案裡模型就摸得到。"""
+        專案 = tmp_path / "甲"
+        專案.mkdir()
+        assert 專案.resolve() not in 預設帳本目錄(專案).resolve().parents

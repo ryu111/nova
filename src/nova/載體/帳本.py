@@ -40,6 +40,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import UTC, datetime
+from hashlib import sha256
 from os import environ
 from pathlib import Path
 from secrets import token_hex
@@ -122,15 +123,39 @@ def 不記帳本() -> 帳本:
     return 帳本(記一筆=不記, 新呼叫編號=發號)
 
 
-def 預設帳本目錄() -> Path:
-    """`$XDG_STATE_HOME/nova/帳本`，沒設就 `~/.local/state/nova/帳本`。
+#: 專案識別碼裡雜湊佔幾個字。看得懂的名字擺前面，雜湊只負責防撞。
+_專案雜湊長度 = 8
 
-    **刻意不落在任何 repo 裡。** 落在工作目錄的話，被 nova 驅動的模型
-    會順手把帳本 commit 進去——而帳本裡有提示長度、失敗代碼這些
-    不該進版控的東西，何況 repo 是 public。
+
+def 專案識別(專案: Path) -> str:
+    """這是哪個專案的帳。**名字看得懂 ＋ 路徑雜湊防撞。**
+
+    純雜湊看不出是誰的帳，而「人查得動」正是帳本存在的理由；
+    純名字則會讓兩個同名的專案（`~/a/nova` 與 `~/b/nova`）混在一起。
+    """
+    絕對 = 專案.resolve()
+    return f"{絕對.name}-{sha256(str(絕對).encode()).hexdigest()[:_專案雜湊長度]}"
+
+
+def 預設帳本目錄(專案: Path | None = None) -> Path:
+    """這個專案的帳本住哪。預設 `$XDG_STATE_HOME/nova/專案/<識別>/帳本`。
+
+    **兩條軸都要顧，而它們指向不同的答案**：
+
+    | | 住在專案底下 | 住在專案外面 |
+    |---|---|---|
+    | 完整性（模型摸不摸得到） | ❌ 會被順手 commit 進去，而且模型改得到 | ✅ |
+    | 歸屬（紀錄屬於誰） | ✅ 跟著專案走 | ⚠️ 全部混在一起 |
+
+    解法是**把歸屬當成索引問題，不是存放位置問題**：存在專案外面、
+    用專案當鍵。原本沒有這一層，86 次執行躺在同一個目錄裡，分不出誰是誰。
+
+    `專案` 不給就退回舊的全域位置——那是給「沒有專案概念」的呼叫端用的
+    （例如純粹想看歷史），不是預設路徑。
     """
     根 = environ.get("XDG_STATE_HOME")
-    return (Path(根) if 根 else Path.home() / ".local" / "state") / "nova" / "帳本"
+    底 = (Path(根) if 根 else Path.home() / ".local" / "state") / "nova"
+    return 底 / "帳本" if 專案 is None else 底 / "專案" / 專案識別(專案) / "帳本"
 
 
 def 新執行識別碼() -> str:

@@ -4,6 +4,7 @@
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,10 +32,16 @@ nova執行檔 = Path(sys.executable).parent / "nova"
 專案根目錄 = Path(__file__).resolve().parent.parent.parent
 
 
-def _跑(*參數: str, 輸入: str | None = None) -> subprocess.CompletedProcess[str]:
+def _跑(
+    *參數: str,
+    輸入: str | None = None,
+    環境: dict[str, str] | None = None,
+    在: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(nova執行檔), *參數],
-        cwd=專案根目錄,
+        cwd=在 or 專案根目錄,
+        env=None if 環境 is None else {**os.environ, **環境},
         capture_output=True,
         text=True,
         input=輸入,
@@ -268,3 +275,39 @@ class Test進度檔在工作目錄裡要被擋下來:
         # CI 沒裝三家 CLI，建腦時 FileNotFoundError，一樣回 2。
         # 退出碼在那裡是對的，只是不是這支測試在守的那件事。
         assert "在工作目錄" not in 結果.stderr, 結果.stderr[:300]
+
+
+class Test帳本按專案分:
+    """純函式分得出來不代表 CLI 分得出來——**要真的有人叫它**。
+
+    這一格的兩條軸容易被改壞成單軸：只顧完整性就變回全域混在一起，
+    只顧歸屬就把帳本寫進專案裡讓模型摸得到。三支測試各守一邊。
+
+    斷言看的是 **CLI 自己講的落點**（`nova 帳本` 在沒有紀錄時會印出來），
+    不是「有沒有真的產生檔案」——後者要先叫一次模型，那是燒 token 測接線。
+    """
+
+    def _落點(self, 專案: Path, 狀態: Path) -> str:
+        return _跑("帳本", 環境={"XDG_STATE_HOME": str(狀態)}, 在=專案).stdout
+
+    def test_在不同專案跑會指向不同目錄(self, tmp_path: Path) -> None:
+        狀態 = tmp_path / "狀態"
+        甲 = tmp_path / "甲"
+        乙 = tmp_path / "乙"
+        for 專案 in (甲, 乙):
+            專案.mkdir()
+        assert self._落點(甲, 狀態) != self._落點(乙, 狀態)
+
+    def test_落點看得出是哪個專案(self, tmp_path: Path) -> None:
+        """純雜湊看不出是誰的帳，而**人查得動**正是帳本存在的理由。"""
+        狀態 = tmp_path / "狀態"
+        專案 = tmp_path / "某個專案"
+        專案.mkdir()
+        assert "某個專案" in self._落點(專案, 狀態)
+
+    def test_落點不在專案裡面(self, tmp_path: Path) -> None:
+        """**歸屬換了，完整性不准跟著換掉**——落在專案裡模型就摸得到。"""
+        狀態 = tmp_path / "狀態"
+        專案 = tmp_path / "甲"
+        專案.mkdir()
+        assert str(專案.resolve()) not in self._落點(專案, 狀態)
