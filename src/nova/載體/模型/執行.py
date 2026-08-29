@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nova.契約.角色 import 預設逾時秒
+from nova.載體.程序 import 收割整棵
 
 
 class 執行逾時(Exception):
@@ -46,7 +47,7 @@ def 跑cli(
     逾時秒: float = 預設逾時秒,
     環境: Mapping[str, str] | None = None,
 ) -> 執行結果:
-    """跑一次外部 CLI，回結構化結果。逾時會殺掉子程序並丟 `執行逾時`。
+    """跑一次外部 CLI，回結構化結果。逾時會殺掉整棵子程序樹並丟 `執行逾時`。
 
     `環境` 是整份取代，不是疊加——呼叫端要什麼就明講什麼，
     避免「本機有某個環境變數所以會過、CI 沒有所以會紅」這種不可重現的失敗。
@@ -54,32 +55,39 @@ def 跑cli(
     if not 執行檔.exists():
         訊息 = f"找不到執行檔：{執行檔}"
         raise FileNotFoundError(訊息)
+    程序 = subprocess.Popen(  # noqa: S603 —— 執行檔與參數由轉接器組出，不吃使用者自由字串
+        [str(執行檔), *參數],
+        cwd=工作目錄,
+        env=dict(環境) if 環境 is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        # **一定要把 stdin 關掉。** 不給的話子程序繼承父程序的 stdin，
+        # 而 codex 看到 stdin 是開著的就會等：實測 stderr 印出
+        # 「Reading additional input from stdin...」然後一直坐著，
+        # 一個 token 都不花，最後被 nova 當成逾時殺掉。
+        #
+        # **「卡在等輸入」跟「想太久」長得一模一樣**——都是逾時、都是 0 token。
+        # sol 那兩次「大題目想不完」的誤診就是這麼來的。
+        stdin=subprocess.DEVNULL,
+        text=True,
+        # 用不了 `subprocess.run`，因為它逾時只 `kill()` 直接子程序，
+        # 拿不到 Popen 物件就沒辦法改成打整組。見 `載體.程序`。
+        start_new_session=True,
+    )
     try:
-        完成 = subprocess.run(  # noqa: S603 —— 執行檔與參數由轉接器組出，不吃使用者自由字串
-            [str(執行檔), *參數],
-            cwd=工作目錄,
-            env=dict(環境) if 環境 is not None else None,
-            capture_output=True,
-            # **一定要把 stdin 關掉。** 不給的話子程序繼承父程序的 stdin，
-            # 而 codex 看到 stdin 是開著的就會等：實測 stderr 印出
-            # 「Reading additional input from stdin...」然後一直坐著，
-            # 一個 token 都不花，最後被 nova 當成逾時殺掉。
-            #
-            # **「卡在等輸入」跟「想太久」長得一模一樣**——都是逾時、都是 0 token。
-            # sol 那兩次「大題目想不完」的誤診就是這麼來的。
-            stdin=subprocess.DEVNULL,
-            text=True,
-            timeout=逾時秒,
-            check=False,
-        )
+        標準輸出, 標準錯誤 = 程序.communicate(timeout=逾時秒)
     except subprocess.TimeoutExpired as 錯:
+        收割整棵(程序)
+        # **不要在這裡再 communicate() 一次。** POSIX 的 `_communicate` 逾時當下
+        # 就把讀到的東西塞進例外了，再讀一次只會多冒「孫程序抓著寫入端、
+        # 收不到 EOF」的險。由 test_孫程序抓著管線不准讓收屍卡住 背書。
         訊息 = f"{執行檔.name} 超過 {逾時秒} 秒沒回應"
         raise 執行逾時(
             訊息,
             部分標準輸出=_轉字串(錯.stdout),
             部分標準錯誤=_轉字串(錯.stderr),
         ) from 錯
-    return 執行結果(標準輸出=完成.stdout, 標準錯誤=完成.stderr, 結束碼=完成.returncode)
+    return 執行結果(標準輸出=標準輸出, 標準錯誤=標準錯誤, 結束碼=程序.returncode)
 
 
 def _轉字串(原始: str | bytes | None) -> str:
