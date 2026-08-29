@@ -494,6 +494,7 @@ def _歸檔成果(
                 迄=摘.迄 if 摘 else "",
                 走了幾階=len(果.軌跡),
                 總token=摘.總token if 摘 else 0,
+                總成本美金=摘.總成本美金 if 摘 else None,
             ),
             目錄=_已處理目錄(參數),
         )
@@ -540,7 +541,9 @@ def _子命令_已處理(參數: argparse.Namespace) -> int:
 
 def _一行成果(筆: 成果) -> str:
     階 = f"{筆.走了幾階} 階" if 筆.走了幾階 else "沒走到任何一階"
-    return f"{筆.執行識別碼}  {筆.收場}（碼 {筆.退出碼}）  {階}  {筆.總token} token  {筆.任務}"
+    成本 = f" · US${筆.總成本美金:.4f}" if 筆.總成本美金 is not None else ""
+    前段 = f"{筆.執行識別碼}  {筆.收場}（碼 {筆.退出碼}）  {階}"
+    return f"{前段}  {筆.總token} token{成本}  {筆.任務}"
 
 
 _收場的退出碼 = {
@@ -595,12 +598,13 @@ def _子命令_帳本(參數: argparse.Namespace) -> int:
 
 def _一行摘要(摘: 摘要) -> str:
     家們 = "、".join(f"{家.供應商}×{家.次數}" for 家 in 摘.各家) or "沒有模型呼叫"
+    成本 = f" · US${摘.總成本美金:.4f}" if 摘.總成本美金 is not None else ""
     警告 = ""
     if 摘.沒收尾的呼叫:
         警告 += f" ⚠ {len(摘.沒收尾的呼叫)} 筆沒收尾"
     if 摘.壞掉的行:
         警告 += f" ⚠ {摘.壞掉的行} 行讀不動"
-    return f"{摘.執行識別碼}  {家們}  {摘.總token} token{警告}"
+    return f"{摘.執行識別碼}  {家們}  {摘.總token} token{成本}{警告}"
 
 
 def _一次的細節(摘: 摘要) -> str:
@@ -608,11 +612,13 @@ def _一次的細節(摘: 摘要) -> str:
     行們.extend(
         f"  {家.供應商:<8}{家.次數} 次（成功 {家.成功} / 失敗 {家.失敗} / 未知 {家.未知}）"
         f" · {家.輸入token}→{家.輸出token} token"
+        f"{f' · US${家.成本美金:.4f}' if 家.成本美金 is not None else ''}"
         for 家 in 摘.各家
     )
     if 摘.階段們:
         行們.append("  階段  " + " → ".join(摘.階段們))
-    行們.append(f"  總計  {摘.總token} token")
+    成本 = f" · US${摘.總成本美金:.4f}" if 摘.總成本美金 is not None else ""
+    行們.append(f"  總計  {摘.總token} token{成本}")
     if 摘.沒收尾的呼叫:
         編號 = "、".join(str(號) for 號 in 摘.沒收尾的呼叫)
         行們.append(f"  ⚠ 沒收尾的呼叫：{編號}——發出去了但沒寫下結果，可能做了一半")

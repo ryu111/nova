@@ -17,7 +17,10 @@
 from dataclasses import dataclass
 from typing import Any
 
-_欄位對照 = (
+#: （繁中屬性名, 落盤的 ASCII 鍵, 讀不到時的預設值）。
+#: 預設值的型別跟著欄位走，所以標成 `Any`——標死會逼出 `type: ignore`，
+#: 而那是用規避換來的綠。
+_欄位對照: tuple[tuple[str, str, Any], ...] = (
     ("執行識別碼", "run_id", ""),
     ("任務", "task", ""),
     ("收場", "outcome", ""),
@@ -26,6 +29,7 @@ _欄位對照 = (
     ("迄", "ended_at", ""),
     ("走了幾階", "steps", 0),
     ("總token", "tokens", 0),
+    ("總成本美金", "cost_usd", None),
 )
 
 
@@ -46,11 +50,12 @@ class 成果:
     迄: str
     走了幾階: int
     總token: int
+    總成本美金: float | None = None
 
 
 def 成果轉字典(一筆: 成果) -> dict[str, Any]:
     """落盤用。鍵是 ASCII，讀的人可能不是 python。"""
-    return {外: getattr(一筆, 內) for 內, 外, _ in _欄位對照}
+    return {外: getattr(一筆, 內) for 內, 外, _ in _欄位對照 if getattr(一筆, 內) is not None}
 
 
 def 字典轉成果(原始: dict[str, Any]) -> 成果:

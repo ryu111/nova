@@ -10,13 +10,18 @@
 會碰硬碟，所以住整合層不住單元層。
 """
 
+import argparse
+import json
 from pathlib import Path
 
 import pytest
 
+from nova.契約.工作流 import 結束, 結束代碼
 from nova.契約.成果 import 成果
+from nova.載體.命令列 import _歸檔成果
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 預設帳本目錄
+from nova.迴圈.工作流 import 工作流結果
 
 
 def _成果(識別碼: str, *, 收場: str = "完成", 退出碼: int = 0) -> 成果:
@@ -125,3 +130,74 @@ class Test落點:
         專案.mkdir()
 
         assert 已處理目錄(專案).parent == 預設帳本目錄(專案).parent
+
+
+class Test從摘要接到成果:
+    """**這條接線最容易漏，而且漏了完全看不出來。**
+
+    加總對了、顯示對了，但 `_歸檔成果` 忘了把成本傳下去的話，
+    成果帳本上就是一片空白——而空白跟「這次沒人給成本」長得一模一樣。
+
+    上一輪這一格是用「跑完就丟的臨時斷言」驗負控的，repo 裡沒有留下任何東西
+    ——那等於沒有保證。見 docs/負控紀錄.md 的第六次。
+    """
+
+    def _跑一次歸檔(self, tmp_path: Path, 事件們: list[dict[str, object]]) -> 成果 | None:
+        帳本目錄 = tmp_path / "帳本"
+        帳本目錄.mkdir(parents=True)
+        識別 = "20260830T120000Z-abc123"
+        (帳本目錄 / f"{識別}.jsonl").write_text(
+            "\n".join(json.dumps(事, ensure_ascii=False) for 事 in 事件們) + "\n",
+            encoding="utf-8",
+        )
+        參數 = argparse.Namespace(帳本目錄=str(帳本目錄))
+        _歸檔成果(
+            參數,
+            識別=識別,
+            任務="做一件事",
+            果=工作流結果(結束=結束(結束代碼.完成, "做完了"), 軌跡=()),
+            退出碼=0,
+        )
+        筆們 = 列出成果(tmp_path / "已處理")
+        return 筆們[0] if 筆們 else None
+
+    def _呼叫(self, 編號: int, 家: str, 成本: float | None) -> list[dict[str, object]]:
+        收尾: dict[str, object] = {
+            "run": "20260830T120000Z-abc123",
+            "seq": 編號 * 2,
+            "ts": f"t{編號 * 2}",
+            "event": "call_finished",
+            "call": 編號,
+            "family": 家,
+            "outcome": "success",
+            "input_tokens": 100,
+            "output_tokens": 10,
+        }
+        if 成本 is not None:
+            收尾["cost_usd"] = 成本
+        return [
+            {
+                "run": "20260830T120000Z-abc123",
+                "seq": 編號 * 2 - 1,
+                "ts": f"t{編號 * 2 - 1}",
+                "event": "call_started",
+                "call": 編號,
+                "family": 家,
+            },
+            收尾,
+        ]
+
+    def test_事件帳本裡的成本會出現在成果上(self, tmp_path: Path) -> None:
+        一筆 = self._跑一次歸檔(tmp_path, self._呼叫(1, "claude", 0.75))
+
+        assert 一筆 is not None, "根本沒歸檔"
+        assert 一筆.總成本美金 == 0.75
+
+    def test_缺一家成本時成果上也是留白(self, tmp_path: Path) -> None:
+        """**留白不准變成 0。** 0 看起來像免費，留白看起來像不知道——後者才是真的。"""
+        一筆 = self._跑一次歸檔(
+            tmp_path, [*self._呼叫(1, "claude", 0.75), *self._呼叫(2, "codex", None)]
+        )
+
+        assert 一筆 is not None
+        assert 一筆.總成本美金 is None

@@ -139,6 +139,7 @@ class 一家的帳:
     未知: int
     輸入token: int
     輸出token: int
+    成本美金: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,3 +179,4 @@ class 摘要:
     沒收尾的呼叫: tuple[int, ...]
     壞掉的行: int
     總token: int
+    總成本美金: float | None = None
