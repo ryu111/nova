@@ -9,6 +9,7 @@
 **而 CLI 仍然回 `status: SUCCESS`**。也就是說「照做但沒東西」長得跟成功一模一樣。
 """
 
+import dataclasses
 import inspect
 import json
 import stat
@@ -19,7 +20,7 @@ import pytest
 
 from nova.契約.模型回應 import 終局
 from nova.載體.命令列 import 主程式
-from nova.載體.生圖 import 生圖
+from nova.載體.生圖 import 生圖, 生圖選項
 
 實錄 = Path(__file__).resolve().parent / "實錄" / "agy_ok.json"
 
@@ -61,7 +62,7 @@ def 不生圖(假CLI: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 class Test驗收看檔案不看模型:
     def test_圖真的出現才算成功(self, tmp_path: Path, 會生圖: Path) -> None:
-        果 = 生圖("一顆星星", 工作目錄=tmp_path, 執行檔=會生圖)
+        果 = 生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=會生圖))
         assert 果.答.終局 is 終局.成功
         assert [檔.name for 檔 in 果.圖檔] == ["星星.png"]
 
@@ -72,14 +73,14 @@ class Test驗收看檔案不看模型:
         agy 的 brain 目錄搬不過來。當成確定失敗會讓上層重跑，
         而重跑是再生一張圖、再花一次錢。
         """
-        果 = 生圖("一顆星星", 工作目錄=tmp_path, 執行檔=不生圖)
+        果 = 生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=不生圖))
         assert 果.答.終局 is 終局.結果未知
         assert 果.圖檔 == ()
         assert "沒有" in 果.答.文字 or "沒有" in 果.答.失敗代碼.value or 果.答.文字
 
     def test_沒圖的時候原因要留在證據裡(self, tmp_path: Path, 不生圖: Path) -> None:
         """只回「結果未知」的話，查的人得自己重建為什麼。"""
-        果 = 生圖("一顆星星", 工作目錄=tmp_path, 執行檔=不生圖)
+        果 = 生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=不生圖))
         assert "工作目錄" in 果.答.文字
 
     def test_本來就有的圖不算數(self, tmp_path: Path, 不生圖: Path) -> None:
@@ -88,7 +89,7 @@ class Test驗收看檔案不看模型:
         看目錄裡有沒有圖的話，第二次呼叫會被第一次的產物騙過去。
         """
         (tmp_path / "舊的.png").write_bytes(b"\x89PNG" + b"0" * 2000)
-        果 = 生圖("一顆星星", 工作目錄=tmp_path, 執行檔=不生圖)
+        果 = 生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=不生圖))
         assert 果.答.終局 is 終局.結果未知
         assert 果.圖檔 == ()
 
@@ -96,13 +97,14 @@ class Test驗收看檔案不看模型:
 class Test權限:
     def test_一定走全開(self, tmp_path: Path, 會生圖: Path) -> None:
         """可編輯下圖進不了工作目錄，而 CLI 假回報成功。**這條不給呼叫端選。**"""
-        生圖("一顆星星", 工作目錄=tmp_path, 執行檔=會生圖)
+        生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=會生圖))
         參數 = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))["argv"]
         assert "--dangerously-skip-permissions" in 參數
 
     def test_呼叫端不能指定權限(self) -> None:
         """簽章裡沒有權限這個參數——能傳就代表能傳錯。"""
         assert "權限" not in inspect.signature(生圖).parameters
+        assert "權限" not in {欄.name for 欄 in dataclasses.fields(生圖選項)}
 
 
 class Test只有agy有:
@@ -112,11 +114,43 @@ class Test只有agy有:
         只看**提示那個參數**，不看整串 argv——`--add-dir` 本來就會帶上工作目錄，
         掃整串的話，把提示裡那句拿掉這支照樣綠。第一版就是這樣，靠負控才發現。
         """
-        生圖("一顆星星", 工作目錄=tmp_path, 執行檔=會生圖)
+        生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=會生圖))
         參數 = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))["argv"]
         提示們 = [孤 for 孤 in 參數 if "generate_image" in 孤]
         assert 提示們, f"argv 裡找不到提示：{參數}"
         assert str(tmp_path) in 提示們[0]
+
+
+class Test續接:
+    """生圖 ＋ 持久對話 ＝ 反覆修圖。
+
+    2026-08-29 真跑實測（agy）：第一輪生黃星並記下 sid（45,375→1,050 token），
+    第二輪帶 `--續接 <sid>` 說「把剛剛那顆改成藍色，其他都一樣」
+    （67,282→2,270 token）——**構圖一樣、顏色變了**，證明它記得前一張。
+
+    **沒有 `保留對話` 參數是刻意的**：02 的矩陣實測 agy 對話一律落地
+    （只有 codex 預設 `--ephemeral` 不留），而生圖只有 agy 有。
+    多一個永遠是 True 的旗標只會讓人以為忘了給就續接不到。
+    """
+
+    def test_續接會把sid傳下去(self, tmp_path: Path, 會生圖: Path) -> None:
+        生圖("改成藍色", 工作目錄=tmp_path, 選項=生圖選項(執行檔=會生圖, 續接="abc-123"))
+        參數 = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))["argv"]
+        assert "abc-123" in 參數
+
+    def test_不給續接就不帶那組旗標(self, tmp_path: Path, 會生圖: Path) -> None:
+        生圖("一顆星星", 工作目錄=tmp_path, 選項=生圖選項(執行檔=會生圖))
+        參數 = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))["argv"]
+        assert "--conversation" not in 參數
+
+    def test_沒有保留對話這個參數(self) -> None:
+        """agy 一律落地。多一個永遠 True 的旗標會讓人以為忘了給就續接不到。"""
+        assert "保留對話" not in {欄.name for 欄 in dataclasses.fields(生圖選項)}
+
+    def test_續接的圖一樣要驗收(self, tmp_path: Path, 不生圖: Path) -> None:
+        """續接不是特例——模型說改好了但檔案不在，一樣降成結果未知。"""
+        果 = 生圖("改成藍色", 工作目錄=tmp_path, 選項=生圖選項(執行檔=不生圖, 續接="abc-123"))
+        assert 果.答.終局 is 終局.結果未知
 
 
 class TestCLI:
@@ -128,6 +162,20 @@ class TestCLI:
         )
         assert 碼 == 0
         assert "星星.png" in capsys.readouterr().out
+
+    def test_續接旗標接得上(
+        self, tmp_path: Path, 會生圖: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """CLI 上真的接得到——沒接的話這個能力等於不存在。"""
+        主程式(
+            [
+                *["生圖", "改成藍色", "--工作目錄", str(tmp_path)],
+                *["--執行檔", str(會生圖), "--續接", "abc-123", "--不記帳"],
+            ]
+        )
+        capsys.readouterr()
+        參數 = json.loads((tmp_path / "argv.json").read_text(encoding="utf-8"))["argv"]
+        assert "abc-123" in 參數
 
     def test_沒生出來要用結果未知的退出碼(
         self, tmp_path: Path, 不生圖: Path, capsys: pytest.CaptureFixture[str]
