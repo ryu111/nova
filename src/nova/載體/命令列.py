@@ -35,9 +35,11 @@ from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.剖析器 import 建剖析器, 處理型
+from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
+from nova.載體.排程 import 排程設定
 from nova.載體.收件 import 完成一件, 待處理, 收下一件, 收件單, 收件目錄
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
@@ -45,6 +47,7 @@ from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.殘骸 import 加上寫檔指示, 撿回殘骸
 from nova.載體.派工表 import 怎麼派
 from nova.載體.熔斷 import 該跳過嗎
+from nova.載體.狀態 import 狀態根目錄
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
@@ -452,7 +455,28 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     """跑一輪 TDD：測試 → 驗證紅 → 實作 → 驗證綠 → 審查。
 
     `--審查用` 必須跟 `--用` 不同家——自己審自己等於沒審（硬規則 4）。
+
+    **一次只准跑一個**（見 `載體.單例`）。排程每 15 分鐘叫一次而一輪可能跑
+    40 分鐘，沒有這道鎖就會三個一起燒預算、一起改同一份原始碼。
     """
+    try:
+        with 只准一個(_工作流鎖(參數)):
+            return _工作流跑一輪(參數)
+    except 拿不到鎖 as 忙:
+        print(str(忙), file=sys.stderr)
+        # **排程撞到就安靜讓開（0），人手動下的指令是真衝突（2）。**
+        # 排程本來就會在忙的時候醒來；把它印成錯誤的話，log 會被永遠
+        # 不會有人修的錯誤塞滿，然後真的錯誤就被淹掉了。
+        return 放行 if 參數.從收件匣 else 阻擋
+
+
+def _工作流鎖(參數: argparse.Namespace) -> Path:
+    """鎖按專案分——兩個不同的專案本來就該可以同時跑。"""
+    return _已處理目錄(參數).parent / "工作流.鎖"
+
+
+def _工作流跑一輪(參數: argparse.Namespace) -> int:
+    """真正的那一輪。拆出來只為了讓鎖包住它，行為完全沒變。"""
     工作目錄 = 在哪跑(參數.工作目錄)
     進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
     擋住 = _工作流前置檢查(參數, 工作目錄, 進度檔)
@@ -624,6 +648,37 @@ def _工作流退出碼(收場: 結束, 軌跡: tuple[步驟結果, ...]) -> int
     if any(步.終局 is 終局.結果未知 for 步 in 軌跡):
         return 未知
     return _收場的退出碼[收場.代碼]
+
+
+def _子命令_排程(參數: argparse.Namespace) -> int:
+    """印出 launchd 設定。**只印不裝。**
+
+    `launchctl load` 下去之後 BTM（背景項目管理）就會留紀錄，`unload` 也清不乾淨
+    ——那是使用者系統上的狀態，不是 nova 的。跟「不准自動改使用者的設定檔」
+    同一條界線：nova 產生，人安裝。
+    """
+    專案 = 在哪跑(None)
+    執行檔 = Path(sys.executable).parent / "nova"
+    try:
+        設定 = 排程設定(執行檔=執行檔, 專案=專案, 狀態根=狀態根目錄(), 每幾分=參數.每幾分)
+    except ValueError as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    print(設定)
+    標籤 = f"com.nova.{專案.name.lower()}"
+    print(
+        "\n".join(
+            [
+                "",
+                f"# 存起來（檔名要跟 Label 一致）：nova 排程 > ~/Library/LaunchAgents/{標籤}.plist",
+                f"# 裝上去：launchctl load ~/Library/LaunchAgents/{標籤}.plist",
+                f"# 拆掉：  launchctl unload ~/Library/LaunchAgents/{標籤}.plist",
+                "# nova 不會自己裝——裝上去是你系統上的狀態，那是你的決定。",
+            ]
+        ),
+        file=sys.stderr,
+    )
+    return 放行
 
 
 def _子命令_收件(參數: argparse.Namespace) -> int:
@@ -813,6 +868,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "檢查提交訊息": _子命令_檢查提交訊息,
     "問": _子命令_問,
     "工作流": _子命令_工作流,
+    "排程": _子命令_排程,
     "收件": _子命令_收件,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
