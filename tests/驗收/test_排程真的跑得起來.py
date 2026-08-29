@@ -106,3 +106,28 @@ def test_每一格都是獨立的字串(tmp_path: Path) -> None:
     指令 = _時鐘要跑的那行("--預算token", "500000", 狀態=狀態, 專案=專案)
 
     assert all(" " not in 格 for 格 in 指令[1:]), 指令
+
+
+def test_印出來的檔名跟plist裡的Label是同一個(tmp_path: Path) -> None:
+    """印出來的那行安裝指令自己說「**檔名要跟 Label 一致**」——那就要真的一致。
+
+    Label 走的是 `_標籤()`（小寫 ASCII kebab，空的退回 `project`），
+    印出來的那行卻自己算了一次 `專案.name.lower()`。專案名只要不是
+    現成的小寫 ASCII（有空格、有大寫、有中文），兩邊就對不上，
+    而使用者照著做會得到一個 `launchctl load` 不動的檔案——
+    **兩份對照表就是這條 bug 的形狀。**
+    """
+    狀態 = tmp_path / "state"
+    專案 = tmp_path / "Nova Repo 專案"
+    專案.mkdir()
+
+    跑完 = _跑("排程", 狀態=狀態, 在=專案)
+    設定 = plistlib.loads(跑完.stdout.encode("utf-8"))
+
+    標籤 = 設定["Label"]
+    # 說明走 stderr，plist 走 stdout——`nova 排程 > x.plist` 才會是一份乾淨的 plist。
+    說明 = 跑完.stderr
+    assert f"{標籤}.plist" in 說明, f"Label 是 {標籤!r}，但安裝指令裡沒有這個檔名：\n{說明}"
+    檔名們 = [段 for 段 in 說明.split() if 段.endswith(".plist")]
+    assert 檔名們, 說明
+    assert all(段.endswith(f"{標籤}.plist") for 段 in 檔名們), f"檔名跟 Label 對不上：\n{說明}"

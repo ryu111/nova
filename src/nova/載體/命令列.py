@@ -40,7 +40,7 @@ from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
-from nova.載體.排程 import 排程設定, 排程預算
+from nova.載體.排程 import 排程標籤, 排程設定, 排程預算
 from nova.載體.收件 import 完成一件, 待處理, 收下一件, 收件單, 收件目錄
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
@@ -776,7 +776,7 @@ def _子命令_排程(參數: argparse.Namespace) -> int:
         print(str(錯), file=sys.stderr)
         return 阻擋
     print(設定)
-    標籤 = f"com.nova.{專案.name.lower()}"
+    標籤 = 排程標籤(專案)
     print(
         "\n".join(
             [
