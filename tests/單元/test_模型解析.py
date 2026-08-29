@@ -290,3 +290,62 @@ class Test額度用完要分得出來:
         """
         答 = 解析codex("", 1, 'error: code "rate_limit_exceeded", 429 Too Many Requests')
         assert 答.失敗代碼 is not 失敗代碼.額度耗盡
+
+
+class Test額度字串三家都要涵蓋:
+    """上一輪只有 codex 有字串。這輪把 claude 與 agy 補上。
+
+    **claude 的變體是會長出來的**——官方錯誤文件列的是
+
+        You've hit your session limit · resets 3:45pm
+        You've hit your weekly limit · resets Mon 12:00am
+        You've hit your Opus limit · resets 3:45pm
+        You've hit your Sonnet limit · resets 3:45pm
+
+    中間那個字是**方案期間或型號名**。寫死這四個，出第五個型號就靜默失效——
+    而靜默失效的分類器比沒有分類器更糟：它讓人以為有在守。
+    所以這一組改用樣式比對，`hit your <任何一個字> limit`。
+
+    出處：anthropics/claude-code issue #86272（重現命令
+    `echo "Reply with only READY." | claude -p --model claude-opus-5`）
+    ＋ Claude Code 官方 Errors — Usage limits。
+    """
+
+    def test_claude的四種額度講法都要命中(self) -> None:
+        for 講法 in (
+            "You've hit your session limit · resets 3:50pm (Asia/Tokyo)",
+            "You've hit your weekly limit · resets Mon 12:00am",
+            "You've hit your Opus limit · resets 3:45pm",
+            "You've hit your Sonnet limit · resets 3:45pm",
+        ):
+            assert 解析claude("", 1, 講法).失敗代碼 is 失敗代碼.額度耗盡, 講法
+
+    def test_還沒出現的型號名也要命中(self) -> None:
+        """**這支才是重點。** 上面四支寫死也會過，這支寫死就過不了。"""
+        講法 = "You've hit your Nebula limit · resets 3:45pm"
+        assert 解析claude("", 1, 講法).失敗代碼 is 失敗代碼.額度耗盡
+
+    def test_agy的individual_quota要命中(self) -> None:
+        """出處：google-antigravity/antigravity-cli issue #789（`agy 1.1.12`）。
+
+        **注意它帶著 `429` 但不是暫時限流**——是要等 143 小時的每日配額。
+        所以這條要排在 HTTP 狀態分類前面，不然會被判成 `上游`。
+        """
+        for 講法 in (
+            "⚠ Individual quota reached. Please upgrade your subscription. Resets in 143h57m55s.",
+            "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 167h39m40s.",
+        ):
+            assert 解析agy("", 1, 講法).失敗代碼 is 失敗代碼.額度耗盡, 講法
+
+    def test_不准把暫時限流誤判成額度用完(self) -> None:
+        """研究裡逐條警告過的坑：**不能只因為含有 `exhausted` 就判成額度耗盡。**
+
+        Gemini CLI 的 `Resource exhausted` 帶著 `Retrying after 1s` 是暫時容量問題，
+        重試幾秒就好；判成額度耗盡會讓接力白換一家。
+        """
+        for 講法 in (
+            'error: code "rate_limit_exceeded", 429 Too Many Requests',
+            "API error: 429 - Resource exhausted. Retrying after 1s",
+            "Please retry in 39.844676573s.",
+        ):
+            assert 解析codex("", 1, 講法).失敗代碼 is not 失敗代碼.額度耗盡, 講法
