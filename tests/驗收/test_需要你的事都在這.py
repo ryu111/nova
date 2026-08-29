@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from nova.載體.收件 import 待處理
+
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]
 _護欄碼 = 4
@@ -163,12 +165,17 @@ class Test需要你的事:
         執行檔, _ = 做假CLI("claude")
         _敲一次(執行檔, "甲", 狀態=狀態, 專案=專案)
         匣 = next((狀態 / "nova" / "專案").glob("*/收件"))
+        # 「甲」撞到上限（`--最多步數 0`），所以它自己留了一張接續票在佇列上。
+        # **這裡數的是絕對值，所以要把那張算進去**——寫死 2 的話，
+        # 這支會在接續功能上線的那天紅，而紅的理由跟它要守的東西無關。
+        本來就有 = len(待處理(匣))
+        assert 本來就有 == 1, [路.name for 路 in 待處理(匣)]
         (匣 / "20260830T120000Z-file-乙-aaa.md").write_text("乙", encoding="utf-8")
         (匣 / "20260830T120001Z-file-丙-bbb.md").write_text("丙", encoding="utf-8")
 
         印出來 = _跑("狀態", 狀態=狀態, 在=專案).stdout
 
-        assert "佇列上 2 件" in 印出來, 印出來
+        assert f"佇列上 {本來就有 + 2} 件" in 印出來, 印出來
 
     def test_沒收尾的算需要你(self, 佈景: tuple[Path, Path], 做假CLI: 做假CLI型) -> None:
         """程序被殺掉會在 `處理中/` 留一件。**不自動放回佇列**（可能做了一半），
