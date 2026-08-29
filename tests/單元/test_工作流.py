@@ -20,6 +20,7 @@ from nova.契約.工作流 import (
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
+from nova.迴圈.狀態機 import TDD階段表
 
 一件事 = 任務(描述="讓 X 變成 Y", 工作目錄=Path("/不存在但沒人會碰"))
 
@@ -84,7 +85,13 @@ def _執行器(
         return (剩.pop(0) if 剩 else True), "假判準"
 
     執行 = 建TDD執行器(
-        測試=人["測試"], 實作=人["實作"], 重構=人["重構"], 審查=人["審查"], 跑判準=跑判準
+        角色表={
+            階段代碼.測試: 人["測試"],
+            階段代碼.實作: 人["實作"],
+            階段代碼.重構: 人["重構"],
+            階段代碼.審查: 人["審查"],
+        },
+        跑判準=跑判準,
     )
     return 執行, 人
 
@@ -341,3 +348,28 @@ def test_步驟結果不可變() -> None:
     步 = 步驟結果(階段=階段代碼.測試, 終局=終局.成功, 判準綠=None, 證據="")
     with pytest.raises(dataclasses.FrozenInstanceError):
         步.證據 = "改掉"  # type: ignore[misc]
+
+
+class Test接線在建構時就要對:
+    """少接一個角色，原本是呼叫時 TypeError（mypy 也擋得到）。
+
+    收成一張表之後變成 `角色表[代碼]` 的裸 KeyError——**跑到那一階才炸，
+    而且 token 已經花掉了**。守衛把它搬回建構當場。
+    """
+
+    def test_角色表少一格_建構當場炸(self) -> None:
+        缺重構 = {
+            階段代碼.測試: 假角色("測試"),
+            階段代碼.實作: 假角色("實作"),
+            階段代碼.審查: 假角色("審查"),
+        }
+        with pytest.raises(ValueError, match=階段代碼.重構.value):
+            建TDD執行器(角色表=缺重構, 跑判準=lambda _: (True, ""))
+
+    def test_要哪些角色是從階段表推導的(self) -> None:
+        """守衛寫死四個的話，下次加階段忘了改守衛，又回到跑到一半才炸。"""
+        該有的 = {定義.代碼 for 定義 in TDD階段表 if 定義.種類 is not 種類.判準}
+        with pytest.raises(ValueError) as 錯:
+            建TDD執行器(角色表={}, 跑判準=lambda _: (True, ""))
+        for 代碼 in 該有的:
+            assert 代碼.value in str(錯.value)
