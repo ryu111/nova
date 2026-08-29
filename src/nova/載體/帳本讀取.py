@@ -51,6 +51,21 @@ def 讀一次執行(路徑: Path) -> 摘要:
         return 收斂(檔, 預設識別碼=路徑.stem)
 
 
+def 讀原始事件(路徑: Path) -> list[dict[str, Any]]:
+    """一行一個事件，讀不動的跳過。
+
+    `讀一次執行` 回的是收斂過的摘要，答不出「模型講了什麼」——那要看原始事件。
+    **讀不動的跳過而不是炸掉**：一行壞掉就整份看不了等於沒有帳本。
+    """
+    收: list[dict[str, Any]] = []
+    with 路徑.open(encoding="utf-8") as 檔:
+        for 行 in 檔:
+            事 = _解析(行)
+            if 事 is not None:
+                收.append(事)
+    return 收
+
+
 def 列出執行(目錄: Path) -> list[Path]:
     """目錄裡的帳本檔，新的在前。檔名開頭是時戳所以字典序就是時序。"""
     if not 目錄.is_dir():
