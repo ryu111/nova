@@ -16,7 +16,9 @@ from typing import IO, Any, TypedDict
 
 from nova.契約.額度 import 家族額度, 快取轉快照, 視窗, 額度快照
 from nova.載體.模型 import 轉接
+from nova.載體.模型.執行 import 跑cli
 from nova.載體.狀態 import 狀態根目錄
+from nova.載體.程序 import 收割整棵
 
 _一天幾分 = 1440
 _一小時幾分 = 60
@@ -227,12 +229,12 @@ def _向codex通訊(
 
 
 def _終止程序(程序: subprocess.Popen[str]) -> None:
-    """溫和終止並在必要時強制結束子程序。"""
-    with contextlib.suppress(Exception):
-        程序.terminate()
-        程序.wait(timeout=1)
-    with contextlib.suppress(Exception):
-        程序.kill()
+    """收掉 app-server 連同它開出來的整棵樹。
+
+    app-server 自己會再開子程序，只 terminate 它一個會留孤兒——
+    2026-08-30 實測撈到一隻 `fake-mute-codex app-server` 活了 24 小時。
+    """
+    收割整棵(程序)
 
 
 def 查詢codex額度(*, 截止秒: float = _codex截止秒) -> tuple[list[視窗型], str | None]:
@@ -247,6 +249,8 @@ def 查詢codex額度(*, 截止秒: float = _codex截止秒) -> tuple[list[視�
             # 補了 stdout 的逾時卻在這裡留一條同樣的路，等於沒補。
             stderr=subprocess.DEVNULL,
             text=True,
+            # 自成一組，_終止程序 才殺得到 app-server 底下的後代。
+            start_new_session=True,
         )
     except Exception as 錯:
         return [], f"啟動 codex app-server 失敗：{錯}"
@@ -273,20 +277,15 @@ def 查詢agy額度() -> tuple[list[視窗型], str | None]:
         return [], f"找不到 agy 執行檔：{錯}"
 
     try:
-        結果 = subprocess.run(  # noqa: S603
-            [str(執行檔), "-p", "/usage"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_agy逾時秒,
-        )
+        # 走 跑cli 不走 subprocess.run：逾時要連 agy 開出來的後代一起收掉。
+        結果 = 跑cli(執行檔, ["-p", "/usage"], 逾時秒=_agy逾時秒)
     except Exception as 錯:
         return [], f"執行 agy /usage 失敗：{錯}"
 
-    if 結果.returncode != 0:
-        return [], f"agy 回傳非 0 結束碼 {結果.returncode}：{結果.stderr.strip()}"
+    if 結果.結束碼 != 0:
+        return [], f"agy 回傳非 0 結束碼 {結果.結束碼}：{結果.標準錯誤.strip()}"
 
-    視窗清單 = 解析agy額度(結果.stdout)
+    視窗清單 = 解析agy額度(結果.標準輸出)
     if not 視窗清單:
         return [], "解析 agy 額度為空"
     return 視窗清單, None
