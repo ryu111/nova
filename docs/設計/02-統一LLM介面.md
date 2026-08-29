@@ -374,10 +374,24 @@ agent_message  失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（
 
 | 保證 | 測試 |
 |---|---|
-| 唯讀與可編輯**絕對不會**冒出危險旗標 | `test_危險旗標只准出現在全開` |
+| **唯讀**絕對不會冒出危險旗標 | `test_唯讀一律不准有危險旗標` |
+| 可編輯只有 agy 例外，claude／codex 不准跟進 | `test_可編輯只有agy准用危險旗標而且理由要對` |
 | 三家都真的有一條全開的路（不是假的） | `test_全開才有危險旗標` |
 | 忘了設不會變成全開 | `test_全開不是預設` |
 | codex `exec resume` 不吃這條（權限沿用原 session） | `test_codex續接時不准出現危險旗標` |
+
+**可編輯這一級為什麼對 agy 鬆了：** agy 的網路工具 `read_url` 被 headless 的權限
+系統 auto-deny，而它**沒有工具白名單旗標、沒有 settings 路徑旗標**——唯一的開關
+是 `--dangerously-skip-permissions`。開網路就是開全部。
+
+代價是真的：auto-deny 正是 agy 唯一的越界保護（`--sandbox` 與 `--mode plan`
+都擋不住寫，三種組合都實測過）。使用者裁定接受這個交換，
+由 `test_agy的可編輯沒有邊界這是已知事實_換網路換來的` 誠實釘住。
+
+**要邊界就用 codex**——三家裡唯一的 OS 層沙箱，而且它開網路不必付這個代價
+（`-c sandbox_workspace_write.network_access=true`，實測 `curl` 從 `000` 變 `200`，
+同一條 `printf > ~/x.txt` 照樣 operation not permitted）。
+由 `test_codex可編輯要開網路而且不必拿掉沙箱` 與 `test_可編輯真的上得了網` 背書。
 
 `呼叫選項.權限` 預設值是 `權限.唯讀`，門面與 CLI 各自的 `_挑權限()` 在
 `全開` 與 `可編輯` 都沒給時回唯讀——**最嚴的那一邊當預設**，這一條在三處都成立。

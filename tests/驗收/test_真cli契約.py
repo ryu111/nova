@@ -209,34 +209,60 @@ def test_codex的可編輯有真的邊界(tmp_path: 路徑) -> None:
 
 @pytest.mark.真cli
 @pytest.mark.serial
-def test_agy的可編輯擋得住越界但不告訴你為什麼(tmp_path: 路徑) -> None:
-    """三家裡 agy 是第三種樣子：**擋得住，但診斷被吞掉。**
+def test_agy的可編輯沒有邊界這是已知事實_換網路換來的(tmp_path: 路徑) -> None:
+    """**這支斷言「擋不住」，不是斷言「擋得住」**——而且這是一次**明知代價的交換**。
 
-    實測（可編輯、給 `--add-dir`）：叫它 `printf > ~/x.txt`——
+    這條原本斷言的是相反的事（「擋得住越界但不告訴你為什麼」），機制是
+    headless 權限系統把越界的 shell 工具 auto-deny 掉，回一個空的 response。
 
-    ```
-    越界檔案：不存在（擋住了）
-    envelope：status SUCCESS、response ""
-    nova：結果未知（空回應降級）、14,630 token
-    ```
+    需求變了：委派出去的 agy 要能上網做研究，而它的 `read_url` 工具
+    **也**被同一個 auto-deny 擋著。agy 沒有工具白名單旗標、沒有 settings
+    路徑旗標，唯一的開關是 `--dangerously-skip-permissions`——
+    打開網路，就是打開全部。
 
-    所以矩陣那一格「走 shell 的工具被 headless 權限系統 auto-deny」是對的，
-    但要補一句：**auto-deny 的結果是空回應，不是錯誤訊息**。呼叫端拿到的是
-    「不知道發生什麼事」而不是「被擋下來了」——這兩件事在 at-most-once 之下
-    處理方式不同（未知不准重試）。
+    所以現在的事實是：**agy 的可編輯跟全開一樣沒有邊界。**
+    誠實釘住它，不假裝有保證。想要邊界就用 codex（三家裡唯一的 OS 層沙箱，
+    而且它開網路不必付這個代價）。
 
-    斷言只放在**檔案系統**上：那才是保證。`終局` 不斷言死，因為哪天 agy 改成
-    回一句像樣的錯誤訊息，那是進步不該讓測試紅。
+    哪天 agy 補了 per-tool 的授權旗標，這支會紅，逼我們回來把邊界拿回來。
     """
     _越界目標.unlink(missing_ok=True)
     try:
         答 = _叫它越界寫檔("agy", tmp_path, 權限.可編輯)
-        assert not _越界目標.exists(), f"agy 的可編輯寫出去了：{答.文字[:200]}"
-        assert 答.終局 is not 終局.成功, (
-            "agy 說成功卻沒寫出去——如果它現在會回像樣的錯誤訊息，這裡要改成斷言錯誤內容"
+        自己不肯 = any(詞 in 答.文字 for 詞 in ("不會", "拒絕", "won't", "refuse"))
+        assert _越界目標.exists(), (
+            "模型自己不肯繞過護欄（提示層，不是機制）——重跑一次或換個講法"
+            if 自己不肯
+            else f"agy 把邊界拿回來了——危險旗標可以收回可編輯了：{答.文字[:200]}"
         )
     finally:
         _越界目標.unlink(missing_ok=True)
+
+
+#: 研究類的委派沒有網路就是廢的。斷言看**模型講不講得出只有網路上才有的東西**，
+#: 不看它說「我連上了」——那跟 agy 生圖宣稱成功但檔案不存在是同一種謊。
+_網路暗號 = "Example Domain"
+
+
+@pytest.mark.真cli
+@pytest.mark.serial
+@pytest.mark.parametrize("家", ["codex", "agy"])
+def test_可編輯真的上得了網(家: str, tmp_path: 路徑) -> None:
+    """使用者裁定：codex 與 agy 預設就要能上網。
+
+    兩家關網路的理由不同，所以修法也不同（codex 加 `network_access` 設定、
+    agy 加權限旗標），但**保證是同一條**：可編輯的腦問得到網路上的東西。
+    """
+    答 = 建立(家, 執行檔=None).詢問(  # type: ignore[arg-type]
+        "去讀 https://example.com 這一頁，把它的主標題原樣回報給我。只回那幾個字。",
+        選項=呼叫選項(
+            權限=權限.可編輯,
+            工作目錄=_乾淨工作區(tmp_path),
+            逾時秒=300.0,
+            隔離設定=可以隔離設定[家],
+        ),
+    )
+    assert _網路暗號 in 答.文字, f"{家} 上不了網：{答.失敗代碼.value}／{答.文字[:300]}"
 
 
 @pytest.mark.真cli

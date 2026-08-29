@@ -342,12 +342,19 @@ class Test權限是漏出的:
             參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
             assert "--add-dir" not in 參數, f"{家} 在沒有工作目錄時加了 --add-dir"
 
-    def test_危險旗標只准出現在全開(self) -> None:
-        """需求變了：不再是「一律不准」，而是「只准在明講全開時出現」。
+    def test_唯讀一律不准有危險旗標(self) -> None:
+        """這條改過兩次，兩次都是需求變了，過程留著。
 
-        全開有正當用途（跑在已經被隔離的環境裡），一律禁掉只會逼人繞過介面
-        自己拼指令——那更糟。但它每多開一級，「模型能對這台機器做什麼」
-        就少一層攔截，所以必須是明講的、而且不可能誤觸的。
+        第一版：一律不准。第二版：只准在全開。**現在：唯讀一律不准，
+        可編輯看那一家的旗標實際上換到什麼。**
+
+        為什麼鬆到可編輯：agy 的網路工具（`read_url`）被 headless 權限系統
+        auto-deny，而**唯一的開關就是 `--dangerously-skip-permissions`**——
+        agy 沒有工具白名單旗標，沒有 settings 路徑旗標，什麼都沒有。
+        要嘛委派出去的 agy 永遠上不了網，要嘛付這個代價。使用者裁定付。
+
+        **唯讀不鬆**：唯讀唯一的呼叫端是工作流的審查員，它要看的是 diff。
+        權限級別之間要有差異才叫級別。
         """
         危險 = (
             "--dangerously-skip-permissions",
@@ -355,9 +362,24 @@ class Test權限是漏出的:
             "--dangerously-bypass-hook-trust",
         )
         for 家 in ("claude", "codex", "agy"):
-            for 可以做什麼 in (權限.唯讀, 權限.可編輯):
-                參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=可以做什麼))
-                assert not (set(危險) & set(參數)), f"{家} 在 {可以做什麼} 用了危險旗標"
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.唯讀))
+            assert not (set(危險) & set(參數)), f"{家} 的唯讀用了危險旗標"
+
+    def test_可編輯只有agy准用危險旗標而且理由要對(self) -> None:
+        """**例外要指名**，不要寫成「可編輯可以有危險旗標」那種鬆掉的通則。
+
+        claude 與 codex 的可編輯都拿得到網路而不必動權限旗標
+        （claude 靠工具白名單、codex 靠 `network_access` 設定），
+        所以它們沒有理由鬆。哪天有人順手給它們加上，這支會紅。
+        """
+        危險 = (
+            "--dangerously-skip-permissions",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--dangerously-bypass-hook-trust",
+        )
+        for 家 in ("claude", "codex"):
+            參數 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+            assert not (set(危險) & set(參數)), f"{家} 的可編輯不該需要危險旗標"
 
     def test_全開才有危險旗標(self) -> None:
         """三家都要真的有一條全開的路，不然這一級是假的。"""
@@ -567,3 +589,41 @@ class Test解析要容忍控制字元:
         答 = 解析agy(壞掉的, 0)
         assert 答.終局 is 終局.成功, "嚴格 JSON 解析會把這個變成『結果未知』"
         assert "第二行" in 答.文字
+
+
+class Test委派出去的腦要上得了網:
+    """研究類的委派沒有網路就是廢的，而三家關網路的理由各不相同。
+
+    實測（2026-08-29，見 `docs/設計/02` 的能力表）：
+
+    - codex：`--sandbox workspace-write` **連網路一起關**，`curl` 回 `000`。
+      加 `-c sandbox_workspace_write.network_access=true` 之後回 `200`，
+      而且 OS 層的檔案邊界照樣在——**這家開網路沒有代價**。
+    - agy：`read_url` 工具被 headless 的權限系統 auto-deny。
+      唯一的開關是 `--dangerously-skip-permissions`，
+      而那正是它唯一的越界保護（`--sandbox` 與 `--mode plan` 都擋不住寫，已實測）。
+      **所以 agy 開網路的代價是失去邊界**，使用者裁定接受，誠實標示。
+    """
+
+    def test_codex可編輯要開網路而且不必拿掉沙箱(self) -> None:
+        可寫 = 建立("codex", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert "sandbox_workspace_write.network_access=true" in 可寫
+        assert 可寫[可寫.index("--sandbox") : 可寫.index("--sandbox") + 2] == [
+            "--sandbox",
+            "workspace-write",
+        ], "開網路不准順便把檔案沙箱拿掉"
+
+    def test_agy可編輯要開網路(self) -> None:
+        可寫 = 建立("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.可編輯))
+        assert "--dangerously-skip-permissions" in 可寫
+
+    def test_唯讀不開網路(self) -> None:
+        """唯讀的呼叫端是工作流的審查員——它要看的是 diff，不是網路。
+
+        **權限級別之間要有差異才叫級別。** 唯讀也開網路的話，
+        「唯讀」就只剩「不能寫檔」一個意思了。
+        """
+        for 家 in ("codex", "agy"):
+            唯讀 = 建立(家, 執行檔=Path("/x")).組參數("提示", 呼叫選項(權限=權限.唯讀))
+            assert not [條 for 條 in 唯讀 if "network_access" in 條], f"{家} 唯讀不該開網路"
+            assert "--dangerously-skip-permissions" not in 唯讀, f"{家} 唯讀不該自動核准"
