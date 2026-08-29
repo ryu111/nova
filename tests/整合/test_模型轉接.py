@@ -6,6 +6,7 @@
 
 import os
 import stat
+import sys
 import tomllib
 from pathlib import Path
 
@@ -27,7 +28,11 @@ from nova.載體.模型.轉接 import (
 
 實錄 = Path(__file__).resolve().parents[1] / "整合" / "實錄"
 
-假CLI內容 = """#!/usr/bin/env python3
+#: 假 CLI 的 shebang **走 `sys.executable`，不走 `/usr/bin/env python3`**。
+#: 兩個理由：一，`env python3` 在這台機器上指到系統的 3.9.6，不是專案釘的 3.13——
+#: 假 CLI 跑在錯的直譯器上，哪天用到新語法會紅在跟測試完全無關的地方。
+#: 二，實測快約 10 毫秒（3.9.6 起得比 3.13 慢）。
+假CLI內容 = f"""#!{sys.executable}
 import os, sys, time, pathlib
 if os.environ.get("假CLI_睡"):
     time.sleep(float(os.environ["假CLI_睡"]))
@@ -41,9 +46,21 @@ sys.exit(int(os.environ.get("假CLI_結束碼", "0")))
 """
 
 
-@pytest.fixture
-def 假CLI(tmp_path: Path) -> Path:
-    路徑 = tmp_path / "假cli"
+@pytest.fixture(scope="session")
+def 假CLI(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """整個 session 共用同一支假 CLI。
+
+    **行為本來就靠環境變數切**（見 `假CLI內容`），所以沒有理由每支測試重寫一份檔。
+
+    實測（macOS、n=15 取中位數）：
+
+        新寫一份檔再第一次執行 ...... 122 毫秒
+        同一支重複執行 .............. 14 毫秒
+
+    貴的不是 fork，是 **macOS 對「剛寫出來的新執行檔」的第一次執行檢查**，約 100 毫秒。
+    那 100 毫秒每支都白付一次。
+    """
+    路徑 = tmp_path_factory.mktemp("假cli") / "假cli"
     路徑.write_text(假CLI內容, encoding="utf-8")
     路徑.chmod(路徑.stat().st_mode | stat.S_IEXEC)
     return 路徑

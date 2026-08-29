@@ -25,8 +25,8 @@ uv run pytest --lf               # 只重跑上次紅的
 uv run ruff check . && uv run ruff format .   # lint 與格式
 uv run mypy                      # 型別（strict）
 
-uv run nova 閘 提交               # commit 前的閘（7 條，約 2 秒，第一個紅就停）
-uv run nova 閘 ci --全部跑完      # CI 跑的那一組（8 條，約 3 秒，一次看到所有紅的）
+uv run nova 閘 提交               # commit 前的閘（7 條，約 1.2 秒，第一個紅就停）
+uv run nova 閘 ci --全部跑完      # CI 跑的那一組（8 條，約 6.5 秒，一次看到所有紅的）
 uv run nova 檢查指令 "<指令>"     # 這條 shell 指令是不是在繞過閘門
 
 python -c 'import nova; print(nova.問("提示", 用="codex").文字)'   # 門面：一次 import 就能用
@@ -50,9 +50,14 @@ uv run pytest -m 真cli                                 # 真的打三家 CLI（
 |---|---|---|---|
 | 內圈（寫 code 時） | 手上那幾支 | `uv run pytest -k <關鍵字> -x` | < 1 秒 |
 | 工具呼叫前 | 禁令指令攔截 | `.claude/settings.json` 的 PreToolUse hook | 30 毫秒 |
-| commit 前 | `nova 閘 提交`（7 條） | pre-commit hook 自動 | 約 2 秒 |
+| commit 前 | `nova 閘 提交`（7 條） | pre-commit hook 自動 | 約 1.2 秒 |
 | commit 訊息 | 繁體中文檢查 | commit-msg hook 自動 | 毫秒 |
-| PR / push main | `nova 閘 ci --全部跑完`（8 條） | GitHub Actions，check 名 `gates` | 約 15 秒 |
+| PR / push main | `nova 閘 ci --全部跑完`（8 條） | GitHub Actions，check 名 `gates` | 約 20 秒 |
+
+**分層是時間預算不是分類學**：`tests/單元/` 只放純函式，會 fork 子程序的一律進
+`tests/整合/`。`pytest tests/單元` 是提交閘唯一的測試規則，混進 fork 的測試等於
+每次 commit 都付一次那個錢——實測混著的時候提交閘 7.1 秒，分乾淨之後 1.2 秒。
+由 `tests/驗收/test_專案骨架.py::test_單元層不准fork子程序` 機械擋下。
 
 **規則只寫一份**：全部登記在 `src/nova/載體/規則表.py`，pre-commit／CI／agent hook
 三個地方各只有一行呼叫 nova。想加規則就加在規則表，**不要往 YAML／JSON 裡塞邏輯**——
@@ -61,7 +66,7 @@ uv run pytest -m 真cli                                 # 真的打三家 CLI（
 **階段就是資源排程**：規則依階段（靜態 → 型別 → 測試）由小到大、一次一條序列跑。
 快的先給回饋，重的後跑，而且不同時吃滿 CPU——資源互搶造成的紅燈是雜訊不是訊號。
 平行只發生在 pytest 內部（`-n <3/4 核心> --dist worksteal`），且 `serial` 標記的測試單獨序列跑。
-**不吃滿核心**：實測 16 核這台，worker 越多越慢（4 個 5.60 秒、12 個 5.79 秒、16 個 6.00 秒），
+**不吃滿核心**：實測 16 核這台，worker 越多越慢（4 個 3.44 秒、12 個 4.02 秒、16 個 4.25 秒），
 因為這套測試不是 CPU-bound，瓶頸是子程序啟動。3/4 是留餘裕的通則，調整點是 `規則表.平行成數`。
 
 `test-count` 的基準由環境變數 `NOVA_TEST_COUNT_BASE` 決定：本地比 `HEAD`，
@@ -255,6 +260,7 @@ TDD 五階段：`測試(模型) → 驗證紅(機械) → 實作(模型) → 驗
 | `git rm` 掉整支測試檔 | `test_整支測試檔被git_rm掉要擋` 紅（基準改走 ls-tree 之前會**放行**） |
 | gates.yml 拿掉 `NOVA_TEST_COUNT_BASE` | `test_CI把測試數基準指到base_branch` 紅 |
 | gates.yml 拿掉 `git fetch` 那步 | `test_CI有先把基準抓下來` 紅 |
+| 把 `test_repo檢查.py` 搬回 `tests/單元/` | `test_單元層不准fork子程序` 紅，指到檔名與痕跡 |
 | 解析 claude 時改看 `subtype` 而非 `is_error` | `test_模型不存在_不准看subtype` 紅（實錄裡失敗案例的 `subtype` 也是 `"success"`） |
 | 把 `timeout` 的終局改成 `failed` | `test_可能已經做了一半的是結果未知[timeout]` 紅 |
 | 新增失敗代碼但不進 `_終局表` | `test_每個失敗代碼都要有明確的終局` 紅 |

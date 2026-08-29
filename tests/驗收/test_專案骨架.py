@@ -52,3 +52,36 @@ def test_設定集中在_pyproject(專案根: Path) -> None:
         assert 區段 in 內容, f"pyproject.toml 缺少 {區段}"
     for 散落 in ["pytest.ini", "setup.py", "setup.cfg", "tox.ini", ".ruff.toml"]:
         assert not (專案根 / 散落).exists(), f"設定散落到 {散落}"
+
+
+#: 「這支測試會 fork 子程序」的可靠信號。**只列真的會 fork 的**——
+#: `執行檔=Path("/不存在")` 只是組參數，不 fork，所以不在這裡。
+_會fork的痕跡 = ("import subprocess", "S_IEXEC", "跑cli(")
+
+
+def test_單元層不准fork子程序(專案根: Path) -> None:
+    """單元層的定義是「純函式、不碰 I/O」——fork 一支子程序不是純函式。
+
+    這條不是潔癖，是拿實測換來的。原本 `test_門面.py` 與 `test_repo檢查.py`
+    掛在單元層，前者每支 fork 一支現寫的假 CLI、後者每支建一個迷你 git repo：
+
+    | | 秒 |
+    |---|---|
+    | 單元層（含那兩支） | 5.91 |
+    | 兩支都搬到整合層之後 | **0.10** |
+    | 提交閘（含那兩支） | 7.10 |
+    | 提交閘（搬完） | **1.18** |
+
+    `pytest tests/單元` 是提交閘唯一的測試規則，所以那 5.8 秒**每次 commit 都付一次**。
+    commit 慢到某個程度，人就會開始想繞過閘門——而繞過一次，閘門就等於不存在。
+
+    搬走不會少一層保護：`test_repo檢查.py` 測的那三條規則（機密、測試數、繁體中文）
+    本來就在提交閘裡對真 repo 實跑，單元測試搬到哪一層都不影響那個。
+    """
+    髒的 = []
+    for 檔 in sorted((專案根 / "tests" / "單元").rglob("test_*.py")):
+        內容 = 檔.read_text(encoding="utf-8")
+        命中 = [痕 for 痕 in _會fork的痕跡 if 痕 in 內容]
+        if 命中:
+            髒的.append(f"{檔.relative_to(專案根)}：{'、'.join(命中)}")
+    assert not 髒的, "這幾支會 fork 子程序，屬於整合層不是單元層：\n" + "\n".join(髒的)
