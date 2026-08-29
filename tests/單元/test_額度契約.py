@@ -6,8 +6,8 @@
 import dataclasses
 
 import pytest
-from nova.契約.額度 import 家族額度, 快取轉快照, 視窗, 額度快照
 
+from nova.契約.額度 import 家族額度, 快取轉快照, 視窗, 額度快照
 from nova.載體.額度 import 快取資料型
 
 
