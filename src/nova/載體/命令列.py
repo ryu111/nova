@@ -45,7 +45,7 @@ from nova.載體.禁令 import 檢查指令
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
-from nova.載體.進度 import 讀進度, 進度執行器
+from nova.載體.進度 import 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.閘 import 跑閘
 from nova.載體.階段記帳 import 記帳執行器
 from nova.迴圈 import 角色提示
@@ -313,25 +313,44 @@ def _哪幾家(旗標: str | None, 階段: 階段代碼) -> set[str]:
     return {家.strip() for 家 in 來源.split(",") if 家.strip()}
 
 
+def _工作流前置檢查(參數: argparse.Namespace, 工作目錄: Path, 進度檔: Path | None) -> str | None:
+    """開跑之前只靠參數就判得出來的事。有問題回訊息，沒問題回 `None`。
+
+    **便宜的驗證要先跑。** 這一段搬到建腦前面是被 CI 教的：
+    CI 沒裝三家 CLI，建腦當場 `FileNotFoundError`，路徑檢查根本走不到——
+    本機綠、CI 紅，而且紅的理由跟這些檢查無關。
+    只要參數就判得出來的東西，不該等到花了力氣之後才判。
+    """
+    # **不給旗標時要拿派工表挑出來的家去比**，不是跳過檢查——
+    # 硬規則 5 守的是「誰真的被叫」，不是「使用者打了什麼字」。
+    重疊 = _哪幾家(參數.用, 階段代碼.測試) & _哪幾家(參數.審查用, 階段代碼.審查)
+    if 重疊:
+        return f"審查要換一顆腦：{'、'.join(sorted(重疊))} 同時出現在 --用 與 --審查用"
+    if 進度檔 is not None:
+        # 模型動得到工作目錄整棵樹。進度檔住在裡面的話，
+        # 它會往裡面寫，而那份東西下一輪會被當成前情餵回去。
+        try:
+            檢查進度檔位置(進度檔, 工作目錄)
+        except ValueError as 錯:
+            return str(錯)
+    return None
+
+
 def _子命令_工作流(參數: argparse.Namespace) -> int:
     """跑一輪 TDD：測試 → 驗證紅 → 實作 → 驗證綠 → 審查。
 
     `--審查用` 必須跟 `--用` 不同家——自己審自己等於沒審（硬規則 4）。
     """
-    # **不給旗標時要拿派工表挑出來的家去比**，不是跳過檢查——
-    # 硬規則 5 守的是「誰真的被叫」，不是「使用者打了什麼字」。
-    做事的 = _哪幾家(參數.用, 階段代碼.測試)
-    審查的 = _哪幾家(參數.審查用, 階段代碼.審查)
-    if 做事的 & 審查的:
-        重疊 = "、".join(sorted(做事的 & 審查的))
-        print(f"審查要換一顆腦：{重疊} 同時出現在 --用 與 --審查用", file=sys.stderr)
-        return 阻擋
     工作目錄 = 在哪跑(參數.工作目錄)
+    進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
+    擋住 = _工作流前置檢查(參數, 工作目錄, 進度檔)
+    if 擋住 is not None:
+        print(擋住, file=sys.stderr)
+        return 阻擋
     描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
     if not 描述.strip():
         print("沒有任務可以做（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
-
     try:
         with _開帳(參數) as 帳:
 
@@ -352,7 +371,6 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
                 },
                 跑判準=建判準(判準指令(參數.判準)),
             )
-            進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
             # 拆成兩個旗標的話，一定有人只給其中一個，然後以為自己接上了。
             走過的 = "" if 進度檔 is None else 讀進度(進度檔)
