@@ -9,11 +9,41 @@
 
 import json
 
+import pytest
+
 from nova.載體.帳本讀取 import 收斂
 
 
 def 事件行(**欄位: object) -> str:
     return json.dumps(欄位, ensure_ascii=False)
+
+
+def _一次呼叫(編號: int, 家: str, *, 成本: float | None = None) -> list[str]:
+    """一對成對事件。`成本=None` 代表那一家沒回報成本（codex 與 agy 就是這樣）。"""
+    收尾: dict[str, object] = {
+        "run": "r",
+        "seq": 編號 * 2,
+        "ts": f"t{編號 * 2}",
+        "event": "call_finished",
+        "call": 編號,
+        "family": 家,
+        "outcome": "success",
+        "input_tokens": 100,
+        "output_tokens": 10,
+    }
+    if 成本 is not None:
+        收尾["cost_usd"] = 成本
+    return [
+        事件行(
+            run="r",
+            seq=編號 * 2 - 1,
+            ts=f"t{編號 * 2 - 1}",
+            event="call_started",
+            call=編號,
+            family=家,
+        ),
+        事件行(**收尾),
+    ]
 
 
 def 呼叫(編號: int, 家: str, 終局: str = "success", 入: int = 100, 出: int = 7) -> list[str]:
@@ -59,6 +89,82 @@ class Test基本統計:
     def test_執行識別碼與起迄(self) -> None:
         果 = 收斂(呼叫(1, "codex"))
         assert (果.執行識別碼, 果.起, 果.迄) == ("r", "t1", "t2")
+
+
+class Test成本統計:
+    def test_有成本與沒成本混在一起時總成本應為None(self) -> None:
+        """缺一筆成本就整個不給，不能只加上有回報的那一筆。"""
+        行們 = [
+            事件行(run="r", seq=1, ts="t1", event="call_started", call=1, family="claude"),
+            事件行(
+                run="r",
+                seq=2,
+                ts="t2",
+                event="call_finished",
+                call=1,
+                family="claude",
+                outcome="success",
+                input_tokens=100,
+                output_tokens=10,
+                cost_usd=0.25,
+            ),
+            事件行(run="r", seq=3, ts="t3", event="call_started", call=2, family="codex"),
+            事件行(
+                run="r",
+                seq=4,
+                ts="t4",
+                event="call_finished",
+                call=2,
+                family="codex",
+                outcome="success",
+                input_tokens=200,
+                output_tokens=20,
+            ),
+        ]
+
+        果 = 收斂(行們)
+
+        assert 果.總成本美金 is None
+
+    def test_全部都有成本時總成本是加總(self) -> None:
+        """**這支是上一支的另一半。**
+
+        只守「混著的時候是 None」的話，一個永遠回 None 的實作也會綠——
+        那等於成本從來沒被讀出來過，而且看起來完全正常。
+        """
+        行們 = [
+            *_一次呼叫(1, "claude", 成本=0.25),
+            *_一次呼叫(2, "claude", 成本=0.75),
+        ]
+
+        果 = 收斂(行們)
+
+        assert 果.總成本美金 == 1.0
+
+    def test_同一家的多筆成本會累加(self) -> None:
+        """只記最後一筆或只記第一筆都會低報，而低報看起來像個數字。"""
+        果 = 收斂([*_一次呼叫(1, "claude", 成本=0.1), *_一次呼叫(2, "claude", 成本=0.2)])
+
+        (那一家,) = 果.各家
+        assert 那一家.成本美金 == pytest.approx(0.3)
+
+    def test_一家有成本另一家沒有時只有沒有的那家是None(self) -> None:
+        """家族層級也要分得開——不然看不出「是誰沒給」。"""
+        果 = 收斂([*_一次呼叫(1, "claude", 成本=0.5), *_一次呼叫(2, "codex")])
+
+        依家 = {家.供應商: 家.成本美金 for 家 in 果.各家}
+        assert 依家 == {"claude": 0.5, "codex": None}
+
+    def test_完全沒有成本時總成本也是None(self) -> None:
+        """跟「混著」同樣回 None，但**理由不同**，所以分開守。
+
+        混著是「有資料但不完整」，全都沒有是「這次根本沒有人給成本」。
+        把兩者合成一支測試的話，實作只要處理其中一種就會綠。
+        """
+        果 = 收斂([*_一次呼叫(1, "codex"), *_一次呼叫(2, "agy")])
+
+        assert 果.總成本美金 is None
+        assert all(家.成本美金 is None for 家 in 果.各家)
 
 
 class Test階段:

@@ -91,6 +91,8 @@ class _收集器:
         self.次數: Counter[str] = Counter()
         self.終局: Counter[tuple[str, str]] = Counter()
         self.token: Counter[tuple[str, str]] = Counter()
+        self.成本: dict[str, float] = {}
+        self.缺成本: set[str] = set()
 
     def 吃(self, 事: dict[str, Any]) -> None:
         self.識別 = self.識別 or str(事.get("run", ""))
@@ -121,6 +123,11 @@ class _收集器:
             值 = 事.get(欄)
             if isinstance(值, int):
                 self.token[家, 欄] += 值
+        成本 = 事.get("cost_usd")
+        if isinstance(成本, (int, float)):
+            self.成本[家] = self.成本.get(家, 0.0) + 成本
+        else:
+            self.缺成本.add(家)
 
     def 收成(self) -> 摘要:
         各家 = tuple(
@@ -132,6 +139,7 @@ class _收集器:
                 未知=self.終局[家, "unknown"],
                 輸入token=self.token[家, "input_tokens"],
                 輸出token=self.token[家, "output_tokens"],
+                成本美金=None if 家 in self.缺成本 else self.成本.get(家, 0.0),
             )
             for 家 in self.次數
         )
@@ -144,7 +152,26 @@ class _收集器:
             沒收尾的呼叫=tuple(self.開著),
             壞掉的行=self.壞行,
             總token=sum(家.輸入token + 家.輸出token for 家 in 各家),
+            總成本美金=_總成本(各家),
         )
+
+
+def _總成本(各家: tuple[一家的帳, ...]) -> float | None:
+    """**有一顆給不出來就整個不給。**
+
+    只有 claude 回成本，codex 與 agy 沒有，所以一次執行裡很可能有幾家有、
+    幾家沒有。把有的那幾家加起來是低報，而**低報的成本比沒有成本更危險，
+    因為它看起來像個數字**（同一條規則在 `載體.模型.接力` 已經生效）。
+
+    寫成迴圈不是為了好看：`sum()` 配 `any()` 的版本 mypy 收窄不了，
+    得靠 `type: ignore` 才過——**那是用規避換來的綠**。
+    """
+    總 = 0.0
+    for 家 in 各家:
+        if 家.成本美金 is None:
+            return None
+        總 += 家.成本美金
+    return 總
 
 
 def 統計規則(目錄: Path) -> tuple[一條規則的帳, ...]:

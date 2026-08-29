@@ -418,10 +418,17 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "w": 170,
    "h": 46,
    "層": "核",
-   "態": "半",
-   "排": "可做",
-   "檔": [],
-   "註": "欄位有了，但只印出來、沒落盤；而且只有 claude 給成本"
+   "態": "好",
+   "檔": [
+    "src/nova/契約/帳本.py",
+    "src/nova/載體/帳本讀取.py",
+    "src/nova/契約/成果.py",
+    "src/nova/載體/命令列.py",
+    "tests/單元/test_帳本讀取.py",
+    "tests/單元/test_帳的顯示.py",
+    "tests/整合/test_已處理.py"
+   ],
+   "註": "寫端本來就有（記帳.py 寫 cost_usd），這一輪補的是讀端：按家與總計加總、nova 帳本與 nova 已處理 都顯示。<b>有一顆給不出來就整個不給</b>——只有 claude 回成本，把有的那幾家加起來是低報，而低報的成本比沒有成本更危險，它看起來像個數字"
   },
   {
    "id": "終態",
