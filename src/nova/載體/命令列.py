@@ -600,8 +600,7 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
 
 def _子命令_額度(參數: argparse.Namespace) -> int:
     """查詢 codex 與 agy 額度並寫入快取。"""
-    del 參數
-    return 執行查詢額度()
+    return 執行查詢額度(最舊秒=參數.最舊)
 
 
 #: 子命令 → 處理函式。**唯一的登記來源**：名字在剖析器宣告、處理函式在這裡，
