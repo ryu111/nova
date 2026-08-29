@@ -100,7 +100,7 @@ class Test派工:
             審查執行檔=審查的,
             最多token=0,
         )
-        assert 果.結束.代碼.value == "aborted", 果.結束.原因
+        assert 果.結束.代碼.value == "guardrail", 果.結束.原因  # 預算生效是護欄不是壞掉
         assert "token" in 果.結束.原因
         assert not 做事紀錄.exists(), "預算是 0 卻還是叫了模型"
 
