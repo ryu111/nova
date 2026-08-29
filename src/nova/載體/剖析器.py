@@ -150,6 +150,11 @@ def _加委派類(
         action="store_true",
         help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
     )
+    流剖析.add_argument(
+        "--從收件匣",
+        action="store_true",
+        help="題目從收件匣拿最前面那一件，不從命令列給。做完會把原始請求搬到成果旁邊",
+    )
     流剖析.add_argument("--執行檔", default=None, help="--用 那家 CLI 的絕對路徑")
     流剖析.add_argument(
         "--最多步數", type=int, default=預設最多步數, help="停止條件：走幾步就強制停"
@@ -197,6 +202,9 @@ def _加觀測類(
         action="store_true",
         help="改看跨執行的規則觸發率：從來不紅的是刪除候選",
     )
+
+    收件剖析 = 子.add_parser("收件", help="看收件匣：丟一個檔進去就是派一次工")
+    收件剖析.set_defaults(執行=處理們["收件"])
 
     成果剖析 = 子.add_parser("已處理", help="看成果帳本：哪幾件工作做完了、收在哪種結局")
     成果剖析.set_defaults(執行=處理們["已處理"])
