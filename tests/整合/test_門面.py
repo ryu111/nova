@@ -179,3 +179,32 @@ class Test接力:
     def test_空的鏈要當場炸(self) -> None:
         with pytest.raises(ValueError, match="至少要指定一家"):
             nova.問("在嗎", 用="")
+
+
+class Test起點:
+    """`起點` 讓「只走重構流程」跑得起來：重構 → 再驗一次綠 → 審查。
+
+    Fowler 的微步循環本來就是**在已經全綠的 code 上**做的——
+    不必每次都從「寫一支會紅的測試」開始。
+    """
+
+    def test_可以從重構階段起跑(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+        做事的, _ = 做假CLI("codex")
+        審查的, _ = 做假CLI("agy", "agy_review_pass.json")
+        果 = nova.派工(
+            "把角色收成一張表",
+            用="codex",
+            審查用="agy",
+            工作目錄=tmp_path,
+            判準指令=["true"],  # 重構流程的前提是本來就全綠
+            執行檔=做事的,
+            審查執行檔=審查的,
+            起點="refactor",
+        )
+        assert 果.結束.代碼.value == "done", 果.結束.原因
+        assert [步.階段.value for 步 in 果.軌跡] == ["refactor", "verify-refactor", "review"]
+
+    def test_不認得的起點要當場炸(self) -> None:
+        """打錯字要立刻知道，不要靜默從頭跑一輪。"""
+        with pytest.raises(ValueError, match="起點"):
+            nova.派工("做點事", 用="codex", 審查用="agy", 起點="隨便打的")
