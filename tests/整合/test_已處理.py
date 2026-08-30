@@ -18,6 +18,7 @@ import pytest
 
 from nova.契約.工作流 import 結束, 結束代碼
 from nova.契約.成果 import 成果
+from nova.契約.遮罩 import 已經遮過了
 from nova.載體.命令列 import _歸檔成果, _題目
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 預設帳本目錄
@@ -27,7 +28,7 @@ from nova.迴圈.工作流 import 工作流結果
 def _成果(識別碼: str, *, 收場: str = "完成", 退出碼: int = 0) -> 成果:
     return 成果(
         執行識別碼=識別碼,
-        任務="隨便一件事",
+        任務=已經遮過了("隨便一件事", 因為="測試資料，裡面沒有祕密"),
         收場=收場,
         退出碼=退出碼,
         起="2026-08-30T09:15:00Z",

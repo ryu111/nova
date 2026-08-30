@@ -36,6 +36,7 @@ from time import monotonic
 from nova.契約.帳本 import 事件, 事件種類
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.角色 import 呼叫選項, 語言模型, 預設選項
+from nova.契約.遮罩 import 已經遮過了, 已遮罩文字
 from nova.載體.帳本 import 帳本
 from nova.載體.遮罩 import 遮罩
 
@@ -129,7 +130,7 @@ class 記帳腦:
 class _落盤的全文:
     """遮過、必要時截斷之後，準備寫進事件的那三格。"""
 
-    文字: str
+    文字: 已遮罩文字
     遮掉幾處: int
     截斷: bool
 
@@ -144,8 +145,11 @@ def _遮過再截斷(答: 回應 | None, *, 記全文: bool) -> _落盤的全文
         return None
     遮完 = 遮罩(答.文字)
     截了 = len(遮完.文字) > 文字上限
+    # **切片會把型別掉回 `str`**（NewType 沒有繼承關係），所以要走逃生口
+    # 把它接回來。截斷不會製造新的祕密——它只會拿掉尾巴。
+    切了 = 已經遮過了(遮完.文字[:文字上限], 因為="遮過的字截斷之後還是遮過的")
     return _落盤的全文(
-        文字=遮完.文字[:文字上限] if 截了 else 遮完.文字,
+        文字=切了 if 截了 else 遮完.文字,
         遮掉幾處=遮完.遮掉幾處,
         截斷=截了,
     )
