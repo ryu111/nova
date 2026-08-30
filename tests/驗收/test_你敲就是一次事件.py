@@ -121,7 +121,7 @@ def test_撞到鎖時題目要留在佇列上(佈景: tuple[Path, Path], 做假C
     with 只准一個(鎖檔們[0]):
         跑完 = _敲一次(執行檔, "撞到鎖的那一句", 狀態=狀態, 專案=專案)
 
-    assert 跑完.returncode == 0, f"撞到鎖不是錯誤，是常態：\n{跑完.stderr[:300]}"
+    assert 跑完.returncode == 2, f"手動撞到鎖是真衝突：\n{跑完.stderr[:300]}"
     等著的 = _跑("收件", 狀態=狀態, 在=專案).stdout
     assert "撞到鎖的那一句" in "".join(
         路.read_text(encoding="utf-8") for 路 in _收件匣(狀態, 專案).iterdir() if 路.is_file()
