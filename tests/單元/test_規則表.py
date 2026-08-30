@@ -67,6 +67,15 @@ def test_三條新規則都上了() -> None:
         assert 必要 in 代碼, f"缺少 {必要}"
 
 
+def test_serial佔比規則已登記且只掛在ci閘() -> None:
+    """serial 佔比規則只掛在 CI 閘，不掛提交閘避免 collect 拖垮預算。"""
+    表 = _規則表()
+    serial條 = next((條 for 條 in 表 if 條.代碼 == "serial-ratio"), None)
+    assert serial條 is not None, "缺少 serial-ratio 規則"
+    assert "ci" in serial條.閘點, "serial-ratio 必須掛在 ci 閘點"
+    assert "提交" not in serial條.閘點, "serial-ratio 不准掛在提交閘（collect 會拖垮 10 秒預算）"
+
+
 def test_涵蓋宣告不能指向自己() -> None:
     for 條 in _規則表():
         assert 條.涵蓋於 != 條.代碼, f"{條.代碼} 宣告自己涵蓋自己，等於沒宣告"
