@@ -11,6 +11,7 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from nova.載體.serial佔比 import 檢查serial佔比
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
 from nova.載體.程序 import 具名啟動
@@ -207,5 +208,13 @@ def 建規則表(根目錄: Path) -> list[規則]:
                 根目錄, "pytest", "-m", "serial and not 真cli", "-q", "-p", "no:randomly"
             ),
             階段=測試,
+        ),
+        規則(
+            代碼="serial-ratio",
+            名稱="serial 測試佔比（阿姆達爾定律門禁）",
+            閘點=frozenset({"ci"}),
+            負責層="載體",
+            檢查=lambda: 檢查serial佔比(根目錄),
+            階段=靜態,
         ),
     ]
