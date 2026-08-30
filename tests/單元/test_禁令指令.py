@@ -10,6 +10,7 @@ from nova.載體.禁令 import 檢查指令
 應拒絕 = [
     "git commit --no-verify -m 訊息",
     "git commit -n -m 訊息",
+    "git commit -nm 訊息",
     "git push --no-verify",
     "gh pr merge 3 --squash --admin",
     "gh pr merge --admin --squash 3",
@@ -50,12 +51,63 @@ def test_語法壞掉但沒禁令的指令放行() -> None:
     巢狀引號這種完全正常的指令誤擋掉——而且擋在跟禁令毫無關係的地方，
     使用者只看得到「指令拆不開」，完全不知道為什麼不能跑。
 
-    改成：拆不開就退回關鍵詞掃描。這不會變寬鬆——`--no-verify` 與 `--admin`
-    出現在原文裡就算，比拆詞更容易命中（會多擋不會少擋）。
-    擋不住的只有刻意混淆，而這裡的對象不是對手，是會手滑的執行者。
+    改成：拆不開時依已解析出的命令段判斷。看得出真正命令就照硬禁令判斷，
+    看不出來的部分不把內文或訊息文字當成命令參數。
     """
     通過, _ = 檢查指令('git commit -m "沒收尾的引號')
     assert 通過 is True, "沒有禁令關鍵詞，不該因為引號沒收尾就被擋"
+
+
+def test_heredoc內文提到缺少刪除分支的合併指令仍然放行() -> None:
+    """heredoc 只是輸出文件內容，內文的合併指令不會被 shell 執行。"""
+    命令 = "cat <<'EOF'" + chr(10) + "gh pr merge 123 --squash" + chr(10) + "EOF"
+
+    通過, 原因 = 檢查指令(命令)
+
+    assert 通過 is True, f"heredoc 內文被誤當成要執行的指令：{原因}"
+
+
+def test_引號內的heredoc樣式不應遮掉後續真正的合併指令() -> None:
+    """引號裡的 heredoc 樣式只是文字，下一行的命令仍會被 shell 執行。"""
+    命令 = 'echo "這不是 heredoc：<<EOF"' + chr(10) + "gh pr merge 123 --squash"
+
+    通過, 原因 = 檢查指令(命令)
+
+    assert 通過 is False, f"後續真正的合併指令被引號內文字遮掉：{原因}"
+
+
+def test_echo提到刪除分支旗標仍然放行() -> None:
+    """echo 的字串是輸出內容，不是 gh pr merge 的參數。"""
+    通過, 原因 = 檢查指令('echo "記得帶 --delete-branch"')
+    assert 通過 is True, f"echo 內容被誤當成合併指令：{原因}"
+
+
+def test_文件說明不准跳過驗證的旗標仍然放行() -> None:
+    """文件內文提到旗標，不代表 shell 會把旗標傳給 git。"""
+    命令 = "cat <<'EOF'" + chr(10) + "git commit 不准使用 --no-verify" + chr(10) + "EOF"
+    通過, 原因 = 檢查指令(命令)
+    assert 通過 is True, f"文件內文被誤當成 git 參數：{原因}"
+
+
+def test_git_commit訊息提到旗標仍然放行() -> None:
+    """`-m` 的字串是 commit 訊息，不是傳給 git 的旗標。"""
+    通過, 原因 = 檢查指令('git commit -m "--no-verify"')
+    assert 通過 is True, f"commit 訊息被誤當成旗標：{原因}"
+
+
+@pytest.mark.parametrize(
+    "命令",
+    [
+        "git -C . commit --no-verify",
+        "HUSKY=0 git commit --no-verify",
+        "sudo git commit --no-verify",
+        "(git commit --no-verify)",
+    ],
+)
+def test_命令前綴包住真的git仍然要擋(命令: str) -> None:
+    """前綴不會改變實際執行的 git commit 行為。"""
+    通過, 原因 = 檢查指令(命令)
+    assert 通過 is False, f"真的 git commit 被前綴繞過：{命令}；{原因}"
 
 
 class Test拆不開的指令:
@@ -70,7 +122,7 @@ class Test拆不開的指令:
         assert 通過 is True, f"正常的 heredoc 被誤擋：{原因}"
 
     def test_拆不開但有禁令還是要擋(self) -> None:
-        """退成關鍵詞掃描不會變寬鬆——原文出現就算。"""
+        """拆不開時仍依已解析出的命令段擋下真正的禁令。"""
         通過, 原因 = 檢查指令('git commit --no-verify -m "沒收尾的引號')
         assert 通過 is False
         assert "--no-verify" in 原因
@@ -109,16 +161,7 @@ class Test合併必須帶刪除分支:
         assert "--admin" in 理由
 
     def test_拆不開的正確合併不准被退路擋掉(self) -> None:
-        """這一條守的是「第三條禁令**不准**進關鍵詞掃描那層」。
-
-        前兩條是**肯定條件**（看到危險字串就擋），退回關鍵詞掃描不會變寬鬆。
-        第三條是**否定條件**（少了某個旗標才擋），關鍵詞掃描判不出「少了什麼」——
-        把 `gh pr merge` 塞進 `_危險詞`，這條帶了 `--delete-branch` 的正確指令
-        會因為引號沒收尾走進退路，然後被字串比對誤擋。
-
-        引號沒收尾是真的會發生的：模組 docstring 記著「實測擋到過一次，
-        而且擋在跟禁令毫無關係的地方」。
-        """
+        """拆不開時仍依已解析出的命令段判斷，不把完整指令誤當成禁令。"""
         通過, _ = 檢查指令('gh pr merge 71 --squash --delete-branch --body "沒收尾')
         assert 通過 is True, "帶了 --delete-branch 的合併，就算拆不開也不准擋"
 

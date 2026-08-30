@@ -20,6 +20,7 @@ from typing import cast
         "ignore:D415",
         "ignore:D403",
         "ignore:ISC001",
+        "extend-exclude:docs",
         "per-file-ignores:src/nova/載體/命令列.py:T201",
         "per-file-ignores:tests/**:S101",
         "per-file-ignores:tests/**:D100",
@@ -38,6 +39,11 @@ from typing import cast
     }
 )
 
+_規則豁免鍵 = ("ignore", "extend-ignore")
+_檔案豁免鍵 = ("per-file-ignores", "extend-per-file-ignores")
+_排除清單鍵 = ("exclude", "extend-exclude")
+_輸入範圍鍵 = ("include", "extend-include")
+
 
 def _表(來源: Mapping[str, object], 名稱: str) -> Mapping[str, object]:
     值 = 來源.get(名稱)
@@ -51,21 +57,75 @@ def _字串列(值: object, 名稱: str) -> tuple[str, ...]:
     if not isinstance(值, list) or not all(isinstance(項, str) for 項 in 值):
         訊息 = f"TOML 的 {名稱} 不是字串陣列"
         raise TypeError(訊息)
-    return tuple(項 for 項 in 值 if isinstance(項, str))
+    return tuple(cast(list[str], 值))
+
+
+def _表或空(來源: Mapping[str, object], 名稱: str) -> Mapping[str, object]:
+    """讀取可省略的 TOML 表；設定缺席時視為空表。"""
+    值 = 來源.get(名稱, {})
+    if not isinstance(值, dict):
+        訊息 = f"TOML 的 {名稱} 不是表"
+        raise TypeError(訊息)
+    return cast(Mapping[str, object], 值)
+
+
+def _展平規則(設定: Mapping[str, object], 鍵們: tuple[str, ...]) -> set[str]:
+    return {f"{鍵}:{規則}" for 鍵 in 鍵們 for 規則 in _字串列(設定.get(鍵, []), 鍵)}
+
+
+def _展平檔案規則(設定: Mapping[str, object], 鍵們: tuple[str, ...]) -> set[str]:
+    豁免: set[str] = set()
+    for 鍵 in 鍵們:
+        檔案規則 = _表或空(設定, 鍵)
+        豁免.update(
+            f"{鍵}:{路徑}:{規則}"
+            for 路徑, 規則們 in 檔案規則.items()
+            for 規則 in _字串列(規則們, f"{鍵}.{路徑}")
+        )
+    return 豁免
+
+
+def _展平路徑鍵(
+    設定: Mapping[str, object],
+    *,
+    表名: str,
+    鍵們: tuple[str, ...],
+) -> set[str]:
+    豁免: set[str] = set()
+    for 鍵 in 鍵們:
+        名稱 = f"{表名}:{鍵}" if 表名 else 鍵
+        豁免.update(f"{名稱}:{路徑}" for 路徑 in _字串列(設定.get(鍵, []), 名稱))
+    return 豁免
 
 
 def 解析ruff豁免(內容: str) -> frozenset[str]:
-    """把 TOML 裡兩處 ruff 豁免攤平成可比對的集合。"""
+    """把 TOML 裡的 ruff 豁免與檔案排除攤平成可比對的集合。
+
+    規則豁免用 `ignore:X`；檔案規則用 `per-file-ignores:路徑:規則`（或 `extend-per-file-ignores`）。
+    外接設定用 `extend:路徑`；頂層排除／輸入範圍用 `鍵:路徑`，巢狀排除則用
+    `表名:鍵:路徑`（例如 `format:exclude:路徑`）。
+    """
     根 = cast(Mapping[str, object], tomllib.loads(內容))
-    lint = _表(_表(_表(根, "tool"), "ruff"), "lint")
-    全域 = {f"ignore:{規則}" for 規則 in _字串列(lint.get("ignore", []), "ignore")}
-    檔案 = _表(lint, "per-file-ignores")
-    檔案豁免 = {
-        f"per-file-ignores:{路徑}:{規則}"
-        for 路徑, 規則們 in 檔案.items()
-        for 規則 in _字串列(規則們, f"per-file-ignores.{路徑}")
-    }
-    return frozenset(全域 | 檔案豁免)
+    ruff設定 = _表(_表(根, "tool"), "ruff")
+    # `lint`／`format` 表都可省略。
+    lint設定 = _表或空(ruff設定, "lint")
+    規則豁免 = _展平規則(ruff設定, _規則豁免鍵) | _展平規則(lint設定, _規則豁免鍵)
+    檔案豁免 = _展平檔案規則(ruff設定, _檔案豁免鍵) | _展平檔案規則(lint設定, _檔案豁免鍵)
+    # Ruff 的 lint 表只有 exclude，沒有 extend-exclude；完整盤點見 docs/負控紀錄.md。
+    lint排除 = _展平路徑鍵(lint設定, 表名="lint", 鍵們=("exclude",))
+    格式設定 = _表或空(ruff設定, "format")
+    格式排除 = _展平路徑鍵(格式設定, 表名="format", 鍵們=_排除清單鍵)
+    頂層排除 = _展平路徑鍵(ruff設定, 表名="", 鍵們=_排除清單鍵)
+    輸入範圍 = _展平路徑鍵(ruff設定, 表名="", 鍵們=_輸入範圍鍵)
+    外接設定路徑 = ruff設定.get("extend")
+    if 外接設定路徑 is not None and not isinstance(外接設定路徑, str):
+        訊息 = "TOML 的 extend 不是字串"
+        raise TypeError(訊息)
+    所有豁免 = 規則豁免 | 檔案豁免
+    所有豁免.update(lint排除, 格式排除, 頂層排除, 輸入範圍)
+    if 外接設定路徑 is not None:
+        所有豁免.add(f"extend:{外接設定路徑}")
+    return frozenset(所有豁免)
 
 
 def 比對ruff豁免(

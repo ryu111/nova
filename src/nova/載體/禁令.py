@@ -1,4 +1,6 @@
-"""禁令的機械化版本：檢查是否違反禁令與寫入受管轄檔案。
+"""禁令的機械化版本：依指令會做的事檢查禁令與寫入受管轄檔案。
+
+硬禁令看的是 shell 解析後真正會執行的命令與參數，不是原文裡出現過哪些字。
 
 這是**加速器不是保證**——agent 換掉、或直接在終端機打，這裡就攔不到。
 前兩條（繞過閘門）的真正兜底是 CI 的 required check 與 GitHub ruleset（bypass 名單空的）；
@@ -11,9 +13,6 @@ import shlex
 from pathlib import Path
 
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 相對專案路徑, 說得出理由了嗎
-
-#: 拆不開時用的關鍵詞掃描。這幾個字串夠獨特，直接在原文找不會誤傷。
-_危險詞 = ("--no-verify", "--admin")
 
 #: 重導寫入的正規表達式（捕捉 > 或 >> 後方的目標路徑）
 _重導樣式 = re.compile(r"(?:>>|>)\s*(?:'([^']*)'|\"([^\"]*)\"|([^\s>&|;]+))")
@@ -31,31 +30,153 @@ _BASH寫入管轄目錄 = frozenset({"src", "tests", "docs"})
 _PYTHON腳本管轄特徵 = tuple(f"{目錄}/" for 目錄 in _BASH寫入管轄目錄)
 
 
-def _拆得開的判斷(詞集: set[str]) -> tuple[bool, str]:
-    if "--no-verify" in 詞集:
+_HEREDOC樣式 = re.compile(
+    r"'[^'\r\n]*'|\"(?:\\\\.|[^\"\\\\\r\n])*\"|(?<!<)<<(?P<忽略定位字元>-?)(?!<)\s*"
+    r"(?P<標記>'[^'\r\n]*'|\"[^\"\r\n]*\"|[^\s<>&|;]+)"
+)
+
+
+def _去掉heredoc內文(命令: str) -> str:
+    """去掉 shell heredoc 的內文，只留下真正的命令行。
+
+    普通 `<<` 的結束標記必須完全相等；只有 `<<-` 會忽略標記前的 tab。
+    """
+    結果: list[str] = []
+    待結束: list[tuple[str, bool]] = []
+    for 行 in 命令.splitlines(keepends=True):
+        if 待結束:
+            結束標記, 忽略定位字元 = 待結束[0]
+            比對行 = 行.rstrip("\r\n")
+            if 忽略定位字元:
+                比對行 = 比對行.lstrip("\t")
+            if 比對行 == 結束標記:
+                待結束.pop(0)
+            continue
+        結果.append(行)
+        待結束.extend(
+            (
+                匹配.group("標記").strip("'\""),
+                bool(匹配.group("忽略定位字元")),
+            )
+            for 匹配 in _找出引號外的heredoc(行)
+        )
+    return "".join(結果)
+
+
+_指令分隔詞 = {"|", "||", ";", "&&", "&", "\n", "(", ")"}
+
+
+def _讀取命令詞列(命令: str) -> tuple[list[str], bool]:
+    """以保留引號的方式讀取 shell 命令詞列。
+
+    保留引號是必要的：引號內的 `--no-verify` 只是文字，不是傳給程式的旗標；
+    `posix=True` 會把引號剝掉，讓文字誤變成旗標。
+    """
+    讀取 = shlex.shlex(
+        _去掉heredoc內文(命令),
+        posix=False,
+        punctuation_chars="|;&()\n",
+    )
+    讀取.whitespace = " \t\r"
+    讀取.whitespace_split = True
+    詞列: list[str] = []
+    try:
+        while True:
+            詞 = 讀取.get_token()
+            if 詞 is None or 詞 == 讀取.eof:
+                break
+            詞列.append(詞)
+    except ValueError:
+        return 詞列, False
+    return 詞列, True
+
+
+_環境變數樣式 = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*")
+
+
+def _去掉命令前綴(詞列: list[str]) -> list[str]:
+    """去掉環境變數與 sudo／env 外殼，留下真正執行的命令。"""
+    起點 = 0
+    while 起點 < len(詞列):
+        if _環境變數樣式.fullmatch(詞列[起點]):
+            起點 += 1
+            continue
+        if 詞列[起點] not in ("sudo", "env"):
+            break
+        起點 += 1
+        while 起點 < len(詞列):
+            詞 = 詞列[起點]
+            if _環境變數樣式.fullmatch(詞):
+                起點 += 1
+            elif 詞 == "--":
+                起點 += 1
+                break
+            elif 詞.startswith("-"):
+                起點 += 2 if 詞 in ("-u", "--user", "-g", "--group", "-C", "--chdir") else 1
+            else:
+                break
+    return 詞列[起點:]
+
+
+def _判斷git禁令(詞列: list[str]) -> tuple[bool, str]:
+    詞列 = _去掉命令前綴(詞列)
+    if not 詞列 or 詞列[0] != "git":
+        return True, ""
+    子命令位置 = 1
+    while 子命令位置 < len(詞列) and 詞列[子命令位置].startswith("-"):
+        if 詞列[子命令位置] in (
+            "-C",
+            "-c",
+            "--git-dir",
+            "--work-tree",
+            "--namespace",
+            "--exec-path",
+        ):
+            子命令位置 += 2
+        else:
+            子命令位置 += 1
+    if 子命令位置 >= len(詞列):
+        return True, ""
+    命令, 參數 = 詞列[子命令位置], 詞列[子命令位置 + 1 :]
+    if 命令 == "commit" and any(_是提交跳過驗證旗標(詞) for 詞 in 參數):
         return False, "禁令 --no-verify：繞過 pre-commit 快閘。要繞過閘門，先修閘門"
-    if {"git", "commit", "-n"} <= 詞集:
-        return False, "禁令 git commit -n：`-n` 就是 `--no-verify` 的短寫"
-    if {"gh", "merge", "--admin"} <= 詞集:
-        return False, "禁令 --admin：用管理員權限跳過 required check，等於自己拆掉執法點"
-    if {"gh", "pr", "merge"} <= 詞集 and "--delete-branch" not in 詞集:
-        return False, "禁令 gh pr merge 缺少 --delete-branch：合併要連分支一起收掉，不然流程沒走完"
+    if 命令 == "push" and "--no-verify" in 參數:
+        return False, "禁令 --no-verify：繞過 pre-push 快閘。要繞過閘門，先修閘門"
     return True, ""
 
 
-def _拆不開的判斷(命令: str) -> tuple[bool, str]:
-    """`shlex` 拆不開時的退路：直接在原文找關鍵詞。
+def _找出引號外的heredoc(行: str) -> list[re.Match[str]]:
+    """找出引號外的 heredoc 樣式；引號內的匹配會先被樣式消耗後排除。"""
+    return [匹配 for 匹配 in _HEREDOC樣式.finditer(行) if 匹配.group("標記")]
 
-    **不硬擋**。硬擋看起來安全，實際上會把 heredoc、巢狀引號這種完全正常的
-    指令全部誤擋掉——實測擋到過一次，而且擋在跟禁令毫無關係的地方。
 
-    退成關鍵詞掃描不會變寬鬆：`--no-verify` 與 `--admin` 這種字串出現在
-    原文裡就足以判定，反而比拆詞更容易命中（會多擋不會少擋）。
-    唯一擋不住的是刻意混淆，而這裡的對象不是對手，是會手滑的執行者。
-    """
-    命中 = [詞 for 詞 in _危險詞 if 詞 in 命令]
-    if 命中:
-        return False, f"禁令 {命中[0]}（指令拆不開，退回關鍵詞掃描）：不准繞過閘門"
+def _判斷gh禁令(詞列: list[str]) -> tuple[bool, str]:
+    詞列 = _去掉命令前綴(詞列)
+    if 詞列[:3] != ["gh", "pr", "merge"]:
+        return True, ""
+    if "--admin" in 詞列[3:]:
+        return False, "禁令 --admin：用管理員權限跳過 required check，等於自己拆掉執法點"
+    if "--delete-branch" not in 詞列[3:]:
+        return False, (
+            "禁令 gh pr merge 缺少 --delete-branch：合併要連分支一起收掉，不然流程沒走完"
+        )
+    return True, ""
+
+
+def _是提交跳過驗證旗標(詞: str) -> bool:
+    """判斷詞是否是 `git commit` 的跳過驗證旗標或其短寫。"""
+    return 詞 == "--no-verify" or (詞.startswith("-n") and not 詞.startswith("--"))
+
+
+def _硬禁令判斷(命令: str) -> tuple[bool, str]:
+    詞列, 拆得開 = _讀取命令詞列(命令)
+    for 子命令 in _分拆子命令(詞列):
+        for 禁令判斷 in (_判斷git禁令, _判斷gh禁令):
+            通過, 原因 = 禁令判斷(子命令)
+            if not 通過:
+                if not 拆得開:
+                    原因 = f"{原因}（指令拆不開，依已解析的命令段判斷）"
+                return False, 原因
     return True, ""
 
 
@@ -93,15 +214,12 @@ def _是Bash寫入管轄路徑(目標: str, 根: Path) -> bool:
 
 def _重導寫入管轄嗎(命令: str, 根: Path) -> bool:
     """檢查命令中的 > 或 >> 重導目標是否落在管轄範圍。"""
+    # 已知限制：這裡掃的是原文，字串裡的 > 仍可能被視為重導。
     for 匹配 in _重導樣式.finditer(命令):
         目標 = next((組 for 組 in 匹配.groups() if 組), None)
         if 目標 and _是Bash寫入管轄路徑(目標, 根):
             return True
     return False
-
-
-#: 指令管道與串接運算子
-_指令分隔詞 = {"|", "||", ";", "&&", "&"}
 
 
 def _擷取_cp_mv_目標(詞列: list[str]) -> str:
@@ -172,7 +290,11 @@ def _詞列會寫到管轄嗎(詞列: list[str], *, 根: Path) -> bool:
 
 
 def 會寫到管轄範圍嗎(命令: str, 根目錄: Path | None = None) -> bool:
-    """判斷 shell 指令是否會寫入受管轄的檔案（純函式）。"""
+    """判斷 shell 指令是否會寫入受管轄的檔案（純函式）。
+
+    硬禁令判斷會去掉 heredoc 內文，因為它只判斷真正執行的命令；這裡刻意保留
+    原文，因為 Python heredoc 的寫檔呼叫與路徑就在內文裡。
+    """
     根 = 根目錄 if 根目錄 is not None else Path.cwd()
 
     if _python腳本寫入管轄嗎(命令):
@@ -191,11 +313,7 @@ def 會寫到管轄範圍嗎(命令: str, 根目錄: Path | None = None) -> bool
 
 def _檢查硬禁令(命令: str) -> tuple[bool, str]:
     """檢查是否違反現有硬禁令（--no-verify、--admin、缺少 --delete-branch）。"""
-    try:
-        詞 = shlex.split(命令)
-    except ValueError:
-        return _拆不開的判斷(命令)
-    return _拆得開的判斷(set(詞))
+    return _硬禁令判斷(命令)
 
 
 def 檢查指令(
