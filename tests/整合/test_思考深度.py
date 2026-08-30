@@ -54,6 +54,18 @@ class Test三家各自實作同一個旋鈕:
         assert "gemini-3.7-flash-low" in 參
         assert "gemini-3.7-flash-high" not in 參
 
+    def test_agy跑別家型號時不准加深度後綴(self) -> None:
+        """agy 也代跑 claude／gpt 的型號，**那些型號沒有深度後綴這回事**。
+
+        `agy models` 列得出 `claude-sonnet-4-6`、`claude-opus-4-6-thinking`、
+        `gpt-oss-120b-medium`。無條件補後綴會送出 `claude-sonnet-4-6-high`
+        這種不存在的型號——而那條通道的額度是獨立的一池，
+        走不到就等於整池浪費。
+        """
+        for 型 in ("claude-sonnet-4-6", "claude-opus-4-6-thinking"):
+            參 = _參數("agy", 模型=型, 思考深度="high")
+            assert 型 in 參, f"{型} 被改掉了：{參}"
+
     def test_agy自己指定的型號也換得掉(self) -> None:
         參 = _參數("agy", 模型="gemini-3.1-pro-high", 思考深度="low")
 

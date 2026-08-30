@@ -171,6 +171,9 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     return ["exec", *共通, 提示]
 
 
+#: 只有這一族的深度包在型號後綴裡。claude／gpt 那些是 agy 代跑的，型號要原樣送。
+_agy有深度後綴的族 = "gemini-"
+
 #: agy 的推理強度包在型號裡（`agy models` 實測），不是另一個旗標。
 agy預設模型 = "gemini-3.7-flash-high"
 
@@ -180,9 +183,15 @@ def _agy型號(選項: 呼叫選項) -> str:
 
     後綴不存在就補上去（`gemini-3.1-pro` → `gemini-3.1-pro-low`），
     已經有就換掉——不換的話 `--模型 …-high --思考深度 low` 會安靜地照 high 跑。
+
+    **但只有 gemini 那一族是這個規則。** agy 也代跑 claude 與 gpt 的型號
+    （`agy models` 實測列得出 `claude-sonnet-4-6`、`claude-opus-4-6-thinking`、
+    `gpt-oss-120b-medium`），那些型號**沒有深度後綴這回事**——
+    補上去就送出一個不存在的型號。而那條通道的額度是**獨立的一池**，
+    走不到等於整池浪費。
     """
     型 = 選項.模型 or agy預設模型
-    if not 選項.思考深度:
+    if not 選項.思考深度 or not 型.startswith(_agy有深度後綴的族):
         return 型
     return _agy後綴.sub("", 型) + f"-{選項.思考深度}"
 
