@@ -171,6 +171,9 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     return ["exec", *共通, 提示]
 
 
+#: 只有這一族的深度包在型號後綴裡。claude／gpt 那些是 agy 代跑的，型號要原樣送。
+_agy有深度後綴的族 = "gemini-"
+
 #: agy 的推理強度包在型號裡（`agy models` 實測），不是另一個旗標。
 agy預設模型 = "gemini-3.7-flash-high"
 
@@ -180,11 +183,25 @@ def _agy型號(選項: 呼叫選項) -> str:
 
     後綴不存在就補上去（`gemini-3.1-pro` → `gemini-3.1-pro-low`），
     已經有就換掉——不換的話 `--模型 …-high --思考深度 low` 會安靜地照 high 跑。
+
+    **但只有 gemini 那一族是這個規則。** agy 也代跑 claude 與 gpt 的型號
+    （`agy models` 實測列得出 `claude-sonnet-4-6`、`claude-opus-4-6-thinking`、
+    `gpt-oss-120b-medium`），那些型號**沒有深度後綴這回事**——
+    補上去就送出一個不存在的型號。而那條通道的額度是**獨立的一池**，
+    走不到等於整池浪費。
     """
     型 = 選項.模型 or agy預設模型
-    if not 選項.思考深度:
+    if not 型.startswith(_agy有深度後綴的族):
         return 型
-    return _agy後綴.sub("", 型) + f"-{選項.思考深度}"
+    組好 = _agy後綴.sub("", 型) + f"-{選項.思考深度}" if 選項.思考深度 else 型
+    if 組好 != agy預設模型:
+        訊息 = (
+            f"agy 的 gemini 只准 {agy預設模型}，你給的是 {組好}"
+            "——那一族共用同一份額度，換型號只會用更貴的單價吃同一池。"
+            "claude／gpt 那些是另一個池，不受這條限制"
+        )
+        raise ValueError(訊息)
+    return 組好
 
 
 def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
@@ -277,7 +294,7 @@ def 逾時的回應(
     對話識別碼是整條路的關鍵：有它才 `--續接` 得了，
     才談得上「接著剛剛的思考做下去」而不是從頭重做。
     """
-    逾時訊息 = _逾時診斷(耗時秒, 上限秒)
+    逾時訊息 = _逾時診斷(耗時秒, 上限秒) + _逾時標準錯誤(部分標準輸出, 部分標準錯誤)
     逾時回應 = 回應(
         文字=逾時訊息,
         終局=終局判定(失敗代碼.逾時),
@@ -294,6 +311,21 @@ def 逾時的回應(
         對話識別碼=部分回應.對話識別碼 or 撿對話識別碼(部分標準輸出),
         文字=逾時訊息 + (部分回應.文字 or 部分標準輸出)[:部分輸出上限],
     )
+
+
+def _逾時標準錯誤(部分標準輸出: str, 部分標準錯誤: str) -> str:
+    """標準輸出全空時，留下子程序最後的標準錯誤。"""
+    if 部分標準輸出.strip():
+        return ""
+    標準錯誤 = 部分標準錯誤.strip()
+    if not 標準錯誤:
+        return ""
+
+    最後一行 = 標準錯誤.splitlines()[-1]
+    訊息 = f"子程序最後印出（不代表停在這裡）：{最後一行}\n"
+    if 標準錯誤 == "Reading additional input from stdin...":
+        訊息 += "子程序沒有實質回應；這次只收到開場白。\n"
+    return 訊息
 
 
 @dataclass(frozen=True, slots=True)
