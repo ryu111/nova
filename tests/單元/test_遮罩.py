@@ -15,8 +15,11 @@ trufflehog 的 `pkg/detectors`），只收**有明確固定前綴或結構**的�
 純函式，不碰硬碟，所以住單元層。
 """
 
+import inspect
+
 import pytest
 
+from nova.契約.遮罩 import 已經遮過了
 from nova.載體.秘密 import 已載入的鍵環境變數
 from nova.載體.遮罩 import 遮罩
 
@@ -244,3 +247,31 @@ class Test自己載進去的不必猜:
 
         assert 果.文字 == "載入了 MY_THING 跟 OTHER_THING"
         assert 果.遮掉幾處 == 0
+
+
+class Test逃生口要說得出理由:
+    """`已經遮過了` 是唯一合法的硬轉入口，所以**它自己也要有閘**。
+
+    沒有閘的話它就是一個安靜的 cast，而安靜的 cast 正是決策 0002 要防的東西。
+    """
+
+    def test_因為是必填的關鍵字(self) -> None:
+        """**位置參數傳不進去、不傳也不行。**
+
+        給了預設值的話，`已經遮過了(某段字)` 會編得過——那時候它跟
+        `cast(已遮罩文字, 某段字)` 一模一樣，grep 不出來、review 看不見。
+        """
+        參數 = inspect.signature(已經遮過了).parameters["因為"]
+
+        assert 參數.kind is inspect.Parameter.KEYWORD_ONLY, "要具名傳，不然會被當成一般參數混過去"
+        assert 參數.default is inspect.Parameter.empty, "有預設值就等於沒有必填"
+
+    @pytest.mark.parametrize("空的", ["", "   ", "\n"])
+    def test_空理由不算理由(self, 空的: str) -> None:
+        """**型別擋不到 `因為=""`。** 那條縫要用執行期的檢查補。"""
+        with pytest.raises(ValueError, match="說得出理由"):
+            已經遮過了("隨便一段字", 因為=空的)
+
+    def test_有理由就放行(self) -> None:
+        """**不能擋到正常用法**——擋過頭的閘會被繞過。"""
+        assert 已經遮過了("一段字", 因為="測試用") == "一段字"

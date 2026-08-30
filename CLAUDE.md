@@ -47,9 +47,12 @@ uv run pytest -m 真cli            # 真的打三家 CLI，燒 token，兩個閘
 1. **squash 合併的 commit 訊息繞過 commit-msg hook**（訊息由 GitHub 從 PR 標題組出來）。
    只有本地加速器，沒有伺服器端保證。
 2. **`gates` 這個 job 名稱是 main 保護規則的 required check context**，改了保護就失效。
-3. **ruff 的快取鍵不含內容**（是路徑＋大小＋mtime 奈秒），所以閘裡的 ruff 一律帶
-   `--no-cache`。拿掉它會出現「閘綠、CI 紅」。由
-   `tests/整合/test_閘不准吃ruff快取.py` 背書。
+3. **ruff 與 mypy 的快取鍵都不含內容**，所以閘裡的 ruff 帶 `--no-cache`、
+   mypy 帶 `--no-incremental`。拿掉會出現「閘綠、CI 紅」。
+   mypy 那條更容易踩：它的鍵是路徑＋大小＋**整數秒** mtime，
+   只在 mtime 對不上時才比內容雜湊——**同一秒內改兩次、長度剛好一樣就中**，
+   而長度剛好一樣在「兩處同一種型別各改回 `str`」這種改法上是常態。
+   由 `tests/整合/test_閘不准吃快取.py` 背書。
 
 ### `pyproject.toml` 停用的那幾組 ruff 規則不要「修好」
 

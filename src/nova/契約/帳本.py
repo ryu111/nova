@@ -27,6 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from nova.契約.遮罩 import 已遮罩文字
+
 
 class 事件種類(StrEnum):
     """帳本記哪幾種事。值 ASCII——跨程序（別的程式會讀這個檔）。"""
@@ -91,7 +93,8 @@ class 事件:
     文字長度: int | None = None
     文字雜湊: str | None = None
     #: 模型講的話，遮罩過。`--不記全文` 的時候是 None。
-    文字: str | None = None
+    #: **型別是 `已遮罩文字` 不是 `str`**：忘了遮就編不過（決策 0002）。
+    文字: 已遮罩文字 | None = None
     #: 遮掉幾處。**誠實欄位**：0 是原文，大於 0 代表缺了幾塊。
     遮掉幾處: int | None = None
     #: 太長被截掉了。沒截就不落盤這一格（不是落 false）。

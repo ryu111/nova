@@ -20,8 +20,8 @@
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 
+from nova.契約.遮罩 import 已經遮過了, 遮罩結果
 from nova.載體.秘密 import 已載入的鍵環境變數
 
 #: 環境變數的鍵長這樣才當它是祕密。純長度判斷會把 `PWD` 跟 `LANG` 也遮掉，
@@ -37,18 +37,6 @@ _最短的祕密 = 8
 
 #: 這些值就算鍵名看起來像祕密也不遮：它們是佔位符或明顯的假值。
 _不是祕密的值 = frozenset({"", "none", "null", "false", "true", "changeme", "xxx", "test"})
-
-
-@dataclass(frozen=True, slots=True)
-class 遮罩結果:
-    """遮完的文字，加上**遮掉幾處**。
-
-    `遮掉幾處` 不是統計用的裝飾品：0 代表「這份是原文」，
-    大於 0 代表「你看到的東西缺了幾塊」。少了它，兩者長得一樣。
-    """
-
-    文字: str
-    遮掉幾處: int
 
 
 def _標記(是什麼: str) -> str:
@@ -117,7 +105,7 @@ def 遮罩(文字: str, *, 環境: Mapping[str, str] | None = None) -> 遮罩結
     不然「本機有某個環境變數所以會過、CI 沒有所以會紅」。
     """
     if not 文字:
-        return 遮罩結果(文字, 0)
+        return 遮罩結果(已經遮過了(文字, 因為="空字串沒有東西可以遮"), 0)
 
     出 = 文字
     次數 = 0
@@ -136,7 +124,10 @@ def 遮罩(文字: str, *, 環境: Mapping[str, str] | None = None) -> 遮罩結
     出, 幾 = _網址帳密.subn(_遮掉密碼那段, 出)
     次數 += 幾
 
-    return 遮罩結果(出, 次數)
+    # **這裡就是那個唯一的來源。** `遮罩結果` 的文字型別是 `已遮罩文字`，
+    # 而造得出它的只有這一行與 `已經遮過了`——其餘地方硬轉由
+    # `test_不准在遮罩以外的地方硬轉` 擋著。
+    return 遮罩結果(已經遮過了(出, 因為="這一行剛把祕密遮完"), 次數)
 
 
 def _遮掉密碼那段(命中: re.Match[str]) -> str:
