@@ -35,6 +35,8 @@
 """
 
 import json
+import os
+import re
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -157,9 +159,28 @@ def 預設帳本目錄(專案: Path | None = None) -> Path:
     return 底 / "帳本" if 專案 is None else 底 / "專案" / 專案識別(專案) / "帳本"
 
 
+#: 父程序指定執行識別碼用的環境變數。**ASCII：跨程序 semantic id。**
+#: `nova 問 --背景` 靠它讓「印給人看的號碼」與「帳本上的號碼」是同一個——
+#: 各編一個的話，使用者拿到的識別碼在 `nova 帳本` 上查不到，
+#: 而那看起來像「帳沒記」，不像「號碼對不上」。
+指定識別碼的環境變數 = "NOVA_RUN_ID"
+
+
 def 新執行識別碼() -> str:
-    """時間開頭所以 `ls` 就是時序，尾巴補亂數避免同一秒撞檔名。"""
+    """時間開頭所以 `ls` 就是時序，尾巴補亂數避免同一秒撞檔名。
+
+    **父程序可以用 `NOVA_RUN_ID` 指定。** 只認格式對的（時戳-十六進位），
+    亂設的一律忽略——不擋的話一個殘留在 shell 裡的環境變數會讓所有執行
+    共用同一個檔名，而那是**靜默地把帳蓋掉**。
+    """
+    指定 = os.environ.get(指定識別碼的環境變數, "")
+    if _像識別碼.fullmatch(指定):
+        return 指定
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + token_hex(3)
+
+
+#: 執行識別碼長什麼樣。用來擋掉亂設的 `NOVA_RUN_ID`。
+_像識別碼 = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{6}")
 
 
 @contextmanager
