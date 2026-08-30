@@ -96,6 +96,11 @@ def 收件目錄(專案: Path | None = None) -> Path:
     return 底 / "收件" if 專案 is None else 底 / "專案" / 專案識別(專案) / "收件"
 
 
+def 處理中目錄(目錄: Path) -> Path:
+    """回傳收件匣裡暫時收下、尚未收尾的目錄。"""
+    return 目錄 / _處理中
+
+
 def 丟一件(題目: str, *, 來源: str, 目錄: Path | None = None) -> Path:
     """把一句話落成一個收件檔，回傳它的位置。**這是「你敲」變成事件的那一步。**
 
@@ -242,7 +247,7 @@ def _搶下來(候選: Path, 收件: Path) -> 收件單 | None:
     內容 = _讀得到嗎(候選)
     if 內容 is None or not 內容.strip():
         return None
-    處理中 = 收件 / _處理中
+    處理中 = 處理中目錄(收件)
     處理中.mkdir(parents=True, exist_ok=True)
     目標 = 處理中 / f"{os.getpid()}-{候選.name}"
     try:
