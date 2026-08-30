@@ -52,6 +52,8 @@ class Test問:
 
 
 class Test派工:
+    """派工流程與交集規則；本地腦資格護欄見 `tests/單元/test_派工門面.py`。"""
+
     def test_自己審自己要擋(self) -> None:
         with pytest.raises(ValueError, match="換一顆腦"):
             nova.派工("做點事", 用="codex", 審查用="codex")

@@ -92,7 +92,7 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
     剖析.add_argument(
         "--用",
         default=None,
-        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+        help="哪一家：claude、codex、agy、local。逗號分隔＝接力（前一顆失敗換下一顆）",
     )
     剖析.add_argument(
         "--工作",

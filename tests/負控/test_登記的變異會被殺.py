@@ -17,6 +17,20 @@ def test_登記的變異會被殺(一筆: 變異) -> None:
     執行器.執行變異(一筆, 根目錄=專案根目錄)
 
 
+def test_本地腦的防護都有固定負控() -> None:
+    """本地腦的每條保證都要真的交給固定負控 runner 執行。"""
+    應被負控釘住 = {
+        "tests/整合/test_命令列.py::Test本地腦沒有審查資格::test_本地腦不准當審查員",
+        "tests/單元/test_派工門面.py::test_門面不准本地腦當審查員",
+        "tests/單元/test_本地派工.py::test_能力未量到前本地腦只保留手動指定",
+    }
+    已登記 = {測試 for 一筆 in 登記 for 測試 in 一筆.該紅}
+
+    assert 應被負控釘住 <= 已登記, (
+        f"本地腦的防護沒有都登進固定負控：{sorted(應被負控釘住 - 已登記)}"
+    )
+
+
 def test_存活變異會讓runner紅() -> None:
     with pytest.raises(執行器.負控錯誤, match="SURVIVED"):
         執行器._判定結果(0, 已收集=True, 逾時=False, 預期掛住=False)
