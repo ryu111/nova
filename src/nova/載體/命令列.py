@@ -87,6 +87,7 @@ from nova.載體.狀態檔 import (
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
+from nova.載體.線 import 執行線
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
 from nova.載體.語言 import 找非繁體字
@@ -1594,6 +1595,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "排程": _子命令_排程,
     "秘密": _子命令_秘密,
     "狀態": _子命令_狀態,
+    "線": 執行線,
     "收件": _子命令_收件,
     "收": _子命令_收,
     "帳本": _子命令_帳本,
