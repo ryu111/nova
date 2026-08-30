@@ -3,6 +3,7 @@
 # 這個 runner 需要把失敗分類塞進例外訊息，保留完整診斷比 lint 的例外訊息風格重要。
 # ruff: noqa: EM101, EM102, TRY003
 
+import ast
 import hashlib
 import os
 import shutil
@@ -10,15 +11,40 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
+from functools import cache
 from pathlib import Path
 
 import coverage
 
-from .登記 import 變異
+from .登記 import 替換一次, 變異
 
 
 class 負控錯誤(RuntimeError):
     """負控本身無法判定時的錯誤。"""
+
+
+@cache
+def _目前覆蓋率() -> coverage.Coverage:
+    覆蓋率 = coverage.Coverage.current()
+    if 覆蓋率 is None:
+        raise RuntimeError("coverage runner 沒有啟動")
+    return 覆蓋率
+
+
+def pytest_collection_finish() -> None:
+    覆蓋率 = _目前覆蓋率()
+    覆蓋率.stop()
+    覆蓋率.save()
+
+
+def pytest_runtest_call() -> None:
+    _目前覆蓋率().start()
+
+
+def pytest_runtest_teardown() -> None:
+    覆蓋率 = _目前覆蓋率()
+    覆蓋率.stop()
+    覆蓋率.save()
 
 
 def _雜湊(檔案: Path) -> str:
@@ -110,8 +136,86 @@ def _覆蓋的行(資料檔: Path, 目標: Path, 上下文: str | None = None) -
     return 命中
 
 
+def _可執行行(文字: str) -> set[int]:
+    try:
+        樹 = ast.parse(文字)
+    except SyntaxError as 錯:
+        raise _錯(f"RUN_ERROR：目標不是可剖析的 Python：{錯}") from 錯
+    文件字串行: set[int] = set()
+    for 節點 in ast.walk(樹):
+        if not isinstance(節點, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not 節點.body:
+            continue
+        第一個 = 節點.body[0]
+        if (
+            isinstance(第一個, ast.Expr)
+            and isinstance(第一個.value, ast.Constant)
+            and isinstance(第一個.value.value, str)
+        ):
+            文件字串行.update(range(第一個.lineno, (第一個.end_lineno or 第一個.lineno) + 1))
+    可執行: set[int] = set()
+    for 節點 in ast.walk(樹):
+        行 = getattr(節點, "lineno", None)
+        if isinstance(行, int) and 行 not in 文件字串行:
+            可執行.add(行)
+    return 可執行
+
+
+def _推導破壞行(目標: Path, 一筆: 變異) -> frozenset[int]:
+    """從操作錨點推導被破壞的所有原始碼行。"""
+    try:
+        錨點 = 一筆.操作.錨點
+    except (AttributeError, TypeError) as 錯:
+        raise _錯(f"RUN_ERROR：操作無法推導破壞行：{type(一筆.操作).__name__}") from 錯
+    if not isinstance(錨點, str) or not 錨點:
+        raise _錯(f"RUN_ERROR：操作沒有可推導的文字錨點：{一筆.識別}")
+    文字 = 目標.read_text(encoding="utf-8")
+    if 文字.count(錨點) != 1:
+        raise _錯(f"RUN_ERROR：錨點應恰好一次，實際 {文字.count(錨點)}：{錨點!r}")
+    起點 = 文字.index(錨點)
+    終點 = 起點 + len(錨點) - 1
+    首行 = 文字.count("\n", 0, 起點) + 1
+    末行 = 文字.count("\n", 0, 終點) + 1
+    可執行行 = _可執行行(文字)
+    要求 = frozenset(行 for 行 in range(首行, 末行 + 1) if 行 in 可執行行)
+    if not 要求:
+        raise _錯(f"RUN_ERROR：操作沒有可推導的 executable 行：{一筆.識別}")
+    return 要求
+
+
+def _是模組層常數替換(文字: str, 一筆: 變異) -> bool:
+    """空覆蓋標記只准用在模組層單一名稱的替換。"""
+    if not isinstance(一筆.操作, 替換一次):
+        return False
+    樹 = ast.parse(文字)
+    起點 = 文字.count("\n", 0, 文字.index(一筆.操作.錨點)) + 1
+    for 節點 in 樹.body:
+        if isinstance(節點, ast.Assign):
+            目標們 = 節點.targets
+        elif isinstance(節點, ast.AnnAssign):
+            目標們 = [節點.target]
+        else:
+            continue
+        末行 = 節點.end_lineno or 節點.lineno
+        if 節點.lineno <= 起點 <= 末行:
+            return all(isinstance(目標, ast.Name) for 目標 in 目標們)
+    return False
+
+
 def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
     目標 = 根目錄 / 一筆.目標檔
+    推導的行 = _推導破壞行(目標, 一筆)
+    if 一筆.必須覆蓋 is None:
+        必須覆蓋 = 推導的行
+    elif not 一筆.必須覆蓋 and _是模組層常數替換(目標.read_text(encoding="utf-8"), 一筆):
+        # 這個顯式空集合是「沒有可追 coverage 行」的標記，不是預設值。
+        必須覆蓋 = frozenset()
+    elif not 一筆.必須覆蓋:
+        # 一般空集合沒有額外斷言，破壞行仍由操作推導並必須被覆蓋。
+        必須覆蓋 = 推導的行
+    else:
+        必須覆蓋 = 推導的行 | 一筆.必須覆蓋
     with tempfile.TemporaryDirectory(prefix="nova-覆蓋率-", dir="/tmp") as 暫存:
         資料檔 = Path(暫存) / ".coverage"
         for nodeid in 一筆.該紅:
@@ -124,10 +228,12 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
                         "coverage",
                         "run",
                         "--parallel-mode",
-                        f"--source={根目錄 / 'src'}",
+                        f"--source={根目錄 / 'src'},{根目錄 / 'tests'}",
                         f"--context={nodeid}",
                         "-m",
                         "pytest",
+                        "-p",
+                        "tests.負控.執行器",
                         "-p",
                         "no:randomly",
                         "-q",
@@ -144,12 +250,19 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
                 raise _錯(f"RUN_ERROR：coverage 無法完成：{nodeid}") from 錯
             if 結果.returncode != 0:
                 raise _錯(f"RUN_ERROR：coverage 測試失敗：{nodeid}\n{結果.stdout}{結果.stderr}")
-            _判定覆蓋(一筆, _覆蓋的行(資料檔, 目標, nodeid))
+            _判定覆蓋(一筆, _覆蓋的行(資料檔, 目標, nodeid), 必須覆蓋)
 
 
-def _判定覆蓋(一筆: 變異, 命中: set[int]) -> None:
-    if not 一筆.必須覆蓋 <= 命中:
-        缺少 = 一筆.必須覆蓋 - 命中
+def _判定覆蓋(
+    一筆: 變異,
+    命中: set[int],
+    必須覆蓋: frozenset[int] | None = None,
+) -> None:
+    要求 = 一筆.必須覆蓋 if 必須覆蓋 is None else 必須覆蓋
+    if 要求 is None:
+        raise _錯(f"RUN_ERROR：沒有覆蓋要求：{一筆.識別}")
+    if not 要求 <= 命中:
+        缺少 = 要求 - 命中
         raise _錯(f"WRONG_TEST：{一筆.識別} 的 {一筆.該紅} 沒覆蓋 {sorted(缺少)}")
 
 

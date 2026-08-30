@@ -92,7 +92,7 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
     剖析.add_argument(
         "--用",
         default=None,
-        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+        help="哪一家：claude、codex、agy、local。逗號分隔＝接力（前一顆失敗換下一顆）",
     )
     剖析.add_argument(
         "--工作",
@@ -228,11 +228,17 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
     剖析.add_argument(
         "--審查用",
         default=None,
-        help="審查員用哪一家。必須跟 --用 不同。不給就照派工表（推理＝sol）",
+        help="審查員用哪一家。判準是對話不是家族名，同一家也行。不給就照派工表（推理＝sol）",
     )
     剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
     剖析.add_argument(
         "--逾時", type=float, default=None, help="每一階最多跑幾秒。不給就用各階段預設"
+    )
+    剖析.add_argument(
+        "--模型",
+        default=None,
+        help="這一次用哪顆型號，蓋掉派工表的策略。"
+        "用在『這一家的某個池用完了、但它代跑的另一個池還有』",
     )
     剖析.add_argument(
         "--提示檔",

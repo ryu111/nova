@@ -24,7 +24,7 @@ from pathlib import Path
 測試根 = "tests"
 
 
-def 拍快照(根目錄: Path) -> dict[str, str]:
+def 拍測試快照(根目錄: Path) -> dict[str, str]:
     """把 `tests/` 底下每個檔的內容雜湊記下來。鍵是相對路徑。
 
     **雜湊不是為了防篡改**，是為了不把整個測試樹讀進記憶體再比一次。
@@ -38,6 +38,9 @@ def 拍快照(根目錄: Path) -> dict[str, str]:
         for 檔 in sorted(在哪.rglob("*"))
         if 檔.is_file() and "__pycache__" not in 檔.parts
     }
+
+
+拍快照 = 拍測試快照  # 相容舊呼叫端（如命令列.py）
 
 
 def 動到測試了嗎(前: Mapping[str, str], 後: Mapping[str, str]) -> tuple[str, ...]:

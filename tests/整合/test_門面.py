@@ -52,9 +52,29 @@ class Test問:
 
 
 class Test派工:
-    def test_自己審自己要擋(self) -> None:
-        with pytest.raises(ValueError, match="換一顆腦"):
-            nova.派工("做點事", 用="codex", 審查用="codex")
+    """派工流程與交集規則；本地腦資格護欄見 `tests/單元/test_派工門面.py`。"""
+
+    def test_同一家做事又審查現在准了(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+        """使用者裁定（2026-08-31）：new session 就不是同一個人。
+
+        原本這裡守的是「同一家一律擋」。判準改成**對話**之後那條不再成立——
+        真正的自寫自評是**跑在同一個對話裡**，而那在結構上不可能
+        （見 `tests/單元/test_換腦判準.py::test_角色結構上不可能續接到同一個對話`）。
+        """
+        執行檔, _ = 做假CLI("codex")
+
+        果 = nova.派工(
+            "做點事",
+            用="codex",
+            審查用="codex",
+            最多步數=0,
+            工作目錄=tmp_path,
+            執行檔=執行檔,
+            審查執行檔=執行檔,
+            帳本目錄=tmp_path / "帳",
+        )
+
+        assert 果 is not None, "同一家不該再被家族名擋在門口"
 
     def test_跑完一輪(self, tmp_path: Path, 做假CLI: 做假CLI型, 翻牌判準: Path) -> None:
         做事的, _ = 做假CLI("codex")
@@ -181,10 +201,14 @@ class Test接力:
         assert 答.終局 is nova.終局.確定失敗
         assert "codex:usage" in 答.文字 and "agy:usage" in 答.文字
 
-    def test_做事與審查的鏈不准重疊(self) -> None:
-        """`codex,agy` 對上 `agy` ——agy 同時做事又審自己。"""
-        with pytest.raises(ValueError, match="換一顆腦"):
-            nova.派工("做點事", 用="codex,agy", 審查用="agy")
+    def test_鏈重疊也不再被擋但本地腦仍然不准(self) -> None:
+        """`codex,agy` 對上 `agy` 現在准了；**放寬的只有家族名那一條**。
+
+        9B 的實測邊界（長提示 2/3、誠實拒答 1/3）沒有因為那條裁定而改變，
+        所以它仍然不能當審查員——這一支守的就是那個界線沒被一起鬆掉。
+        """
+        with pytest.raises(ValueError, match="審查資格|local"):
+            nova.派工("做點事", 用="codex,agy", 審查用="local")
 
     def test_空的鏈要當場炸(self) -> None:
         with pytest.raises(ValueError, match="至少要指定一家"):

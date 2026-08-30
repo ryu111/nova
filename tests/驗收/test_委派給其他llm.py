@@ -135,27 +135,68 @@ def test_工作流有token預算這個旋鈕() -> None:
 
 
 class Test工作流的換腦保證:
-    """自己審自己等於沒審——硬規則 4。這條從文件變成機械保證。"""
+    """自己審自己等於沒審——硬規則 4。判準是**對話**不是家族名（`#140`）。
 
-    def test_審查用不能跟用同一家(self) -> None:
+    家族名重疊不再被擋：三家不給續接時本來就都是新對話（codex `--ephemeral`、
+    claude 不給 `--resume`、agy 不給 `--conversation`），新對話看不到做事那邊的
+    推理過程。真正要擋的自寫自評是跑在同一個對話裡，而那在結構上不可能——
+    精確定義由 `tests/單元/test_換腦判準.py` 守。
+
+    這一格守的是**真執行檔、真 argv 走得通**：同一家不再停在門口，
+    而是一路走到停止規則（判準三：墊片測得出轉遞形狀，測不出可達性）。
+    """
+
+    def test_同一家不再擋在門口(self, 假CLI: Path) -> None:
+        """走到護欄才停（退出碼 4），不是停在參數檢查（退出碼 2）。
+
+        `--最多步數 0` 讓迴圈一步都不跑（`range(0)` 是空迴圈），所以這一格
+        證明「檢查放行了」而**不燒任何 token**；假 CLI 是第二層保險——
+        步數旗標哪天接錯了也打不到真模型。這個檔案的前提就是不燒 token，
+        原本這兩格是唯二沒帶 `--執行檔` 的，只因為門口擋著才沒露餡。
+        """
+        環境 = {
+            **os.environ,
+            "假CLI_實錄": str(實錄 / 成功實錄["codex"]),
+            "假CLI_結束碼": "0",
+        }
         結果 = subprocess.run(
-            [str(nova執行檔), "工作流", "--用", "codex", "--審查用", "codex", "任務"],
+            [
+                str(nova執行檔),
+                "工作流",
+                "--用",
+                "codex",
+                "--審查用",
+                "codex",
+                "--執行檔",
+                str(假CLI),
+                "--最多步數",
+                "0",
+                "--不記帳",
+                "任務",
+            ],
+            cwd=專案根目錄,
+            capture_output=True,
+            text=True,
+            env=環境,
+            check=False,
+        )
+        assert 結果.returncode == 4, 結果.stderr
+        assert "換一顆腦" not in 結果.stderr
+
+    def test_審查用這個旋鈕沒有消失(self) -> None:
+        """使用者要能指名審查家——這個旋鈕不准在某次重構裡消失。
+
+        原本這一格叫「審查用是必要參數」，斷言 `"審查用" in stderr`——**那是假綠**：
+        `--審查用` 從來不是 required（不給就走派工表），它會綠是因為**另一條規則**
+        的錯誤訊息「…同時出現在 --用 與 --審查用」剛好含這三個字。
+        子字串斷言撞上別條規則的訊息就會這樣，而且拆掉那條規則才會現形。
+        """
+        結果 = subprocess.run(
+            [str(nova執行檔), "工作流", "--help"],
             cwd=專案根目錄,
             capture_output=True,
             text=True,
             check=False,
         )
-        assert 結果.returncode == 2
-        assert "換一顆腦" in 結果.stderr
-
-    def test_審查用是必要參數(self) -> None:
-        """省略不會靜默退回同一家——argparse 當場擋。"""
-        結果 = subprocess.run(
-            [str(nova執行檔), "工作流", "--用", "codex", "任務"],
-            cwd=專案根目錄,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert 結果.returncode != 0
-        assert "審查用" in 結果.stderr
+        assert 結果.returncode == 0
+        assert "--審查用" in 結果.stdout
