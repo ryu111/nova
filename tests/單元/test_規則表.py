@@ -67,6 +67,17 @@ def test_三條新規則都上了() -> None:
         assert 必要 in 代碼, f"缺少 {必要}"
 
 
+def test_登記的負控runner只接在ci閘() -> None:
+    """負控 runner 必須被 CI 執行，但不能拖進十秒提交閘。"""
+    負控 = next(
+        (條 for 條 in _規則表() if 條.代碼 == "registered-mutation"),
+        None,
+    )
+
+    assert 負控 is not None, "CI 缺少 registered-mutation 負控 runner"
+    assert 負控.閘點 == frozenset({"ci"}), f"負控 runner 閘點錯了：{負控.閘點}"
+
+
 def test_serial佔比規則已登記且只掛在ci閘() -> None:
     """serial 佔比規則只掛在 CI 閘，不掛提交閘避免 collect 拖垮預算。"""
     表 = _規則表()
