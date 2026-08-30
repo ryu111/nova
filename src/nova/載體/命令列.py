@@ -702,7 +702,7 @@ def _階段的派法(階段: 階段代碼) -> 派法:
 
 
 def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
-    """把命令列的腦來源套到 TDD 藍圖，保留派工表的模型設定。"""
+    """把命令列的腦來源與逾時套到 TDD 藍圖，保留派工表的模型設定。"""
 
     def _整理腦來源(來源: str) -> tuple[str, ...]:
         return tuple(家.strip() for 家 in 來源.split(",") if 家.strip())
@@ -721,6 +721,8 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
             )
             continue
         結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型, 思考深度=藍圖.派法.思考深度))
+    if 參數.逾時 is not None:
+        結果 = [dataclasses.replace(藍圖, 逾時秒=參數.逾時) for 藍圖 in 結果]
     return tuple(結果)
 
 
