@@ -33,9 +33,16 @@ class Test管轄範圍:
 
     @pytest.mark.parametrize(
         "相對路徑",
-        [".remember/now.md", ".claude/settings.json", ".git/config", "docs/../.remember/x.md"],
+        [
+            ".remember/now.md",
+            ".claude/settings.json",
+            ".git/config",
+            "docs/../.remember/x.md",
+            "scratchpad/筆記.md",
+            "scratchpad/temp.py",
+        ],
     )
-    def test_點開頭的地盤不管(self, 相對路徑: str) -> None:
+    def test_點開頭與暫存工作區的地盤不管(self, 相對路徑: str) -> None:
         """**修 nova 需要動這些**，擋下去會變成「工具壞了就修不了工具」。"""
         assert not 在管轄範圍嗎(根 / 相對路徑, 根目錄=根)
 

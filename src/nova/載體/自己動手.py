@@ -15,9 +15,14 @@
 
 | 路徑 | 管嗎 | 為什麼 |
 |---|---|---|
-| `src/`、`tests/`、`docs/` 裡的檔案 | **管** | 這正是該走 nova 的那種工作 |
+| 專案內非點開頭、非排除目錄的檔案 | **管** | 這正是該走 nova 的那種工作 |
 | 開頭是 `.` 的（`.remember/`、`.claude/`、`.git/`） | 不管 | 工具自己的地盤 |
+| `scratchpad/` | 不管 | 暫存筆記與實驗區 |
 | repo 外面 | 不管 | 這條規則只在這個 repo 裡成立 |
+
+註：Bash 指令護欄（見 `禁令.py`）在此一般管轄基礎上進一步
+窄化至核心目錄（`src/`、`tests/`、`docs/`），以防 `echo > 說明` 等
+一般文字重導造成誤擋死鎖。
 
 ## 記號住專案外面
 
@@ -39,6 +44,18 @@ _資料夾 = "繞過"
 #: **外面來的字串不准直接當路徑**——`../` 就跑出去了。
 _安全的會話 = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
+#: 不納入管轄的目錄名稱
+_排除目錄名 = frozenset({"scratchpad"})
+
+
+def 相對專案路徑(路徑: Path, *, 根目錄: Path) -> Path | None:
+    """將路徑解析為相對於專案根目錄的相對路徑；若超出根目錄則回傳 None。"""
+    try:
+        絕對路徑 = 路徑 if 路徑.is_absolute() else (根目錄 / 路徑)
+        return 絕對路徑.resolve().relative_to(根目錄.resolve())
+    except ValueError:
+        return None
+
 
 def 在管轄範圍嗎(路徑: Path, *, 根目錄: Path) -> bool:
     """這個檔案歸這條規則管嗎。**純函式，所以測得動。**
@@ -46,14 +63,10 @@ def 在管轄範圍嗎(路徑: Path, *, 根目錄: Path) -> bool:
     路徑要先解析成絕對的：`docs/../.remember/x.md` 比字串的話看起來像
     `docs/` 底下，那等於沒擋到點開頭的地盤。
     """
-    try:
-        絕對路徑 = 路徑 if 路徑.is_absolute() else (根目錄 / 路徑)
-        相對 = 絕對路徑.resolve().relative_to(根目錄.resolve())
-    except ValueError:
+    相對 = 相對專案路徑(路徑, 根目錄=根目錄)
+    if 相對 is None or not 相對.parts:
         return False
-    if not 相對.parts:
-        return False
-    return not any(段.startswith(".") or 段 == "scratchpad" for 段 in 相對.parts)
+    return not any(段.startswith(".") or 段 in _排除目錄名 for 段 in 相對.parts)
 
 
 def 繞過目錄(專案: Path) -> Path:

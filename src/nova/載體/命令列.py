@@ -179,8 +179,8 @@ def _子命令_檢查指令(參數: argparse.Namespace) -> int:
         return 阻擋
     if not 指令:
         return 放行
-    專案 = 在哪跑(getattr(參數, "工作目錄", None))
-    通過, 原因 = 檢查指令(指令, 根目錄=專案, 會話=會話, 專案=專案)
+    專案 = 在哪跑(None)
+    通過, 原因 = 檢查指令(指令, 專案=專案, 會話=會話)
     if 通過:
         return 放行
     print(f"nova 阻擋：{原因}", file=sys.stderr)
