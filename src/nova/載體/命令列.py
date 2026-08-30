@@ -76,6 +76,7 @@ from nova.載體.狀態檔 import (
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
+from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
 from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
@@ -162,6 +163,74 @@ def _子命令_檢查指令(參數: argparse.Namespace) -> int:
         return 放行
     print(f"nova 阻擋：{原因}", file=sys.stderr)
     return 阻擋
+
+
+def _該擋的理由(載荷: object) -> str | None:
+    """要擋就回訊息，不擋回 None。**看不懂的一律回 None（放行）。**
+
+    跟 `檢查指令` 剛好相反，而且是刻意的：那一支守的是不可逆的動作
+    （繞過閘門、跳過 required check），讀不懂就該 fail-closed；
+    這一支守的是一個**預設值**，而它掛在 Edit／Write 上——
+    **修 nova 的唯一辦法就是編輯 nova 的檔案。**
+    """
+    if not isinstance(載荷, dict):
+        return None
+    工具輸入 = 載荷.get("tool_input")
+    檔 = 工具輸入.get("file_path") if isinstance(工具輸入, dict) else None
+    if not isinstance(檔, str) or not 檔:
+        return None
+    專案 = 在哪跑(None)
+    if not 在管轄範圍嗎(Path(檔), 根目錄=專案):
+        return None
+    會話 = 載荷.get("session_id")
+    # 沒有 session id 就說不出那行指令給人照抄，擋了也沒用——放行。
+    if not isinstance(會話, str) or not 會話:
+        return None
+    if 說得出理由了嗎(會話, 專案=專案):
+        return None
+    return 擋的話要說什麼(會話)
+
+
+def _子命令_檢查編輯(參數: argparse.Namespace) -> int:
+    """agent hook 問「這個編輯可以嗎」。**退出碼永遠是 0。**
+
+    擋不擋看的是**有沒有印出那段 JSON**，不是退出碼——`uv run` 自己失敗時
+    也會回非零，跟「故意擋下」在退出碼上分不開，於是 nova 一壞
+    （import 錯、venv 沒建好）就變成全部編輯都擋住，而那時候
+    **修 nova 需要的正是編輯**。今晚真的踩過兩次（那次掛在 Bash 上，
+    還能用 Edit 逃出來；這一支掛在 Edit 上，沒有逃生口）。
+    """
+    del 參數
+    try:
+        擋 = _該擋的理由(json.load(sys.stdin))
+    except Exception as 錯:  # noqa: BLE001 —— 保證就是「絕不因為自己爆掉而擋住編輯」
+        print(f"nova 檢查編輯自己出錯了，放行：{錯}", file=sys.stderr)
+        return 放行
+    if 擋 is not None:
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": 擋,
+                    }
+                },
+                ensure_ascii=False,
+            )
+        )
+    return 放行
+
+
+def _子命令_繞過(參數: argparse.Namespace) -> int:
+    """記下「這次為什麼自己動手」。**理由才是這條規則真正的產出。**"""
+    try:
+        落點 = 記下繞過(參數.會話, 參數.因為, 專案=在哪跑(None))
+    except ValueError as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    print(f"記下來了：{落點}")
+    return 放行
 
 
 def _子命令_檢查提交訊息(參數: argparse.Namespace) -> int:
@@ -1215,6 +1284,8 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
 處理們: dict[str, 處理型] = {
     "閘": _子命令_閘,
     "檢查指令": _子命令_檢查指令,
+    "檢查編輯": _子命令_檢查編輯,
+    "繞過": _子命令_繞過,
     "檢查提交訊息": _子命令_檢查提交訊息,
     "問": _子命令_問,
     "工作流": _子命令_工作流,
