@@ -25,6 +25,7 @@
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Collection
 from dataclasses import dataclass
 from os import environ
 from typing import Any
@@ -43,6 +44,13 @@ from nova.契約.角色 import 呼叫選項, 權限, 預設選項
 家族名 = "local"
 
 _探型號逾時秒 = 5.0
+
+
+def 審查資格理由(家們: Collection[str]) -> str | None:
+    """本地腦不能成為工作流唯一的審查點。"""
+    if 家族名 in 家們:
+        return f"{家族名} 沒有審查資格：9B 本地模型不能當審查員"
+    return None
 
 
 def 預設本地網址() -> str:
@@ -68,7 +76,7 @@ class 本地腦:
             return _建立失敗回應(做不到, 失敗代碼.用法錯誤, 結束碼=2)
         try:
             型號 = 選項.模型 or self._第一個型號(選項.逾時秒)
-            回來 = self._送出對話(提示, 型號=型號, 逾時秒=選項.逾時秒)
+            回應資料 = self._送出對話(提示, 型號=型號, 逾時秒=選項.逾時秒)
         except TimeoutError:
             # **請求可能已經出門了。** 確定失敗會讓上層放心重跑，而那會重做副作用。
             return _建立失敗回應(
@@ -80,26 +88,28 @@ class 本地腦:
             return _處理連線錯誤(self.網址, 選項.逾時秒, 錯)
         except (ValueError, KeyError, IndexError) as 錯:
             return _建立失敗回應(f"{self.網址} 的回應看不懂（{錯}）", 失敗代碼.上游)
-        return _讀成回應(回來)
+        return _讀成回應(回應資料)
 
     def _第一個型號(self, 逾時秒: float) -> str:
         """**不寫死型號**——寫死的話換一顆模型就要改 nova 的原始碼。"""
-        表 = self._打(f"{self.網址}/models", 內容=None, 逾時秒=min(逾時秒, _探型號逾時秒))
-        return str(表["data"][0]["id"])
+        模型清單 = self._發出請求(
+            f"{self.網址}/models", 內容=None, 逾時秒=min(逾時秒, _探型號逾時秒)
+        )
+        return str(模型清單["data"][0]["id"])
 
     def _送出對話(self, 提示: str, *, 型號: str, 逾時秒: float) -> dict[str, Any]:
-        return self._打(
+        return self._發出請求(
             f"{self.網址}/chat/completions",
             內容={"model": 型號, "messages": [{"role": "user", "content": 提示}]},
             逾時秒=逾時秒,
         )
 
-    def _打(self, 網址: str, *, 內容: dict[str, Any] | None, 逾時秒: float) -> dict[str, Any]:
+    def _發出請求(self, 網址: str, *, 內容: dict[str, Any] | None, 逾時秒: float) -> dict[str, Any]:
         身體 = None if 內容 is None else json.dumps(內容).encode("utf-8")
-        求 = urllib.request.Request(  # noqa: S310 —— 網址由設定給定，不吃模型輸出
+        請求 = urllib.request.Request(  # noqa: S310 —— 網址由設定給定，不吃模型輸出
             網址, data=身體, headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(求, timeout=逾時秒) as 回:  # noqa: S310 —— 同上
+        with urllib.request.urlopen(請求, timeout=逾時秒) as 回:  # noqa: S310 —— 同上
             讀到: dict[str, Any] = json.loads(回.read().decode("utf-8"))
         return 讀到
 
@@ -135,17 +145,17 @@ def _建立失敗回應(訊息: str, 代碼: 失敗代碼, *, 結束碼: int = 1
     )
 
 
-def _讀成回應(回來: dict[str, Any]) -> 回應:
-    用 = 回來.get("usage") or {}
+def _讀成回應(回應資料: dict[str, Any]) -> 回應:
+    用量資料 = 回應資料.get("usage") or {}
     return 回應(
-        文字=str(回來["choices"][0]["message"]["content"]),
+        文字=str(回應資料["choices"][0]["message"]["content"]),
         終局=終局.成功,
         失敗代碼=失敗代碼.無,
         原始結束碼=0,
-        對話識別碼=回來.get("id"),
+        對話識別碼=回應資料.get("id"),
         用量=用量(
-            輸入token=int(用.get("prompt_tokens", 0)),
-            輸出token=int(用.get("completion_tokens", 0)),
+            輸入token=int(用量資料.get("prompt_tokens", 0)),
+            輸出token=int(用量資料.get("completion_tokens", 0)),
             # 本地跑沒有 API 帳單。**事實不是估算。**
             成本美金=0.0,
         ),
