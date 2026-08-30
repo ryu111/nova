@@ -249,6 +249,14 @@ def 建規則表(根目錄: Path) -> list[規則]:
             階段=測試,
         ),
         規則(
+            代碼="registered-mutation",
+            名稱="登記負控（精確變異）",
+            閘點=frozenset({"ci"}),
+            負責層="測試",
+            檢查=_外部指令(根目錄, "pytest", "tests/負控/test_登記的變異會被殺.py", "-q"),
+            階段=測試,
+        ),
+        規則(
             代碼="serial-ratio",
             名稱="serial 測試佔比（阿姆達爾定律門禁）",
             閘點=frozenset({"ci"}),
