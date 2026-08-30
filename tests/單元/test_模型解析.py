@@ -213,27 +213,49 @@ class Test診斷不准被自己的罐頭句擋掉:
 
 
 class Test權限被擋要分得出來:
-    """`unknown` 是三種完全不同處境的垃圾桶，處理方式卻相反。
+    """agy 在 headless 模式拒絕工具時，這是環境層的確定失敗。
 
-    真實案例（PR #57 撿回 stderr 之後才看得到的那一行）：
+    真實案例（PR #57 撿回 stderr 之後才看得到的那一行，這次是 `command`）：
 
-        jetski: no output produced — a tool required the "read_url" permission
+        jetski: no output produced — a tool required the "command" permission
         that headless mode cannot prompt for, so it was auto-denied.
 
-    這條的處置跟其他 `unknown` 相反：**換一顆腦沒有用**——
-    下一顆撞的是同一堵牆（同一套沙箱、同一份權限旗標），
-    只是多燒一次 token。要動的是沙箱設定或授權，不是模型。
-
-    所以它必須先分得出來，`接力腦` 才有辦法不去換。
+    工具在第一步就被權限系統拒絕，沒有任何動作發生；不能把它降成
+    「可能已經做了一半」的結果未知。診斷也要保留供應商、工具與權限名稱，
+    人才能去修環境，而不是去猜工作流有沒有半成品。
     """
 
-    def test_agy的auto_deny要分成權限被擋(self) -> None:
+    def test_agy的auto_deny要分成確定失敗(self) -> None:
         信封 = json.dumps({"status": "SUCCESS", "response": ""})
         診斷 = (
-            'jetski: no output produced — a tool required the "read_url" permission '
-            "that headless mode cannot prompt for, so it was auto-denied."
+            'agy: jetski: no output produced — the "run_command" tool '
+            'required the "command" permission that headless mode cannot prompt for, '
+            "so it was auto-denied."
         )
-        assert 解析agy(信封, 0, 診斷).失敗代碼 is 失敗代碼.權限被擋
+        答 = 解析agy(信封, 0, 診斷)
+        assert 答.失敗代碼 is 失敗代碼.權限被擋
+        assert 答.終局 is 終局.確定失敗, "權限在模型開始前被拒，不能算結果未知"
+
+    def test_agy的auto_deny訊息要指得出家工具和權限(self) -> None:
+        信封 = json.dumps({"status": "SUCCESS", "response": ""})
+        診斷 = (
+            'agy: jetski: no output produced — the "run_command" tool '
+            'required the "command" permission that headless mode cannot prompt for, '
+            "so it was auto-denied."
+        )
+        答 = 解析agy(信封, 0, 診斷)
+
+        for 片段 in (
+            "agy",
+            "run_command",
+            '"command"',
+            "--add-dir",
+            "檔案存取",
+            "headless",
+            "auto-denied",
+        ):
+            assert 片段 in 答.文字, f"權限被拒的環境證據少了 {片段!r}：{答.文字}"
+        assert 答.終局 is 終局.確定失敗, "環境層失敗的訊息不能伴隨結果未知"
 
     def test_codex的沙箱拒絕要分成權限被擋(self) -> None:
         """實測原文（設計文件 02 有貼）：
