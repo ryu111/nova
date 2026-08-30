@@ -17,6 +17,20 @@ def test_登記的變異會被殺(一筆: 變異) -> None:
     執行器.執行變異(一筆, 根目錄=專案根目錄)
 
 
+def test_本地腦的防護都有固定負控() -> None:
+    """本地腦的每條保證都要真的交給固定負控 runner 執行。"""
+    應被負控釘住 = {
+        "tests/整合/test_命令列.py::Test本地腦沒有審查資格::test_本地腦不准當審查員",
+        "tests/單元/test_派工門面.py::test_門面不准本地腦當審查員",
+        "tests/單元/test_本地派工.py::test_能力未量到前本地腦只保留手動指定",
+    }
+    已登記 = {測試 for 一筆 in 登記 for 測試 in 一筆.該紅}
+
+    assert 應被負控釘住 <= 已登記, (
+        f"本地腦的防護沒有都登進固定負控：{sorted(應被負控釘住 - 已登記)}"
+    )
+
+
 def test_存活變異會讓runner紅() -> None:
     with pytest.raises(執行器.負控錯誤, match="SURVIVED"):
         執行器._判定結果(0, 已收集=True, 逾時=False, 預期掛住=False)
@@ -33,6 +47,56 @@ def test_點錯測試會先報WRONG_TEST() -> None:
     )
     with pytest.raises(執行器.負控錯誤, match="WRONG_TEST"):
         執行器._判定覆蓋(一筆, {6})
+
+
+def test_行號由操作推導且點錯先報WRONG_TEST_正常變異是KILLED(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不填行號時，走不到錨點的測試要先被辨認；真正走到的才算 KILLED。"""
+    操作 = 替換一次("思考深度: str", '思考深度: str = "high"')
+    點錯的變異 = 變異(
+        識別="推導位置點錯",
+        目標檔=Path("src/nova/契約/派工.py"),
+        操作=操作,
+        必須覆蓋=frozenset(),
+        該紅=("tests/負控/test_登記的變異會被殺.py::test_存活變異會讓runner紅",),
+        最多秒=2.0,
+    )
+
+    with pytest.raises(執行器.負控錯誤, match="WRONG_TEST"):
+        執行器.執行變異(點錯的變異, 根目錄=專案根目錄)
+
+    正常的變異 = 變異(
+        識別="推導位置正常",
+        目標檔=點錯的變異.目標檔,
+        操作=操作,
+        必須覆蓋=frozenset(),
+        該紅=("tests/單元/test_派工表.py::test_派法必須明確指定思考深度",),
+        最多秒=2.0,
+    )
+    判決: list[str] = []
+    原本判定結果 = 執行器._判定結果
+
+    def 記錄判決(
+        退出碼: int | None,
+        *,
+        已收集: bool,
+        逾時: bool,
+        預期掛住: bool,
+    ) -> str:
+        結果 = 原本判定結果(
+            退出碼,
+            已收集=已收集,
+            逾時=逾時,
+            預期掛住=預期掛住,
+        )
+        判決.append(結果)
+        return 結果
+
+    monkeypatch.setattr(執行器, "_判定結果", 記錄判決)
+    執行器.執行變異(正常的變異, 根目錄=專案根目錄)
+
+    assert 判決 == ["KILLED"]
 
 
 @pytest.mark.parametrize("內容", ["", "甲甲"])

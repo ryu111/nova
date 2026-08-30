@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping
 from nova.契約.工作流 import 階段代碼, 預設最多token, 預設最多步數
 from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 預設逾時秒
+from nova.契約.觸發 import 喚醒來源
 from nova.載體.模型.轉接 import 思考深度們
 
 #: 一個子命令的處理函式。`argparse.Namespace` → 退出碼。
@@ -91,7 +92,7 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
     剖析.add_argument(
         "--用",
         default=None,
-        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+        help="哪一家：claude、codex、agy、local。逗號分隔＝接力（前一顆失敗換下一顆）",
     )
     剖析.add_argument(
         "--工作",
@@ -198,6 +199,12 @@ def _加委派類(
         action="store_true",
         help="題目從收件匣拿最前面那一件，不從命令列給。做完會把原始請求搬到成果旁邊",
     )
+    流剖析.add_argument(
+        "--喚醒來源",
+        choices=[來源.value for 來源 in 喚醒來源],
+        default=喚醒來源.人手動敲.value,
+        help="誰讓這一輪醒來；排程必須明傳 schedule",
+    )
     _一輪的旗標(流剖析)
 
     跑剖析 = 子.add_parser("跑", help="敲一句話就開始做：先落成收件檔，再走 工作流 --從收件匣")
@@ -221,9 +228,18 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
     剖析.add_argument(
         "--審查用",
         default=None,
-        help="審查員用哪一家。必須跟 --用 不同。不給就照派工表（推理＝sol）",
+        help="審查員用哪一家。判準是對話不是家族名，同一家也行。不給就照派工表（推理＝sol）",
     )
     剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
+    剖析.add_argument(
+        "--逾時", type=float, default=None, help="每一階最多跑幾秒。不給就用各階段預設"
+    )
+    剖析.add_argument(
+        "--模型",
+        default=None,
+        help="這一次用哪顆型號，蓋掉派工表的策略。"
+        "用在『這一家的某個池用完了、但它代跑的另一個池還有』",
+    )
     剖析.add_argument(
         "--提示檔",
         default=None,
@@ -319,8 +335,22 @@ def _加觀測類(
     狀態剖析 = 子.add_parser("狀態", help="現在怎麼樣、有什麼需要你（上次醒來、佇列、卡住的）")
     狀態剖析.set_defaults(執行=處理們["狀態"])
 
+    線剖析 = 子.add_parser("線", help="看工作線的唯讀狀態")
+    線剖析.set_defaults(執行=處理們["線"])
+
     收件剖析 = 子.add_parser("收件", help="看收件匣：丟一個檔進去就是派一次工")
     收件剖析.set_defaults(執行=處理們["收件"])
+
+    收剖析 = 子.add_parser("收", help="跑閘、提交、推送、等 CI，通過後合併並刪分支")
+    收剖析.set_defaults(執行=處理們["收"])
+    收剖析.add_argument("提交訊息", nargs="*", help="commit 與 PR 標題；不給就用預設訊息")
+    收剖析.add_argument("-m", "--訊息", default=None, help="commit 與 PR 標題")
+    收剖析.add_argument("--工作目錄", default=None, help="要收尾的專案；預設是現在這個目錄")
+    收剖析.add_argument(
+        "--等CI秒", type=float, default=1800.0, help="最多等 required checks 幾秒（預設 1800）"
+    )
+    收剖析.add_argument("--帳本目錄", default=None, help="閘的帳本寫到哪")
+    收剖析.add_argument("--不記帳", action="store_true", help="閘不要留執行紀錄")
 
     成果剖析 = 子.add_parser("已處理", help="看成果帳本：哪幾件工作做完了、收在哪種結局")
     成果剖析.set_defaults(執行=處理們["已處理"])

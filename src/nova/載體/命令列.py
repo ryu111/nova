@@ -36,10 +36,12 @@ from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型
-from nova.載體.判準 import 判準指令, 在哪跑, 建判準, 建重構判準
+from nova.契約.觸發 import 喚醒來源
+from nova.載體.判準 import 判準指令, 建判準, 建重構判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
-from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
+from nova.載體.專案脈絡 import 專案執行脈絡, 建專案執行脈絡
+from nova.載體.已處理 import 列出成果, 歸檔
 from nova.載體.帳本 import (
     不記帳本,
     專案識別,
@@ -47,7 +49,6 @@ from nova.載體.帳本 import (
     指定識別碼的環境變數,
     新執行識別碼,
     開帳本,
-    預設帳本目錄,
 )
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件, 還在跑的有哪些
 from nova.載體.排程 import 啟動器名, 怎麼跑, 排程標籤, 排程設定, 排程預算, 確保啟動器在
@@ -60,10 +61,10 @@ from nova.載體.收件 import (
     接著排,
     收下一件,
     收件單,
-    收件目錄,
     最多輪次,
 )
 from nova.載體.模型.接力 import 接力腦
+from nova.載體.模型.本地 import 審查資格理由
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.殘骸 import 加上寫檔指示, 撿回殘骸
@@ -86,6 +87,7 @@ from nova.載體.狀態檔 import (
 from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
+from nova.載體.線 import 執行線
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
 from nova.載體.語言 import 找非繁體字
@@ -107,6 +109,17 @@ from nova.迴圈.角色工廠 import 建角色表, 角色藍圖
 # 結果未知要跟確定失敗分開，腳本才知道「這個不准重跑」。
 未知 = 3
 _終局的退出碼 = {終局.成功: 放行, 終局.確定失敗: 閘紅, 終局.結果未知: 未知}
+
+
+def _專案脈絡(參數: argparse.Namespace) -> 專案執行脈絡:
+    """同一個 CLI 參數只建立一次專案執行脈絡。"""
+    脈絡 = getattr(參數, "專案脈絡", None)
+    if isinstance(脈絡, 專案執行脈絡):
+        return 脈絡
+    工作目錄 = getattr(參數, "工作目錄", None) or getattr(參數, "根目錄", None)
+    脈絡 = 建專案執行脈絡(工作目錄)
+    參數.專案脈絡 = 脈絡
+    return 脈絡
 
 
 @dataclasses.dataclass(slots=True)
@@ -140,7 +153,7 @@ def _印結果(結果表: list[檢查結果]) -> int:
 
 
 def _子命令_閘(參數: argparse.Namespace) -> int:
-    根目錄 = Path(參數.根目錄).resolve()
+    根目錄 = _專案脈絡(參數).根目錄
     try:
         with _開帳(參數) as 帳:
             結果表 = 跑閘(參數.閘點, 建規則表(根目錄), 提前停止=not 參數.全部跑完, 帳=帳)
@@ -180,7 +193,7 @@ def _子命令_檢查指令(參數: argparse.Namespace) -> int:
         return 阻擋
     if not 指令:
         return 放行
-    專案 = 在哪跑(None)
+    專案 = _專案脈絡(參數).根目錄
     通過, 原因 = 檢查指令(指令, 專案=專案, 會話=會話)
     if 通過:
         return 放行
@@ -202,7 +215,7 @@ def _該擋的理由(載荷: object) -> str | None:
     檔 = 工具輸入.get("file_path") if isinstance(工具輸入, dict) else None
     if not isinstance(檔, str) or not 檔:
         return None
-    專案 = 在哪跑(None)
+    專案 = 建專案執行脈絡().根目錄
     if not 在管轄範圍嗎(Path(檔), 根目錄=專案):
         return None
     會話 = 載荷.get("session_id")
@@ -248,7 +261,7 @@ def _子命令_檢查編輯(參數: argparse.Namespace) -> int:
 def _子命令_繞過(參數: argparse.Namespace) -> int:
     """記下「這次為什麼自己動手」。**理由才是這條規則真正的產出。**"""
     try:
-        落點 = 記下繞過(參數.會話, 參數.因為, 專案=在哪跑(None))
+        落點 = 記下繞過(參數.會話, 參數.因為, 專案=_專案脈絡(參數).根目錄)
     except ValueError as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
@@ -322,7 +335,7 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     挑法 = _挑腦(參數)
     if 挑法 is None:
         return 阻擋
-    沒憑證 = _秘密先交出去(在哪跑(參數.工作目錄))
+    沒憑證 = _秘密先交出去(_專案脈絡(參數).根目錄)
     if 沒憑證 is not None:
         return 沒憑證
     擋 = _預算先擋一下(參數)
@@ -358,7 +371,7 @@ def _丟到背景(參數: argparse.Namespace) -> int:
     if len(參) == len(sys.argv[1:]):
         print("--背景 只能從命令列用（重新發射靠的是 sys.argv）", file=sys.stderr)
         return 阻擋
-    落點目錄 = 狀態根目錄() / "專案" / 專案識別(在哪跑(參數.工作目錄)) / _背景資料夾
+    落點目錄 = 狀態根目錄() / "專案" / 專案識別(_專案脈絡(參數).根目錄) / _背景資料夾
     落點目錄.mkdir(parents=True, exist_ok=True)
     # **一件事只准有一個號碼。** 這裡編一個、帳本另外編一個的話，
     # 使用者拿到的識別碼在 `nova 帳本` 上查不到——而那看起來像「帳沒記」。
@@ -411,7 +424,7 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
                 選項=呼叫選項(
                     模型=這次.模,
                     思考深度=這次.思考深度,
-                    工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
+                    工作目錄=_專案脈絡(參數).根目錄,
                     逾時秒=參數.逾時,
                     權限=這次.可以做什麼,
                     隔離設定=not 參數.不隔離設定,
@@ -461,7 +474,7 @@ def _子命令_重構(參數: argparse.Namespace) -> int:
     | 最多秒數 | `--逾時`（預設 1800） |
     | 結果未知不重跑 | 終局映射回 3，腳本照規矩不准重跑 |
     """
-    根 = 在哪跑(參數.工作目錄)
+    根 = _專案脈絡(參數).根目錄
     前 = 拍快照(根)
     碼 = _子命令_問(參數, 角色=角色提示.重構員)
     動了 = 動到測試了嗎(前, 拍快照(根))
@@ -510,7 +523,7 @@ def _帳本目錄(參數: argparse.Namespace) -> Path:
     """
     if 參數.帳本目錄:
         return Path(參數.帳本目錄)
-    return 預設帳本目錄(在哪跑(None))
+    return _專案脈絡(參數).帳本
 
 
 #: 帳本檔名開頭的時戳格式。**跟 `帳本.新執行識別碼` 是同一個格式**——
@@ -691,7 +704,7 @@ def _階段的派法(階段: 階段代碼) -> 派法:
 
 
 def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
-    """把命令列的腦來源套到 TDD 藍圖，保留派工表的模型設定。"""
+    """把命令列的腦來源與逾時套到 TDD 藍圖，保留派工表的模型設定。"""
 
     def _整理腦來源(來源: str) -> tuple[str, ...]:
         return tuple(家.strip() for 家 in 來源.split(",") if 家.strip())
@@ -710,6 +723,10 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
             )
             continue
         結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型, 思考深度=藍圖.派法.思考深度))
+    if 參數.逾時 is not None:
+        結果 = [dataclasses.replace(藍圖, 逾時秒=參數.逾時) for 藍圖 in 結果]
+    if getattr(參數, "模型", None):
+        結果 = [dataclasses.replace(藍圖, 模型=參數.模型) for 藍圖 in 結果]
     return tuple(結果)
 
 
@@ -779,12 +796,18 @@ def _工作流前置檢查(參數: argparse.Namespace, 工作目錄: Path, 進�
     CI 沒裝三家 CLI，建腦當場 `FileNotFoundError`，路徑檢查根本走不到——
     本機綠、CI 紅，而且紅的理由跟這些檢查無關。
     只要參數就判得出來的東西，不該等到花了力氣之後才判。
+
+    這裡也守本地腦的資格：它是 9B 唯讀模型，不能成為工作流唯一的審查點。
     """
     # **不給旗標時要拿派工表挑出來的家去比**，不是跳過檢查——
     # 硬規則 5 守的是「誰真的被叫」，不是「使用者打了什麼字」。
-    重疊 = _哪幾家(參數.用, 階段代碼.測試) & _哪幾家(參數.審查用, 階段代碼.審查)
-    if 重疊:
-        return f"審查要換一顆腦：{'、'.join(sorted(重疊))} 同時出現在 --用 與 --審查用"
+    #
+    # 家族名重疊**不再是錯**（`#140`）：判準是對話不是家族名，
+    # 三家不給續接時本來就都是新對話。真正的自寫自評是跑在同一個對話裡，
+    # 而那在結構上不可能（`固定提示角色` 沒有續接欄位）。
+    審查家們 = _哪幾家(參數.審查用, 階段代碼.審查)
+    if (不合格理由 := 審查資格理由(審查家們)) is not None:
+        return 不合格理由
     if 進度檔 is not None:
         # 模型動得到工作目錄整棵樹。進度檔住在裡面的話，
         # 它會往裡面寫，而那份東西下一輪會被當成前情餵回去。
@@ -819,7 +842,7 @@ def _這次要做什麼(參數: argparse.Namespace) -> _題目 | int:
     排程的 log 會被永遠不會有人修的錯誤塞滿。
     """
     if 參數.從收件匣:
-        匣 = 收件目錄(在哪跑(None))
+        匣 = _專案脈絡(參數).收件
         收件 = 收下一件(匣)
         if 收件 is None:
             print(f"收件匣是空的（{匣}）", file=sys.stderr)
@@ -857,18 +880,21 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
         print(str(錯), file=sys.stderr)
         return 阻擋
     try:
-        丟一件(描述, 來源=你敲, 目錄=收件目錄(在哪跑(None)))
+        丟一件(描述, 來源=你敲, 目錄=_專案脈絡(參數).收件)
     except (ValueError, OSError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
     參數.從收件匣 = True
+    參數.喚醒來源 = 喚醒來源.人手動敲.value
     return _子命令_工作流(參數)
 
 
 def _子命令_工作流(參數: argparse.Namespace) -> int:
     """跑一輪 TDD：測試 → 驗證紅 → 實作 → 驗證綠 → 審查。
 
-    `--審查用` 必須跟 `--用` 不同家——自己審自己等於沒審（硬規則 4）。
+    `--審查用` 可以跟 `--用` 同一家（`#140`）——判準是**對話**不是家族名，
+    三家不給續接時本來就都是新對話。真正要擋的自寫自評是跑在同一個對話裡，
+    而那在結構上不可能：`固定提示角色` 組呼叫選項時沒有續接這個欄位。
 
     **一次只准跑一個**（見 `載體.單例`）。排程每 15 分鐘叫一次而一輪可能跑
     40 分鐘，沒有這道鎖就會三個一起燒預算、一起改同一份原始碼。
@@ -880,10 +906,14 @@ def _子命令_工作流(參數: argparse.Namespace) -> int:
     except 拿不到鎖 as 忙:
         print(str(忙), file=sys.stderr)
         這次.結果, 這次.理由 = 在忙, str(忙)
-        # **排程撞到就安靜讓開（0），人手動下的指令是真衝突（2）。**
+        # **排程撞到就安靜讓開（0），其他喚醒來源是真衝突（2）。**
         # 排程本來就會在忙的時候醒來；把它印成錯誤的話，log 會被永遠
         # 不會有人修的錯誤塞滿，然後真的錯誤就被淹掉了。
-        碼 = 放行 if 參數.從收件匣 else 阻擋
+        碼 = (
+            放行
+            if getattr(參數, "喚醒來源", 喚醒來源.人手動敲.value) == 喚醒來源.排程到期.value
+            else 阻擋
+        )
     _記下這次醒來(參數, 這次, 碼)
     return 碼
 
@@ -894,7 +924,7 @@ def _記下這次醒來(參數: argparse.Namespace, 這次: _醒來, 碼: int) -
     歷史已經有兩本了（事件帳本、成果帳）；再開第三本 append-only 的東西
     只會跟前兩本漂移。這裡答的是「現在怎麼樣」。
     """
-    專案 = 在哪跑(參數.工作目錄)
+    專案 = _專案脈絡(參數).根目錄
     寫下現況(
         現況(
             上次醒來=現在幾點(),
@@ -909,7 +939,7 @@ def _記下這次醒來(參數: argparse.Namespace, 這次: _醒來, 碼: int) -
 
 def _工作流鎖(參數: argparse.Namespace) -> Path:
     """鎖按專案分——兩個不同的專案本來就該可以同時跑。"""
-    return _已處理目錄(參數).parent / "工作流.鎖"
+    return _專案脈絡(參數).鎖
 
 
 def _工作流開跑前(
@@ -950,7 +980,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
     預設是「做完了」，所以漏填會讓一次被擋下的醒來記成做完了，
     那比不記更糟。由 `tests/驗收/test_需要你的事都在這.py` 守著。
     """
-    工作目錄 = 在哪跑(參數.工作目錄)
+    工作目錄 = _專案脈絡(參數).根目錄
     進度檔 = None if 參數.進度檔 is None else Path(參數.進度檔)
     擋 = _工作流開跑前(參數, 工作目錄, 進度檔, 這次)
     if 擋 is not None:
@@ -1037,7 +1067,12 @@ def _也許接著排(收件: 收件單, *, 果: 工作流結果, 識別: str, �
     """
     if 碼 != 護欄碼:
         return
-    票 = 接著排(收件, 前情=_走到哪(果.軌跡), 上一輪=識別, 目錄=收件目錄(在哪跑(None)))
+    票 = 接著排(
+        收件,
+        前情=_走到哪(果.軌跡),
+        上一輪=識別,
+        目錄=收件.處理中路徑.parent.parent,
+    )
     if 票 is None:
         # **輪次用完要看得見。** 靜靜不排的話，「做不完」跟「做完了」
         # 在 nova 狀態 上長得一模一樣，而那正是最貴的那種看不見。
@@ -1106,7 +1141,7 @@ def _已處理目錄(參數: argparse.Namespace) -> Path:
     """跟 `_帳本目錄` 用同一個專案鍵——兩本帳要住在同一個專案資料夾底下。"""
     if 參數.帳本目錄:
         return Path(參數.帳本目錄).parent / "已處理"
-    return 已處理目錄(在哪跑(None))
+    return _專案脈絡(參數).已處理
 
 
 def _子命令_已處理(參數: argparse.Namespace) -> int:
@@ -1114,7 +1149,7 @@ def _子命令_已處理(參數: argparse.Namespace) -> int:
 
     **有讀取端才算補了成果帳本**——只有寫端的話那是寫檔案給沒人看。
     """
-    目錄 = 已處理目錄(在哪跑(None))
+    目錄 = _專案脈絡(參數).已處理
     筆們 = 列出成果(目錄, 上限=參數.最近)
     if not 筆們:
         print(f"還沒有任何成果（會寫在 {目錄}）")
@@ -1163,7 +1198,7 @@ def _子命令_排程(參數: argparse.Namespace) -> int:
     ——那是使用者系統上的狀態，不是 nova 的。跟「不准自動改使用者的設定檔」
     同一條界線：nova 產生，人安裝。
     """
-    專案 = 在哪跑(None)
+    專案 = _專案脈絡(參數).根目錄
     # **在自己的 venv 裡建一個看得出是誰的啟動器**，不是使用者系統上的狀態，
     # 所以這一步 nova 自己做（`launchctl load` 那一步才是人的）。
     # 每次重印都建一次：`uv sync` 之類的動作可能把它清掉，而清掉之後
@@ -1213,8 +1248,7 @@ def _子命令_秘密(參數: argparse.Namespace) -> int:
     印值的話這個子命令自己就變成洩漏管道——而它存在的理由是讓人查得動
     「為什麼子程序沒拿到憑證」，那個問題只需要鍵名。
     """
-    del 參數
-    專案 = 在哪跑(None)
+    專案 = _專案脈絡(參數).根目錄
     路徑 = 祕密檔(專案)
     print(f"祕密檔：{路徑}")
     if not 路徑.is_file():
@@ -1257,8 +1291,8 @@ def _子命令_狀態(參數: argparse.Namespace) -> int:
 
     **還沒有狀態不是錯誤**，回 0。回非零的話狀態列會一直閃紅。
     """
-    del 參數
-    專案 = 在哪跑(None)
+    脈絡 = _專案脈絡(參數)
+    專案 = 脈絡.根目錄
     路徑 = 狀態檔(專案)
     print(f"狀態檔：{路徑}")
     現 = 讀現況(路徑)
@@ -1266,10 +1300,10 @@ def _子命令_狀態(參數: argparse.Namespace) -> int:
         print("  （還沒醒來過。跑一次 nova 跑 或 nova 工作流 --從收件匣 就會有）")
     else:
         _印上次醒來(現)
-        _印佇列(專案)
+        _印佇列(脈絡)
     # **不管醒來過沒有都要印。** 背景派出去的活跟「排程有沒有醒過」無關——
     # 提早 return 的話，第一次用 nova 的人派了一份研究出去卻什麼都看不到。
-    _印還在跑的(預設帳本目錄(專案))
+    _印還在跑的(脈絡.帳本)
     return 放行
 
 
@@ -1281,9 +1315,9 @@ def _印上次醒來(現: 現況) -> None:
         print(f"    帳在 nova 帳本 {現.上次執行識別碼}")
 
 
-def _印佇列(專案: Path) -> None:
-    匣 = 收件目錄(專案)
-    處理中 = 匣 / "處理中"
+def _印佇列(脈絡: 專案執行脈絡) -> None:
+    匣 = 脈絡.收件
+    處理中 = 脈絡.處理中
     卡住的 = len([路 for 路 in 處理中.glob("*") if 路.is_file()]) if 處理中.is_dir() else 0
     print(f"  佇列上 {len(待處理(匣))} 件")
     if 卡住的:
@@ -1298,10 +1332,10 @@ def _子命令_收件(參數: argparse.Namespace) -> int:
     **這一格只讀不跑。** 要跑是 `nova 工作流 --從收件匣`——另外開一條執行路徑
     的話，預算、判準、歸檔就會有兩份，而兩份遲早會不一樣。
     """
-    del 參數
-    目錄 = 收件目錄(在哪跑(None))
+    脈絡 = _專案脈絡(參數)
+    目錄 = 脈絡.收件
     等著的 = 待處理(目錄)
-    處理中目錄 = 目錄 / "處理中"
+    處理中目錄 = 脈絡.處理中
     處理中 = sorted(處理中目錄.glob("*")) if 處理中目錄.is_dir() else []
     print(f"收件匣：{目錄}")
     if not 等著的 and not 處理中:
@@ -1315,6 +1349,77 @@ def _子命令_收件(參數: argparse.Namespace) -> int:
         # （跟退出碼 3「腳本不准重跑」同一條規則）。
         print(f"  ⚠ 沒收尾  {路.name}（收下了但沒寫下結果，可能做了一半）")
     return 放行
+
+
+def _跑收尾指令(根目錄: Path, *指令: str, 逾時秒: float | None = None) -> tuple[int, str]:
+    """在專案裡跑一個收尾指令，回傳 nova 退出碼與輸出。"""
+    try:
+        結果 = subprocess.run(  # noqa: S603 —— 收尾指令由這個節點固定組出
+            list(指令),
+            cwd=根目錄,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=逾時秒,
+        )
+    except subprocess.TimeoutExpired:
+        return 未知, f"指令等不到結果（{' '.join(指令)}）"
+    except OSError as 錯:
+        return 閘紅, f"指令跑不起來（{' '.join(指令)}）：{錯}"
+    輸出 = (結果.stdout + 結果.stderr).strip()
+    if 結果.returncode:
+        return 閘紅, 輸出 or f"指令退出碼 {結果.returncode}：{' '.join(指令)}"
+    return 放行, 輸出
+
+
+def _跑並印收尾指令(根目錄: Path, *指令: str, 逾時秒: float | None = None) -> int:
+    """跑一個收尾指令並印出它的輸出。"""
+    碼, 輸出 = _跑收尾指令(根目錄, *指令, 逾時秒=逾時秒)
+    if 輸出:
+        print(輸出)
+    return 碼
+
+
+def _收尾閘(參數: argparse.Namespace, 根目錄: Path) -> int:
+    """只跑提交閘；閘紅時不碰 git 與 gh。"""
+    try:
+        with _開帳(參數) as 帳:
+            結果表 = 跑閘("提交", 建規則表(根目錄), 提前停止=True, 帳=帳)
+    except (OSError, ValueError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 閘紅
+    return _印結果(結果表)
+
+
+def _子命令_收(參數: argparse.Namespace) -> int:
+    """確定性收尾：閘 → commit → push → PR → required CI → merge。"""
+    根 = _專案脈絡(參數).根目錄
+    if (碼 := _收尾閘(參數, 根)) != 放行:
+        return 碼
+
+    訊息 = 參數.訊息 or " ".join(參數.提交訊息) or "nova：收尾"
+    for 指令 in (
+        ("git", "add", "-A"),
+        ("git", "commit", "-m", 訊息),
+        ("git", "push", "--set-upstream", "origin", "HEAD"),
+        ("gh", "pr", "create", "--title", 訊息, "--body", 訊息),
+    ):
+        if (碼 := _跑並印收尾指令(根, *指令)) != 放行:
+            return 碼
+
+    if (
+        碼 := _跑並印收尾指令(根, "gh", "pr", "checks", "--required", "--watch", 逾時秒=參數.等CI秒)
+    ) != 放行:
+        return 碼
+
+    return _跑並印收尾指令(
+        根,
+        "gh",
+        "pr",
+        "merge",
+        "--squash",
+        "--delete-branch",
+    )
 
 
 def _子命令_帳本(參數: argparse.Namespace) -> int:
@@ -1438,7 +1543,7 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
     if not 描述.strip():
         print("沒有描述可以生（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
-    目錄 = 在哪跑(參數.工作目錄)
+    目錄 = _專案脈絡(參數).根目錄
     try:
         with _開帳(參數) as 帳:
             果 = 生圖(
@@ -1490,7 +1595,9 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "排程": _子命令_排程,
     "秘密": _子命令_秘密,
     "狀態": _子命令_狀態,
+    "線": 執行線,
     "收件": _子命令_收件,
+    "收": _子命令_收,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
     "生圖": _子命令_生圖,
@@ -1501,6 +1608,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
 def 主程式(argv: list[str] | None = None) -> int:
     """進入點。回傳退出碼：0 放行、1 閘紅／確定失敗、2 阻擋、3 結果未知。"""
     參數 = 建剖析器(處理們).parse_args(argv)
+    _專案脈絡(參數)
     return int(參數.執行(參數))
 
 
