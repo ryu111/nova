@@ -287,6 +287,7 @@ class _要問的東西:
     提示: str
     用: str
     模: str | None
+    思考深度: str | None
     可以做什麼: 權限
     屍: Path | None
 
@@ -334,8 +335,8 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
             print("--輸出檔 要它寫檔，就得給 --可編輯（或 --全開）", file=sys.stderr)
             return 阻擋
         提示 = 加上寫檔指示(提示, 屍)
-    用, 模 = 挑法
-    return _要問的東西(提示=提示, 用=用, 模=模, 可以做什麼=可以做什麼, 屍=屍)
+    用, 模, 深度 = 挑法
+    return _要問的東西(提示=提示, 用=用, 模=模, 思考深度=深度, 可以做什麼=可以做什麼, 屍=屍)
 
 
 #: 背景輸出放哪。跟帳本、收件匣同一個專案資料夾——住專案外面、用專案當鍵。
@@ -409,7 +410,7 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
                 這次.提示,
                 選項=呼叫選項(
                     模型=這次.模,
-                    思考深度=參數.思考深度,
+                    思考深度=這次.思考深度,
                     工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
                     逾時秒=參數.逾時,
                     權限=這次.可以做什麼,
@@ -473,22 +474,25 @@ def _子命令_重構(參數: argparse.Namespace) -> int:
     return 護欄碼
 
 
-def _挑腦(參數: argparse.Namespace) -> tuple[str, str | None] | None:
-    """決定這次用哪條鏈、哪顆模型。回 None ＝ 參數矛盾，呼叫端該退出。
+def _挑腦(參數: argparse.Namespace) -> tuple[str, str | None, str | None] | None:
+    """決定這次用哪條鏈、哪顆模型、哪種思考深度。回 None ＝ 參數矛盾，呼叫端該退出。
 
     `--工作` 查派工表（策略寫在表裡不是寫在我腦裡）；`--用` 是手動指定。
     **兩個都給是矛盾不是「其中一個優先」**——猜一個會讓策略被無聲推翻。
     """
-    if 參數.工作 and (參數.用 or 參數.模型):
-        print("--工作 已經決定了要用誰跟哪顆模型，不要同時給 --用 或 --模型", file=sys.stderr)
+    if 參數.工作 and (參數.用 or 參數.模型 or 參數.思考深度):
+        print(
+            "--工作 已經決定了要用誰、哪顆模型與思考深度，不要同時給 --用、--模型 或 --思考深度",
+            file=sys.stderr,
+        )
         return None
     if 參數.工作:
         派 = 怎麼派(工作種類(參數.工作))
-        return ",".join(派.腦們), 派.模型
+        return ",".join(派.腦們), 派.模型, 派.思考深度
     if not 參數.用:
         print("要給 --用（哪一家）或 --工作（照派工表挑）", file=sys.stderr)
         return None
-    return 參數.用, 參數.模型
+    return 參數.用, 參數.模型, 參數.思考深度
 
 
 def _挑權限(參數: argparse.Namespace) -> 權限:
@@ -699,12 +703,13 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
             結果.append(
                 dataclasses.replace(
                     藍圖,
-                    派法=派法(腦們=_整理腦來源(指名)),
+                    派法=dataclasses.replace(藍圖.派法, 腦們=_整理腦來源(指名)),
                     模型=None,
+                    思考深度=None,
                 )
             )
             continue
-        結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型))
+        結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型, 思考深度=藍圖.派法.思考深度))
     return tuple(結果)
 
 
