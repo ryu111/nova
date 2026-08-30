@@ -16,7 +16,7 @@
 所以這支 runner 的測試不必碰任何 LLM 或子程序。
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -27,6 +27,8 @@ from nova.契約.工作流 import (
     判準,
     判準終局,
     執行器,
+    工作區判定,
+    工作區狀態,
     步驟結果,
     種類,
     結束,
@@ -37,6 +39,7 @@ from nova.契約.工作流 import (
 )
 from nova.契約.模型回應 import 終局
 from nova.契約.角色 import 角色
+from nova.載體.工作區 import 判定工作區, 拍工作區快照
 from nova.迴圈.審查 import 讀審查判定
 from nova.迴圈.狀態機 import TDD階段表, 下一步, 卡住了, 建索引
 
@@ -49,13 +52,17 @@ class 工作流結果:
     軌跡: tuple[步驟結果, ...]
 
 
-def 跑工作流(
+type 結果未知判定器 = Callable[[任務, 階段代碼], 工作區判定 | str]
+
+
+def 跑工作流(  # noqa: PLR0913 —— 結果未知判定是唯讀收場的唯一注入點
     任務: 任務,
     *,
     執行一步: 執行器,
     階段表: tuple[階段定義, ...] = TDD階段表,
     起點: 階段代碼 = 階段代碼.測試,
     停止: 停止條件 = 預設停止,
+    結果未知判定: 結果未知判定器 | None = None,
 ) -> 工作流結果:
     """從起點開始走，走到結束、撞到步數上限、或花完預算為止。
 
@@ -74,6 +81,8 @@ def 跑工作流(
 
     `階段表` 真的是走的那張表：這支不認全域的 `TDD階段表`，只認參數。
     收下卻不用等於**靜默忽略**——呼叫端拿到一次照舊的跑法，而且沒有任何訊號。
+
+    `結果未知判定` 只在結果未知時呼叫一次；不傳時查工作區的 git 狀態與 ci 閘。
     """
     索引 = 建索引(階段表)
     _檢查階段表(索引, 起點)
@@ -81,6 +90,7 @@ def 跑工作流(
     工作區雜湊們: list[str | None] = []
     已花token = 0
     目前: 階段代碼 | 結束 = 起點
+    用內建判定 = 結果未知判定 is None
     for _ in range(停止.最多步數):
         if isinstance(目前, 結束):
             return 工作流結果(結束=目前, 軌跡=tuple(軌跡))
@@ -103,10 +113,17 @@ def 跑工作流(
         if 沒進展 is not None:
             return 工作流結果(結束=結束(結束代碼.護欄, 沒進展), 軌跡=tuple(軌跡))
         定義 = 索引[目前]
+        # 必須在執行一步之前拍快照，事後拍就分不出沒被動過。
+        前快照 = 拍工作區快照(任務.工作目錄) if 用內建判定 else None
         結果 = 執行一步(定義, 任務, tuple(軌跡))
         軌跡.append(結果)
         工作區雜湊們.append(_工作區雜湊(任務.工作目錄) if 定義.種類 is 種類.判準 else None)
         已花token += 結果.花費.總token if 結果.花費 is not None else 0
+        if 結果.終局 is 終局.結果未知:
+            return 工作流結果(
+                結束=_結果未知收場(任務, 定義, 結果未知判定, 前快照, 階段表),
+                軌跡=tuple(軌跡),
+            )
         目前 = 下一步(定義, 結果)
     if isinstance(目前, 結束):
         return 工作流結果(結束=目前, 軌跡=tuple(軌跡))
@@ -139,6 +156,45 @@ def _工作區雜湊(工作目錄: Path) -> str | None:
         總雜湊.update(str(相對路徑).encode("utf-8"))
         總雜湊.update(sha256(檔案.read_bytes()).digest())
     return 總雜湊.hexdigest()
+
+
+def _結果未知收場(
+    任務: 任務,
+    定義: 階段定義,
+    唯讀判定: 結果未知判定器 | None,
+    前快照: Mapping[str, str] | None,
+    階段表: tuple[階段定義, ...],
+) -> 結束:
+    """結果未知時只做一次唯讀判定；判定失敗仍維持未知。
+
+    掛住（hang）不在這裡處理：跑閘目前無逾時參數，需由外部程序監控。
+    """
+    收尾 = 結束(結束代碼.護欄, f"{定義.名稱}的結果未知，不准自動重試（可能已經做了一半）")
+    try:
+        證據 = (
+            判定工作區(任務, 定義.代碼, 前快照=前快照, 階段表=階段表)
+            if 唯讀判定 is None
+            else 唯讀判定(任務, 定義.代碼)
+        )
+    except Exception as 錯:  # noqa: BLE001 —— 唯讀查詢失敗（包含簽章或檢查拋錯）仍要 fail-closed 交出未知證據
+        理由 = str(錯) or type(錯).__name__
+        return 結束(收尾.代碼, f"{收尾.原因}；唯讀判定失敗，仍為未知：{理由}")
+    證據文字 = _工作區判定文字(證據) if isinstance(證據, 工作區判定) else 證據
+    return 結束(收尾.代碼, f"{收尾.原因}；唯讀判定：{證據文字}")
+
+
+def _工作區判定文字(判定: 工作區判定) -> str:
+    """把結構化工作區判定格式化成收尾訊息。"""
+    if 判定.狀態 is 工作區狀態.綠:
+        文字 = f"工作區綠：{'、'.join(判定.綠的)}"
+    elif 判定.狀態 is 工作區狀態.紅:
+        文字 = f"工作區紅：{'、'.join(判定.紅的)}"
+    else:
+        文字 = "工作區沒被動過"
+    if 判定.未跑的階段:
+        尚未 = "、".join(階段.name for 階段 in 判定.未跑的階段)
+        文字 += f"；尚未執行：{尚未}"
+    return 文字
 
 
 def _預算不夠(已花: int, 上限: int, 估: int, 剩餘階數: int) -> str | None:
