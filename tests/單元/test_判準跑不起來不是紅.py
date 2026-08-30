@@ -96,3 +96,64 @@ def test_判準階段不准再有紅邊的特例() -> None:
     確定失敗那段 = 來源.split("if 結果.終局 is 終局.確定失敗:")[1].split("\n\n")[0]
 
     assert "種類.判準" not in 確定失敗那段, 確定失敗那段
+
+
+def _假pytest(tmp_path: Path, 退出碼: int) -> list[str]:
+    """一支名字叫 `pytest`、只負責回一個退出碼的腳本。
+
+    用 `sh 腳本` 跑而不是加執行位元：這一格要測的是**退出碼怎麼被翻譯**，
+    不是檔案權限。指令裡有 `pytest` 這個字，判準才知道該用誰的退出碼語意。
+    """
+    腳本 = tmp_path / "pytest"
+    腳本.write_text(f"exit {退出碼}\n", encoding="utf-8")
+    return ["sh", str(腳本)]
+
+
+class Test判準看得懂pytest的退出碼:
+    """**pytest 用退出碼分「測試沒過」與「根本沒驗到」，判準也要分。**
+
+    分界線原本劃在「Python 端有沒有丟例外」——那條線只抓得到指令不存在。
+    `pytest` 好端端地跑起來、卻回報「一支測試都沒收集到」時，Python 端
+    什麼例外都沒有，於是判準說紅、工作流回去「再實作一次」，每一輪夾一個模型階段。
+
+    exit 5 正是「研究題誤進 TDD 工作流」的準確形狀：沒有測試檔，
+    所以永遠收集不到，所以永遠燒下去。
+    """
+
+    def test_沒收集到任何測試是跑不起來(self, tmp_path: Path) -> None:
+        """exit 5 = 沒收集到任何測試。**沒驗到不等於驗不過。**"""
+        收場, 證據 = 建判準(_假pytest(tmp_path, 5))(任務(描述="", 工作目錄=tmp_path))
+
+        assert 收場 is 判準終局.跑不起來, 證據
+        assert "跑不起來" in 證據
+
+    def test_用法錯誤是跑不起來(self, tmp_path: Path) -> None:
+        """exit 4 = 旗標打錯或路徑不存在。改實作一百次也不會讓旗標變對。"""
+        收場, 證據 = 建判準(_假pytest(tmp_path, 4))(任務(描述="", 工作目錄=tmp_path))
+
+        assert 收場 is 判準終局.跑不起來, 證據
+        assert "跑不起來" in 證據
+
+    def test_有測試失敗還是紅(self, tmp_path: Path) -> None:
+        """exit 1 = 真的有測試沒過。**只改「沒驗到」那兩格**，回饋那一格不准動。"""
+        收場, _ = 建判準(_假pytest(tmp_path, 1))(任務(描述="", 工作目錄=tmp_path))
+
+        assert 收場 is 判準終局.紅
+
+    def test_全過還是綠(self, tmp_path: Path) -> None:
+        收場, _ = 建判準(_假pytest(tmp_path, 0))(任務(描述="", 工作目錄=tmp_path))
+
+        assert 收場 is 判準終局.綠
+
+    def test_不是pytest的指令退出碼5仍是紅(self, tmp_path: Path) -> None:
+        """**退出碼語意是各程式自己的知識，不是通用常識。**
+
+        nova 自己的 4 就是「護欄生效」而不是「用法錯誤」。把 4／5 無條件
+        翻成跑不起來，等於把別人給的回饋偽裝成環境問題——正好是
+        `判準終局.跑不起來` 這個型別存在理由的鏡像錯誤。
+
+        所以這個映射綁在 pytest 上；認不出來就退回當紅（降級方向安全）。
+        """
+        收場, _ = 建判準(["sh", "-c", "exit 5"])(任務(描述="", 工作目錄=tmp_path))
+
+        assert 收場 is 判準終局.紅
