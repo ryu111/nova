@@ -6,7 +6,7 @@
 > - 問法：使用者說「graph 去參考完官方 workflow 一共有幾種用法，然後有幾種 agent，
 >   怎麼調度使用」——盤點題不是設計題，要的是數字與出處
 > - 範圍：7 支 workflow 腳本、34 份 agent 定義、1 份 advanced-workflows 參考文件。
->   全文 522 處 `檔案:行號` 出處。**版本會變**，這是 2026-08-30 那份快取的樣子。
+>   全文 659 處 `檔案:行號` 出處（293 個不重複），模型自己回頭驗過每一個行號都存在。**版本會變**，這是 2026-08-30 那份快取的樣子。
 > - 第四題（對照 nova）那一段模型看不到 nova 的原始碼，
 >   所以它把 nova 現況一律標成「查不到」、推論一律標成「推測」——那是對的做法。
 
@@ -14,7 +14,7 @@
 
 ## 盤點範圍
 
-本題的 workflow 母體是 **7 支**腳本；逐檔清單如下（每一項均以該檔第一行作為檔案存在與內容起點的出處）：
+本題的 workflow 母體是 **7 支**腳本；逐檔清單如下（每一項均以該檔第一行作為檔案存在與內容起點的出處）：`plugins/claude-security/workflows/scan.js:1`、`plugins/code-modernization/workflows/extract-rules.js:1`、`plugins/code-modernization/workflows/harden-scan.js:1`、`plugins/code-modernization/workflows/portfolio-assess.js:1`、`plugins/code-modernization/workflows/reimagine-scaffold.js:1`、`plugins/code-modernization/workflows/uplift-deltas.js:1`、`plugins/code-modernization/workflows/uplift-migrate.js:1`。
 
 1. `plugins/claude-security/workflows/scan.js:1`
 2. `plugins/code-modernization/workflows/extract-rules.js:1`
@@ -26,7 +26,9 @@
 
 ## 分類結論：5 種可組合的執行形狀
 
-這 7 支腳本共出現 **5 種可組合的執行形狀**；這裡數的是控制流形狀，不把「固定 N／資料 N／預算 N」另算成形狀，而在下一節把 N 的來源逐段列清楚。
+這 7 支腳本共出現 **5 種可組合的執行形狀**；這裡數的是控制流形狀，不把「固定 N／資料 N／預算 N」另算成形狀，而在下一節把 N 的來源逐段列清楚。五種形狀的代表控制點分別在 `plugins/code-modernization/workflows/reimagine-scaffold.js:61`、`plugins/claude-security/workflows/scan.js:1`、`plugins/code-modernization/workflows/extract-rules.js:192`、`plugins/code-modernization/workflows/uplift-migrate.js:275`、`plugins/code-modernization/workflows/harden-scan.js:138`。
+
+計數口徑再限定兩點：單獨 `await agent(...)` 是 N=1 的退化單階扇出，不另立第六種（實例是 DTO tail：`plugins/code-modernization/workflows/extract-rules.js:343`）；「固定／資料／預算」是 fan-out cardinality 的來源軸，不是另一個同步形狀（固定 5、資料 N、budget stop 的代表分別在 `plugins/code-modernization/workflows/harden-scan.js:97`、`plugins/code-modernization/workflows/harden-scan.js:161`、`plugins/code-modernization/workflows/extract-rules.js:193`）。
 
 | # | 形狀 | 判準 | 實例與出處 |
 |---|---|---|---|
@@ -53,6 +55,8 @@ systems（N = systems.length）
          filter null／列 unmeasured → 程式算 COCOMO → sort → return
 ```
 
+圖據：`plugins/code-modernization/workflows/portfolio-assess.js:63`、`plugins/code-modernization/workflows/portfolio-assess.js:81`、`plugins/code-modernization/workflows/portfolio-assess.js:84`、`plugins/code-modernization/workflows/portfolio-assess.js:96`、`plugins/code-modernization/workflows/portfolio-assess.js:103`。
+
 扇出 N 完全由輸入 `systems` 的資料長度決定；腳本只要求非空陣列，**沒有數值上限**：`plugins/code-modernization/workflows/portfolio-assess.js:16`、`plugins/code-modernization/workflows/portfolio-assess.js:18`、`plugins/code-modernization/workflows/portfolio-assess.js:63`。單一 agent 回傳 null 不會丟掉整批；腳本 filter 掉 null，將找不到 row 的 system 放進 `unmeasured`：`plugins/code-modernization/workflows/portfolio-assess.js:81`、`plugins/code-modernization/workflows/portfolio-assess.js:84`、`plugins/code-modernization/workflows/portfolio-assess.js:85`、`plugins/code-modernization/workflows/portfolio-assess.js:103`。
 
 ### 2. `modernize-reimagine-scaffold`
@@ -63,6 +67,8 @@ approved services（N = services.length）
   ├─ scaffold service 2 ─┼─ parallel ── [整組屏障] ── filter null
   └─ scaffold service N ─┘                            └─ totals／notScaffolded
 ```
+
+圖據：`plugins/code-modernization/workflows/reimagine-scaffold.js:59`、`plugins/code-modernization/workflows/reimagine-scaffold.js:61`、`plugins/code-modernization/workflows/reimagine-scaffold.js:88`、`plugins/code-modernization/workflows/reimagine-scaffold.js:94`。
 
 扇出 N 由核准後的 `services` 資料長度決定；腳本明說「no cap」，只由 runtime 依其 concurrency limit 排隊，來源沒有給該 runtime limit 的數字：`plugins/code-modernization/workflows/reimagine-scaffold.js:4`、`plugins/code-modernization/workflows/reimagine-scaffold.js:59`、`plugins/code-modernization/workflows/reimagine-scaffold.js:61`。失敗／跳過的 null 被 filter，並列入 `notScaffolded`，不拖垮彙整：`plugins/code-modernization/workflows/reimagine-scaffold.js:88`、`plugins/code-modernization/workflows/reimagine-scaffold.js:89`、`plugins/code-modernization/workflows/reimagine-scaffold.js:94`。
 
@@ -89,6 +95,8 @@ approved services（N = services.length）
                     agree    → 保留／只允許向下校準 severity
 ```
 
+圖據：`plugins/code-modernization/workflows/harden-scan.js:97`、`plugins/code-modernization/workflows/harden-scan.js:106`、`plugins/code-modernization/workflows/harden-scan.js:129`、`plugins/code-modernization/workflows/harden-scan.js:161`、`plugins/code-modernization/workflows/harden-scan.js:171`、`plugins/code-modernization/workflows/harden-scan.js:184`、`plugins/code-modernization/workflows/harden-scan.js:186`、`plugins/code-modernization/workflows/harden-scan.js:195`。
+
 第一階 N 寫死為 **5** 個 class：`plugins/code-modernization/workflows/harden-scan.js:97`、`plugins/code-modernization/workflows/harden-scan.js:104`、`plugins/code-modernization/workflows/harden-scan.js:106`。第二階 N 是去重後 finding 數，第三階 N 是 surviving Critical／High 數；兩者都由資料決定且腳本沒有數值 cap：`plugins/code-modernization/workflows/harden-scan.js:129`、`plugins/code-modernization/workflows/harden-scan.js:135`、`plugins/code-modernization/workflows/harden-scan.js:161`、`plugins/code-modernization/workflows/harden-scan.js:184`、`plugins/code-modernization/workflows/harden-scan.js:186`。
 
 這是條件式對抗複核，不是多數決：第一名 refuter 回 `real:false` 就刪除；對已通過且為 Critical／High 的項目，第二名 confirmer 若反對，程式**不刪除**而是降為 Medium 並標註 human triage：`plugins/code-modernization/workflows/harden-scan.js:171`、`plugins/code-modernization/workflows/harden-scan.js:176`、`plugins/code-modernization/workflows/harden-scan.js:178`、`plugins/code-modernization/workflows/harden-scan.js:195`、`plugins/code-modernization/workflows/harden-scan.js:198`、`plugins/code-modernization/workflows/harden-scan.js:201`。
@@ -114,6 +122,8 @@ round = 0, dryRounds = 0, maxRounds = clamp(input/default 4, 1..8)
   └─ single DTO agent → return
 ```
 
+圖據：`plugins/code-modernization/workflows/extract-rules.js:165`、`plugins/code-modernization/workflows/extract-rules.js:192`、`plugins/code-modernization/workflows/extract-rules.js:204`、`plugins/code-modernization/workflows/extract-rules.js:240`、`plugins/code-modernization/workflows/extract-rules.js:247`、`plugins/code-modernization/workflows/extract-rules.js:287`、`plugins/code-modernization/workflows/extract-rules.js:295`、`plugins/code-modernization/workflows/extract-rules.js:341`。
+
 收斂條件是 **連續 2 輪沒有 fresh rule**；有 fresh rule 就把 dry counter 歸零：`plugins/code-modernization/workflows/extract-rules.js:190`、`plugins/code-modernization/workflows/extract-rules.js:192`、`plugins/code-modernization/workflows/extract-rules.js:240`、`plugins/code-modernization/workflows/extract-rules.js:244`。硬上限是 `maxRounds` 預設 **4**、最小 **1**、最大 **8**；另有預算停止條件 `budget.total && budget.remaining() < 60000`：`plugins/code-modernization/workflows/extract-rules.js:32`、`plugins/code-modernization/workflows/extract-rules.js:33`、`plugins/code-modernization/workflows/extract-rules.js:193`、`plugins/code-modernization/workflows/extract-rules.js:195`。
 
 每輪 extractor N 固定 **3**（calculations、validations、lifecycle）；referee N 由該輪 fresh rule 數決定且無項目 cap；P0 panel 的排程 N 是 P0 rule 數乘 **2**：`plugins/code-modernization/workflows/extract-rules.js:166`、`plugins/code-modernization/workflows/extract-rules.js:182`、`plugins/code-modernization/workflows/extract-rules.js:204`、`plugins/code-modernization/workflows/extract-rules.js:247`、`plugins/code-modernization/workflows/extract-rules.js:291`、`plugins/code-modernization/workflows/extract-rules.js:297`。
@@ -134,6 +144,8 @@ P0 的「票數」不是 2 票多數決：程式收集實際有回傳的 verdict
                     ▼
           confirmed／wrong-site corrected／dropped → deterministic stats
 ```
+
+圖據：`plugins/code-modernization/workflows/uplift-deltas.js:91`、`plugins/code-modernization/workflows/uplift-deltas.js:115`、`plugins/code-modernization/workflows/uplift-deltas.js:136`、`plugins/code-modernization/workflows/uplift-deltas.js:144`、`plugins/code-modernization/workflows/uplift-deltas.js:153`、`plugins/code-modernization/workflows/uplift-deltas.js:156`、`plugins/code-modernization/workflows/uplift-deltas.js:177`。
 
 第一階 N 寫死為 **4** 個 category；第二階 N 是 deduped delta 數，沒有腳本內數值 cap：`plugins/code-modernization/workflows/uplift-deltas.js:91`、`plugins/code-modernization/workflows/uplift-deltas.js:113`、`plugins/code-modernization/workflows/uplift-deltas.js:115`、`plugins/code-modernization/workflows/uplift-deltas.js:144`、`plugins/code-modernization/workflows/uplift-deltas.js:150`、`plugins/code-modernization/workflows/uplift-deltas.js:156`。每項只有 finder 加一名 referee，沒有把同一 delta 同時送給多名 verifier，因此不是票決型 panel：`plugins/code-modernization/workflows/uplift-deltas.js:153`、`plugins/code-modernization/workflows/uplift-deltas.js:157`。
 
@@ -157,6 +169,8 @@ units + deps → 驗證路徑互斥、驗證 DAG 無 cycle
   │
   └─ 分成 built／failed／blocked／remaining，回傳可重送清單
 ```
+
+圖據：`plugins/code-modernization/workflows/uplift-migrate.js:120`、`plugins/code-modernization/workflows/uplift-migrate.js:139`、`plugins/code-modernization/workflows/uplift-migrate.js:260`、`plugins/code-modernization/workflows/uplift-migrate.js:275`、`plugins/code-modernization/workflows/uplift-migrate.js:280`、`plugins/code-modernization/workflows/uplift-migrate.js:301`、`plugins/code-modernization/workflows/uplift-migrate.js:314`、`plugins/code-modernization/workflows/uplift-migrate.js:337`、`plugins/code-modernization/workflows/uplift-migrate.js:350`、`plugins/code-modernization/workflows/uplift-migrate.js:400`。
 
 這個迴圈的 N 同時由輸入、資料與 cap 決定：`FIRST_BATCH` 由 caller 的 `batchSize` 決定，預設 **4**，但 clamp 到 `MAX_BATCH = 16`；後續倍率依批次為 1、2、4，最後仍以 **16** 封頂：`plugins/code-modernization/workflows/uplift-migrate.js:137`、`plugins/code-modernization/workflows/uplift-migrate.js:141`、`plugins/code-modernization/workflows/uplift-migrate.js:284`、`plugins/code-modernization/workflows/uplift-migrate.js:287`。實際 batch 還只取當時 eligible 的前 N 項，因此也受依賴圖與剩餘資料量決定：`plugins/code-modernization/workflows/uplift-migrate.js:280`、`plugins/code-modernization/workflows/uplift-migrate.js:281`、`plugins/code-modernization/workflows/uplift-migrate.js:287`。
 
@@ -193,6 +207,8 @@ args／effort／diff-size／scope-size gate
           └─ 若仍 kept：single red-team refuter；FALSE_POSITIVE 才推翻
 ```
 
+圖據（原檔壓成單行）：`plugins/claude-security/workflows/scan.js:1`。
+
 以上所有 `scan.js` 數字與分支均在壓成一行的原檔：effort gate、small diff（≤5 files 且 ≤300 lines）、small scope（≤5 files）、component cap 12／24、raw candidate cap 400、verification cap 45、3-voter 規則、max repanel 與 red-team 都在 `plugins/claude-security/workflows/scan.js:1`。
 
 完整形狀的 component 數是 inventory 資料決定、normal 最多 **12**、high/max 最多 **24**；每 component 的研究格有 4 類，但純 managed language 會剪掉 memory 類剩 3 類；normal 每格 1 人、high/max 每格 2 人。low 或 medium-small 則壓成 1 component × 1 位全類別 researcher。這些 gate、category 陣列、managed-language pruning 與 multiplicity 均在 `plugins/claude-security/workflows/scan.js:1`。
@@ -225,11 +241,23 @@ sweep N 是 tier／focus 決定：collapsed/low 為 0，normal 為 1，high/max 
 
 ## 精確口徑
 
-材料是 **34 份 agent 定義**。原始碼沒有共同的 `type` 或 `kind` 欄位可供再分「agent 類型」；按定義格式只能分成 **2 種**：**31 份有 YAML-style frontmatter**，另 **3 份是純 Markdown prompt、完全沒有 frontmatter**。後三份都直接從 H1 開始：`plugins/skill-creator/skills/skill-creator/agents/analyzer.md:1`、`plugins/skill-creator/skills/skill-creator/agents/comparator.md:1`、`plugins/skill-creator/skills/skill-creator/agents/grader.md:1`。其餘逐檔 frontmatter 母表如下；每列的引用涵蓋該檔所有 frontmatter 欄位。
+材料是 **34 份 agent 定義**。原始碼沒有共同的 `type` 或 `kind` 欄位可供再分官方語意上的「agent 類型」；按最外層格式是 **2 類**：**31 份有 YAML-style frontmatter**，另 **3 份是純 Markdown prompt、完全沒有 frontmatter**。後三份都直接從 H1 開始：`plugins/skill-creator/skills/skill-creator/agents/analyzer.md:1`、`plugins/skill-creator/skills/skill-creator/agents/comparator.md:1`、`plugins/skill-creator/skills/skill-creator/agents/grader.md:1`。若把「種類」定義成**欄位 presence signature（不計欄位順序）**，則精確是 **7 種**；逐種如下，逐檔明細再見下一張母表。
+
+欄位統計採**文字盤點口徑**：只數檔首 `---` 區段中未縮排的 `key:`；不把「某個 strict YAML parser 是否接受整段」混入欄位出現次數。例示的 frontmatter 邊界可見 `plugins/claude-security/agents/claude-security.md:1`、`plugins/claude-security/agents/claude-security.md:9`，而長單行 description 仍按行首欄位計數的例子是 `plugins/pr-review-toolkit/agents/silent-failure-hunter.md:1`、`plugins/pr-review-toolkit/agents/silent-failure-hunter.md:6`。
+
+| 欄位 presence signature | 份數 | 成員與出處 |
+|---|---:|---|
+| 無 frontmatter | 3 | `plugins/skill-creator/skills/skill-creator/agents/analyzer.md:1`、`plugins/skill-creator/skills/skill-creator/agents/comparator.md:1`、`plugins/skill-creator/skills/skill-creator/agents/grader.md:1` |
+| `name, description, model` | 4 | `plugins/agent-sdk-dev/agents/agent-sdk-verifier-py.md:2`、`plugins/agent-sdk-dev/agents/agent-sdk-verifier-ts.md:2`、`plugins/code-simplifier/agents/code-simplifier.md:2`、`plugins/pr-review-toolkit/agents/code-simplifier.md:2` |
+| `name, description, model, effort, color, tools, initialPrompt` | 1 | `plugins/claude-security/agents/claude-security.md:2`、`plugins/claude-security/agents/claude-security.md:8` |
+| `name, description, model, effort, color, tools` | 6 | `plugins/claude-security/agents/explore.md:2`、`plugins/claude-security/agents/patch-generator.md:2`、`plugins/claude-security/agents/patch-verifier.md:2`、`plugins/claude-security/agents/scan-inventory.md:2`、`plugins/claude-security/agents/scan-researcher.md:2`、`plugins/claude-security/agents/scan-verifier.md:2` |
+| `name, description, tools` | 8 | `plugins/code-modernization/agents/architecture-critic.md:2`、`plugins/code-modernization/agents/business-rules-extractor.md:2`、`plugins/code-modernization/agents/legacy-analyst.md:2`、`plugins/code-modernization/agents/scaffolder.md:2`、`plugins/code-modernization/agents/security-auditor.md:2`、`plugins/code-modernization/agents/test-engineer.md:2`、`plugins/code-modernization/agents/uplift-migrator.md:2`、`plugins/code-modernization/agents/version-delta-analyst.md:2` |
+| `name, description, model, color, tools` | 7 | `plugins/feature-dev/agents/code-architect.md:2`、`plugins/feature-dev/agents/code-explorer.md:2`、`plugins/feature-dev/agents/code-reviewer.md:2`、`plugins/hookify/agents/conversation-analyzer.md:2`、`plugins/plugin-dev/agents/agent-creator.md:2`、`plugins/plugin-dev/agents/plugin-validator.md:2`、`plugins/plugin-dev/agents/skill-reviewer.md:2` |
+| `name, description, model, color` | 5 | `plugins/pr-review-toolkit/agents/code-reviewer.md:2`、`plugins/pr-review-toolkit/agents/comment-analyzer.md:2`、`plugins/pr-review-toolkit/agents/pr-test-analyzer.md:2`、`plugins/pr-review-toolkit/agents/silent-failure-hunter.md:2`、`plugins/pr-review-toolkit/agents/type-design-analyzer.md:2` |
 
 ## 34 份逐檔欄位母表
 
-`D` 代表 `description`；`T1`～`T12` 是下一小節列出的完整 `tools` 取值，不是省略未統計的欄位。
+`D` 代表 `description`；`T1`～`T12` 是下一小節列出的完整 `tools` 取值，不是省略未統計的欄位；兩欄的原始寫法可見 `plugins/claude-security/agents/claude-security.md:3`、`plugins/claude-security/agents/claude-security.md:7`。
 
 | # | 定義 | frontmatter 欄位／值 | 出處 |
 |---:|---|---|---|
@@ -270,19 +298,19 @@ sweep N 是 tier／focus 決定：collapsed/low 為 0，normal 為 1，high/max 
 
 ## 欄位出現次數與取值分布
 
-逐檔母表只出現 **7 個欄位**，分布如下；沒有列出的欄位在這 34 份材料中就是 0 次。
+逐檔母表只出現 **7 個欄位**，分布如下；沒有列出的欄位在這 34 份材料中就是 0 次。七欄全集可在唯一全欄位定義的 `plugins/claude-security/agents/claude-security.md:2`、`plugins/claude-security/agents/claude-security.md:3`、`plugins/claude-security/agents/claude-security.md:4`、`plugins/claude-security/agents/claude-security.md:5`、`plugins/claude-security/agents/claude-security.md:6`、`plugins/claude-security/agents/claude-security.md:7`、`plugins/claude-security/agents/claude-security.md:8` 核對；全體 absence／presence 則見上方 34 列母表。
 
-| 欄位 | 出現 | 取值分布 | 出處 |
+| 欄位 | 出現（缺省） | 取值分布 | 出處 |
 |---|---:|---|---|
-| `name` | 31 | 29 個 distinct 值；`code-reviewer` 2 次、`code-simplifier` 2 次，其餘 27 個名字各 1 次 | 兩個 `code-reviewer`：`plugins/feature-dev/agents/code-reviewer.md:2`、`plugins/pr-review-toolkit/agents/code-reviewer.md:2`；兩個 `code-simplifier`：`plugins/code-simplifier/agents/code-simplifier.md:2`、`plugins/pr-review-toolkit/agents/code-simplifier.md:2`；全體見上方逐檔母表。 |
-| `description` | 31 | 31 個自由文字值，各不相同 | 每份 frontmatter 的 `description` 位置均在上方逐檔母表所引範圍內；三份無 frontmatter 的出處是 `plugins/skill-creator/skills/skill-creator/agents/analyzer.md:1`、`plugins/skill-creator/skills/skill-creator/agents/comparator.md:1`、`plugins/skill-creator/skills/skill-creator/agents/grader.md:1`。 |
-| `model` | 23 | `inherit` 11、`sonnet` 8、`opus` 4 | 各檔值見上方逐檔母表；三種實例分別為 `plugins/claude-security/agents/patch-generator.md:4`、`plugins/agent-sdk-dev/agents/agent-sdk-verifier-py.md:4`、`plugins/claude-security/agents/claude-security.md:4`。 |
-| `effort` | 7 | `xhigh` 6、`medium` 1 | 7 份全在 claude-security：`plugins/claude-security/agents/claude-security.md:5`、`plugins/claude-security/agents/explore.md:5`、`plugins/claude-security/agents/patch-generator.md:5`、`plugins/claude-security/agents/patch-verifier.md:5`、`plugins/claude-security/agents/scan-inventory.md:5`、`plugins/claude-security/agents/scan-researcher.md:5`、`plugins/claude-security/agents/scan-verifier.md:5`。 |
-| `color` | 19 | green 5、yellow 4、cyan 3、red 2、blue 1、magenta 1、orange 1、pink 1、purple 1 | 19 個逐檔值見上方母表；各 singleton 的直接出處：`plugins/claude-security/agents/patch-verifier.md:6`、`plugins/plugin-dev/agents/agent-creator.md:33`、`plugins/claude-security/agents/scan-verifier.md:6`、`plugins/pr-review-toolkit/agents/type-design-analyzer.md:5`、`plugins/claude-security/agents/claude-security.md:6`。 |
-| `tools` | 22 | 共 12 種完整取值組合；見下一表 | 22 個逐檔值及行號見下一表。 |
-| `initialPrompt` | 1 | `"/claude-security:claude-security"` 1 | `plugins/claude-security/agents/claude-security.md:8` |
+| `name` | 31（3） | 29 個 distinct 值；`code-reviewer` 2 次、`code-simplifier` 2 次，其餘 27 個名字各 1 次 | 兩個 `code-reviewer`：`plugins/feature-dev/agents/code-reviewer.md:2`、`plugins/pr-review-toolkit/agents/code-reviewer.md:2`；兩個 `code-simplifier`：`plugins/code-simplifier/agents/code-simplifier.md:2`、`plugins/pr-review-toolkit/agents/code-simplifier.md:2`；全體見上方逐檔母表。 |
+| `description` | 31（3） | 31 個自由文字值，各不相同 | 每份 frontmatter 的 `description` 位置均在上方逐檔母表所引範圍內；三份無 frontmatter 的出處是 `plugins/skill-creator/skills/skill-creator/agents/analyzer.md:1`、`plugins/skill-creator/skills/skill-creator/agents/comparator.md:1`、`plugins/skill-creator/skills/skill-creator/agents/grader.md:1`。 |
+| `model` | 23（11） | `inherit` 11、`sonnet` 8、`opus` 4 | 各檔值見上方逐檔母表；三種實例分別為 `plugins/claude-security/agents/patch-generator.md:4`、`plugins/agent-sdk-dev/agents/agent-sdk-verifier-py.md:4`、`plugins/claude-security/agents/claude-security.md:4`。 |
+| `effort` | 7（27） | `xhigh` 6、`medium` 1 | 7 份全在 claude-security：`plugins/claude-security/agents/claude-security.md:5`、`plugins/claude-security/agents/explore.md:5`、`plugins/claude-security/agents/patch-generator.md:5`、`plugins/claude-security/agents/patch-verifier.md:5`、`plugins/claude-security/agents/scan-inventory.md:5`、`plugins/claude-security/agents/scan-researcher.md:5`、`plugins/claude-security/agents/scan-verifier.md:5`。 |
+| `color` | 19（15） | green 5、yellow 4、cyan 3、red 2、blue 1、magenta 1、orange 1、pink 1、purple 1 | 19 個逐檔值見上方母表；各 singleton 的直接出處：`plugins/claude-security/agents/patch-verifier.md:6`、`plugins/plugin-dev/agents/agent-creator.md:33`、`plugins/claude-security/agents/scan-verifier.md:6`、`plugins/pr-review-toolkit/agents/type-design-analyzer.md:5`、`plugins/claude-security/agents/claude-security.md:6`。 |
+| `tools` | 22（12） | 共 12 種完整取值組合；見下一表 | 22 個逐檔值及行號見下一表。 |
+| `initialPrompt` | 1（33） | `"/claude-security:claude-security"` 1 | `plugins/claude-security/agents/claude-security.md:8` |
 
-`tools` 的 12 種完整取值組合如下；順序保留原檔，`Agent(...)` 也保留為一個帶參數的 tool declaration。
+`tools` 的 12 種完整取值組合如下；順序保留原檔，`Agent(...)` 也保留為一個帶參數的 tool declaration。最寬組合與 agent-as-tool 語法見 `plugins/claude-security/agents/claude-security.md:7`，最窄的兩-tool 組合見 `plugins/hookify/agents/conversation-analyzer.md:6`、`plugins/plugin-dev/agents/agent-creator.md:34`；12 種的完整逐值出處在緊接的表內。
 
 | ID | 次數 | `tools` 原值 | 出處 |
 |---|---:|---|---|
@@ -312,13 +340,13 @@ sweep N 是 tier／focus 決定：collapsed/low 為 0，normal 為 1，high/max 
 | `claude-security:patch-generator` | 1 | `claude-security` | `plugins/claude-security/agents/claude-security.md:7` |
 | `claude-security:patch-verifier` | 1 | `claude-security` | `plugins/claude-security/agents/claude-security.md:7` |
 
-所以，以「被不同 agent 的 `tools` 欄位共用」為口徑，最被共用的是 **`claude-security:explore`，5 個不同上游**；其他 5 個被當 agent tool 暴露的定義都只有 1 個上游：同上五個 `tools` 欄位出處。
+所以，以「被不同 agent 的 `tools` 欄位共用」為口徑，最被共用的是 **`claude-security:explore`，5 個不同上游**；其他 5 個被當 agent tool 暴露的定義都只有 1 個上游：`plugins/claude-security/agents/claude-security.md:7`、`plugins/claude-security/agents/patch-generator.md:7`、`plugins/claude-security/agents/patch-verifier.md:7`、`plugins/claude-security/agents/scan-researcher.md:7`、`plugins/claude-security/agents/scan-verifier.md:7`。
 
-若把「上游」改成 7 支 workflow 的 `agentType`（這不是 agent-to-agent `tools` 邊），最被不同 workflow 共用的是 `code-modernization:legacy-analyst`，共 **2 支**：portfolio survey 一支、extract-rules 的 Verify／DTO 一支：`plugins/code-modernization/workflows/portfolio-assess.js:76`、`plugins/code-modernization/workflows/extract-rules.js:261`、`plugins/code-modernization/workflows/extract-rules.js:348`。其餘 workflow `agentType` 都只出現在各自一支 workflow；例如 business-rules-extractor 雖在同一支 extract 裡出現兩個 stage，仍只有一個 workflow 上游：`plugins/code-modernization/workflows/extract-rules.js:215`、`plugins/code-modernization/workflows/extract-rules.js:310`。
+若把「上游」改成 7 支 workflow 的 `agentType`（這不是 agent-to-agent `tools` 邊），最被不同 workflow 共用的是 `code-modernization:legacy-analyst`，共 **2 支**：portfolio survey 一支、extract-rules 的 Verify／DTO 一支：`plugins/code-modernization/workflows/portfolio-assess.js:76`、`plugins/code-modernization/workflows/extract-rules.js:261`、`plugins/code-modernization/workflows/extract-rules.js:348`。其餘 workflow `agentType` 都只出現在各自一支 workflow：`plugins/code-modernization/workflows/reimagine-scaffold.js:79`、`plugins/code-modernization/workflows/harden-scan.js:113`、`plugins/code-modernization/workflows/extract-rules.js:215`、`plugins/code-modernization/workflows/uplift-deltas.js:127`、`plugins/code-modernization/workflows/uplift-migrate.js:304`、`plugins/claude-security/workflows/scan.js:1`。
 
 ## 明說「不准單獨叫」的 agent
 
-明文包含 **`not for direct invocation`** 的正好 **5 份**，而且原句都在 `description` 欄位：
+明文包含 **`not for direct invocation`** 的正好 **5 份**，而且原句都在 `description` 欄位：`plugins/claude-security/agents/scan-inventory.md:3`、`plugins/claude-security/agents/scan-researcher.md:3`、`plugins/claude-security/agents/scan-verifier.md:3`、`plugins/claude-security/agents/patch-generator.md:3`、`plugins/claude-security/agents/patch-verifier.md:3`。
 
 1. `scan-inventory` 原句：「Restricted read-only repository cartographer dispatched by the Claude Security scan workflow to partition the tree into components and account for every top-level directory; **not for direct invocation or vulnerability research.**」`plugins/claude-security/agents/scan-inventory.md:3`
 2. `scan-researcher` 原句：「Restricted read-only vulnerability researcher dispatched by the Claude Security scan workflow; **not for direct invocation or general exploration.**」`plugins/claude-security/agents/scan-researcher.md:3`
@@ -358,7 +386,7 @@ caller／human 的分界在 invocation 外：scaffold 只在架構已由 human �
 
 ## 分支失敗會不會拖垮整階？
 
-就腳本有明寫的 **null／falsy（skipped、died、errored）回傳路徑**而言，答案是通常**不會**：各腳本在屏障後 filter、continue、標成未完成，或 retry。各支的精確語意如下。
+就腳本有明寫的 **null／falsy（skipped、died、errored）回傳路徑**而言，答案是通常**不會**：各腳本在屏障後 filter、continue、標成未完成，或 retry；代表控制點在 `plugins/code-modernization/workflows/portfolio-assess.js:84`、`plugins/code-modernization/workflows/extract-rules.js:272`、`plugins/code-modernization/workflows/uplift-migrate.js:314`、`plugins/claude-security/workflows/scan.js:1`。各支的精確語意如下。
 
 | workflow | 單一分支無結果時 | 是否仍繼續／結果如何記 | 出處 |
 |---|---|---|---|
@@ -418,6 +446,8 @@ schema 之外還有程式層強制：Map dedup、enum-derived branch、filter nu
 
 security scan 有的是**單一 logical agent 的即時 retry**，不是 workflow checkpoint：四次 retry delays 與最終仍可回 falsy 都在 `plugins/claude-security/workflows/scan.js:1`。
 
+`claude-security` orchestrator 另要求多階 job 用 task list 保存並更新 plan；但該句沒有宣告 task list 的持久性，也沒有給 interruption 後的 resume entrypoint，因此只能算 in-session 進度追蹤，不能當成已證實的恢復機制：tool 權限與原句分別在 `plugins/claude-security/agents/claude-security.md:7`、`plugins/claude-security/agents/claude-security.md:13`。
+
 實作中唯一明確的**跨 invocation 接續協定**是 uplift-migrate：回傳 `remainingUnits`、`failedUnits`、`blockedUnits` 三份 `{name,path,deps?}` 可重送清單；caller 先把 `playbookGaps` 寫回 PLAYBOOK、處理 `sharedFileNeeds`，再以清單重呼叫：`plugins/code-modernization/workflows/uplift-migrate.js:5`、`plugins/code-modernization/workflows/uplift-migrate.js:6`、`plugins/code-modernization/workflows/uplift-migrate.js:350`、`plugins/code-modernization/workflows/uplift-migrate.js:356`、`plugins/code-modernization/workflows/uplift-migrate.js:415`、`plugins/code-modernization/workflows/uplift-migrate.js:423`。這只能接「已正常 return／被 circuit breaker 正常中止」的結果；半途程序消失而沒有 return 時如何還原 `done`／`remaining`，材料查不到：同一批狀態建立與 return 邊界見 `plugins/code-modernization/workflows/uplift-migrate.js:263`、`plugins/code-modernization/workflows/uplift-migrate.js:400`。
 
 extract 的 maxRounds 截尾訊息允許 caller 以 `modulePattern` 或較高 `maxRounds` 再跑，但它沒有輸出可還原 `seen` map 的 checkpoint，因此是重跑／縮 scope，不是原地 resume：`plugins/code-modernization/workflows/extract-rules.js:283`、`plugins/code-modernization/workflows/extract-rules.js:284`、`plugins/code-modernization/workflows/extract-rules.js:358`。
@@ -432,11 +462,11 @@ extract 的 maxRounds 截尾訊息允許 caller 以 `modulePattern` 或較高 `m
 
 ## 證據界線
 
-nova 的程式碼不在指定材料內，所以「nova 現在是否已實作 schema validator、retry adapter、checkpoint store」一律**查不到**。以下只採題目明定的前提：nova 是 claude／codex／agy 三家平級 CLI 子程序、一次呼叫一個程序；凡由這個程序邊界推導的可搬性與缺件排序，均標成**推測**。官方側的每個機制仍逐項附原始碼出處。
+nova 的程式碼不在指定材料內，所以「nova 現在是否已實作 schema validator、retry adapter、checkpoint store」一律**查不到**。以下只採題目明定的前提：nova 是 claude／codex／agy 三家平級 CLI 子程序、一次呼叫一個程序；凡由這個程序邊界推導的可搬性與缺件排序，均標成**推測**。可逐行引用的官方側材料則是 workflow、agent 定義與 recovery 參考，例如 `plugins/claude-security/workflows/scan.js:1`、`plugins/claude-security/agents/claude-security.md:1`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:1`。
 
 ## 哪些用法可以直接搬
 
-此處「直接搬」指**保留同一控制語意，以 nova 外層 coordinator 啟動 CLI process**；不是把 `agent()` 那一行原封不動執行。
+此處「直接搬」指**保留同一控制語意，以 nova 外層 coordinator 啟動 CLI process**；不是把官方的 `agent()`／`parallel()` call 原封不動執行。兩種官方 call boundary 的實例在 `plugins/code-modernization/workflows/portfolio-assess.js:66`、`plugins/code-modernization/workflows/reimagine-scaffold.js:61`。
 
 | 官方形狀 | 可搬性 | 推測：搬到多 CLI 的等價形狀 | 官方出處 |
 |---|---|---|---|
@@ -466,13 +496,13 @@ nova 的程式碼不在指定材料內，所以「nova 現在是否已實作 sch
 
 ## 官方有而 nova 沒有：前五名
 
-**查不到（嚴格盤點結論）：**沒有 nova 原始碼，所以不能由材料證明 nova 目前「沒有」以下任一項。
+**查不到（嚴格盤點結論）：**沒有 nova 原始碼，所以不能由指定的官方材料證明 nova 目前「沒有」以下任一項；可證明的只會是官方側確有相應機制，例如 schema call 與 recovery pattern：`plugins/code-modernization/workflows/portfolio-assess.js:79`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:332`。
 
 **推測排序（依題目給定的多 CLI 程序模型；排序標準是補上後可立即承接最多官方 workflow 語意）：**
 
 1. **跨 provider 的 result envelope + schema validator。** 先統一 `ok/status/payload/error/usage`，再驗 required/type/enum/pattern；7 支 workflow 的所有 agent call 都依賴 schema 化結果，且下游直接讀欄位分支，所以這是其他調度語意的地基：`plugins/code-modernization/workflows/portfolio-assess.js:42`、`plugins/code-modernization/workflows/portfolio-assess.js:79`、`plugins/code-modernization/workflows/extract-rules.js:66`、`plugins/code-modernization/workflows/extract-rules.js:218`、`plugins/claude-security/workflows/scan.js:1`。
 2. **coordinator-owned failure normalization + retry/backoff。** 把 exit code、signal、timeout、schema-invalid、空輸出轉成一致的 retryable／terminal 狀態，才能重現 security scan 的「初次 + 4 retries」與其他腳本的局部 null isolation：`plugins/claude-security/workflows/scan.js:1`、`plugins/code-modernization/workflows/extract-rules.js:270`、`plugins/code-modernization/workflows/extract-rules.js:272`、`plugins/code-modernization/workflows/uplift-migrate.js:314`。
-3. **durable per-item checkpoint／resume manifest。** CLI 程序邊界讓已完成 unit、未完成 unit、票與 gaps 都應落盤；官方參考已給 `.local.md` state、last-completed 與 checkpoint resume pattern，實際 migrate 也已給三種 re-passable unit lists：`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:281`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:332`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:348`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:600`、`plugins/code-modernization/workflows/uplift-migrate.js:415`、`plugins/code-modernization/workflows/uplift-migrate.js:423`。
+3. **durable per-item checkpoint／resume manifest（官方參考 pattern；7 支 JS 尚未實作）。** CLI 程序邊界讓已完成 unit、未完成 unit、票與 gaps 都應落盤；官方參考已給 `.local.md` state、last-completed 與 checkpoint resume pattern，實際 migrate 也已給三種 re-passable unit lists：`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:281`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:332`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:348`、`plugins/plugin-dev/skills/command-development/references/advanced-workflows.md:600`、`plugins/code-modernization/workflows/uplift-migrate.js:415`、`plugins/code-modernization/workflows/uplift-migrate.js:423`。
 4. **有界 scheduler：per-provider concurrency、全域 agent／token budget、queue cap。** 官方把 runtime queue、effort-dependent width、remaining-token gate與 per-batch 16 分散在不同層；nova 若集中管理即可避免三家 CLI 同時爆量，並保留原本的比例控制：`plugins/code-modernization/workflows/reimagine-scaffold.js:4`、`plugins/code-modernization/workflows/extract-rules.js:193`、`plugins/code-modernization/workflows/uplift-migrate.js:137`、`plugins/code-modernization/workflows/uplift-migrate.js:141`、`plugins/claude-security/workflows/scan.js:1`。
 5. **可稽核的 adversarial vote ledger + incomplete-panel 規則。** 對同一 claim 保存 provider／lens／verdict／reason，計票由 coordinator 做而不是讓最後一個模型自由總結；security scan 已把每 finding 的 panel／adversarial rounds 與總票數放入 return，且對缺票、repanel、red-team 各有不同 fail-open／fail-closed 規則：`plugins/claude-security/workflows/scan.js:1`。extract 的雙 judge 還顯示「排程票數」與「實收票數」必須分開記：`plugins/code-modernization/workflows/extract-rules.js:295`、`plugins/code-modernization/workflows/extract-rules.js:320`、`plugins/code-modernization/workflows/extract-rules.js:330`。
 
