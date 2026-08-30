@@ -6,6 +6,7 @@
 
 import shlex
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -74,6 +75,29 @@ def 建判準(指令: Sequence[str] = 預設判準指令, *, 逾時秒: float = 
             # 重跑一百次還是同一個結果，而每次重跑中間都夾著一個模型階段。
             return 判準終局.跑不起來, f"判準跑不起來（環境問題，不是測試沒過）：{沒驗到}\n{輸出}"
         return 判準終局.紅, 輸出
+
+    return 跑
+
+
+def 建重構判準() -> 判準:
+    """建出重構結束時使用的 lint 與格式判準。"""
+    ruff = str(Path(sys.executable).parent / "ruff")
+    檢查們 = (
+        ("ruff-check", 建判準((ruff, "check", "--no-cache", "."))),
+        ("ruff-format", 建判準((ruff, "format", "--check", "--no-cache", "."))),
+    )
+
+    def 跑(任: 任務) -> tuple[判準終局, str]:
+        收場們: list[判準終局] = []
+        證據們: list[str] = []
+        for 名稱, 檢查 in 檢查們:
+            收場, 證據 = 檢查(任)
+            收場們.append(收場)
+            證據們.append(f"[{名稱}] {證據}")
+        if any(收場 is 判準終局.跑不起來 for 收場 in 收場們):
+            return 判準終局.跑不起來, "\n".join(證據們)
+        收場 = 判準終局.綠 if all(項 is 判準終局.綠 for 項 in 收場們) else 判準終局.紅
+        return 收場, "\n".join(證據們)
 
     return 跑
 
