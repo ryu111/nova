@@ -74,6 +74,109 @@ def _加檢查類(
     訊息剖析.add_argument("檔案", help="commit 訊息檔（git 會傳 .git/COMMIT_EDITMSG）")
 
 
+def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> None:
+    """`問` 與 `重構` 共用的那一整組旗標。
+
+    **抽出來不是為了少打字，是為了不讓兩份走散**：單節點子命令是
+    「同一個委派路徑的薄適配器」（見 `docs/設計/07-節點是一等公民.md`），
+    各自維護一份的話，`--預算token` 這種護欄遲早只剩一邊有。
+    """
+    剖析.add_argument("提示", nargs="*", help=題目說明)
+    剖析.add_argument(
+        "--提示檔",
+        default=None,
+        help="從檔案讀題目。長的、多行的、有反引號的一律走這條"
+        "——argv 會被 shell 展開，吃掉之後沒有殘跡",
+    )
+    剖析.add_argument(
+        "--用",
+        default=None,
+        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
+    )
+    剖析.add_argument(
+        "--工作",
+        default=None,
+        choices=[種.value for 種 in 工作種類],
+        help="照派工表自動挑腦：routine 給 agy（分擔額度）、reasoning 給 sol",
+    )
+    剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
+    剖析.add_argument(
+        "--思考深度",
+        default=None,
+        choices=list(思考深度們),
+        help="想多深。三家機制不同（claude --effort、codex TOML、agy 型號後綴），"
+        "統一介面吸收掉。agy 只有 low/medium/high，給更深會當場擋下不會默默降級",
+    )
+    剖析.add_argument(
+        "--預算token",
+        type=int,
+        default=None,
+        help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
+    )
+    剖析.add_argument(
+        "--預算美金",
+        type=float,
+        default=None,
+        help="這段時間內全專案最多花多少美金，超過就停（預設不鎖；算不出成本時一律放行）",
+    )
+    剖析.add_argument(
+        "--預算幾小時",
+        type=float,
+        default=24.0,
+        help="預算的時間窗口（預設 24 小時）",
+    )
+    剖析.add_argument(
+        "--不記全文",
+        action="store_true",
+        help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
+    )
+    剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
+    剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
+    剖析.add_argument(
+        "--逾時",
+        type=float,
+        default=預設逾時秒,
+        help=f"幾秒沒回應就殺掉（預設 {預設逾時秒:.0f}）。砍太早會變成『結果未知』，那是不可回復的",
+    )
+    剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
+    剖析.add_argument(
+        "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
+    )
+    剖析.add_argument(
+        "--全開",
+        action="store_true",
+        help="跳過權限檢查並關掉沙箱。只在已經被隔離的環境裡用",
+    )
+    剖析.add_argument("--續接", default=None, help="接回某段對話（給上一次輸出的 對話識別碼）")
+    剖析.add_argument(
+        "--保留對話",
+        action="store_true",
+        help="把這段對話留在磁碟上，之後才續接得到（codex 預設不留）",
+    )
+    剖析.add_argument(
+        "--不隔離設定",
+        action="store_true",
+        help="讓它讀使用者家目錄的設定。claude 的 --bare 連 keychain 都不讀，訂閱登入要靠這個",
+    )
+    剖析.add_argument("--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本")
+    剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
+    剖析.add_argument(
+        "--輸出檔",
+        default=None,
+        help="叫它邊做邊寫進這個檔。逾時被殺之後還撿得回進度（要搭 --可編輯）",
+    )
+    剖析.add_argument(
+        "--背景",
+        action="store_true",
+        help="丟到背景跑，立刻回。印出識別碼與輸出檔；看還在跑什麼用 nova 狀態",
+    )
+    剖析.add_argument(
+        "--熔斷",
+        action="store_true",
+        help="啟用跨執行熔斷（連續失敗時暫停呼叫該家）。預設關閉（看帳跟關流程是兩件事）",
+    )
+
+
 def _加委派類(
     子: "argparse._SubParsersAction[argparse.ArgumentParser]",
     處理們: Mapping[str, 處理型],
@@ -81,102 +184,11 @@ def _加委派類(
     """問、工作流——把事情交給別家 LLM CLI。"""
     問剖析 = 子.add_parser("問", help="把一件事委派給別家 LLM CLI（分擔額度）")
     問剖析.set_defaults(執行=處理們["問"])
-    問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
-    問剖析.add_argument(
-        "--提示檔",
-        default=None,
-        help="從檔案讀題目。長的、多行的、有反引號的一律走這條"
-        "——argv 會被 shell 展開，吃掉之後沒有殘跡",
-    )
-    問剖析.add_argument(
-        "--用",
-        default=None,
-        help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
-    )
-    問剖析.add_argument(
-        "--工作",
-        default=None,
-        choices=[種.value for 種 in 工作種類],
-        help="照派工表自動挑腦：routine 給 agy（分擔額度）、reasoning 給 sol",
-    )
-    問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
-    問剖析.add_argument(
-        "--思考深度",
-        default=None,
-        choices=list(思考深度們),
-        help="想多深。三家機制不同（claude --effort、codex TOML、agy 型號後綴），"
-        "統一介面吸收掉。agy 只有 low/medium/high，給更深會當場擋下不會默默降級",
-    )
-    問剖析.add_argument(
-        "--預算token",
-        type=int,
-        default=None,
-        help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
-    )
-    問剖析.add_argument(
-        "--預算美金",
-        type=float,
-        default=None,
-        help="這段時間內全專案最多花多少美金，超過就停（預設不鎖；算不出成本時一律放行）",
-    )
-    問剖析.add_argument(
-        "--預算幾小時",
-        type=float,
-        default=24.0,
-        help="預算的時間窗口（預設 24 小時）",
-    )
-    問剖析.add_argument(
-        "--不記全文",
-        action="store_true",
-        help="帳本只記長度與雜湊，不記模型講的話。預設會記（遮罩過）",
-    )
-    問剖析.add_argument("--執行檔", default=None, help="CLI 的絕對路徑。不給就自己找（不信 PATH）")
-    問剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
-    問剖析.add_argument(
-        "--逾時",
-        type=float,
-        default=預設逾時秒,
-        help=f"幾秒沒回應就殺掉（預設 {預設逾時秒:.0f}）。砍太早會變成『結果未知』，那是不可回復的",
-    )
-    問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
-    問剖析.add_argument(
-        "--可編輯", action="store_true", help="讓它能改檔案（預設唯讀——忘了給不會變成放行）"
-    )
-    問剖析.add_argument(
-        "--全開",
-        action="store_true",
-        help="跳過權限檢查並關掉沙箱。只在已經被隔離的環境裡用",
-    )
-    問剖析.add_argument("--續接", default=None, help="接回某段對話（給上一次輸出的 對話識別碼）")
-    問剖析.add_argument(
-        "--保留對話",
-        action="store_true",
-        help="把這段對話留在磁碟上，之後才續接得到（codex 預設不留）",
-    )
-    問剖析.add_argument(
-        "--不隔離設定",
-        action="store_true",
-        help="讓它讀使用者家目錄的設定。claude 的 --bare 連 keychain 都不讀，訂閱登入要靠這個",
-    )
-    問剖析.add_argument(
-        "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
-    )
-    問剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
-    問剖析.add_argument(
-        "--輸出檔",
-        default=None,
-        help="叫它邊做邊寫進這個檔。逾時被殺之後還撿得回進度（要搭 --可編輯）",
-    )
-    問剖析.add_argument(
-        "--背景",
-        action="store_true",
-        help="丟到背景跑，立刻回。印出識別碼與輸出檔；看還在跑什麼用 nova 狀態",
-    )
-    問剖析.add_argument(
-        "--熔斷",
-        action="store_true",
-        help="啟用跨執行熔斷（連續失敗時暫停呼叫該家）。預設關閉（看帳跟關流程是兩件事）",
-    )
+    _加委派旗標(問剖析, 題目說明="要問的話。不給就從 stdin 讀")
+
+    重構剖析 = 子.add_parser("重構", help="單獨叫重構員這一個節點（動到測試檔就回護欄，退出碼 4）")
+    重構剖析.set_defaults(執行=處理們["重構"])
+    _加委派旗標(重構剖析, 題目說明="要重構什麼")
 
     流剖析 = 子.add_parser("工作流", help="跑一輪 TDD：測試→驗證紅→實作→驗證綠→審查")
     流剖析.set_defaults(執行=處理們["工作流"])
