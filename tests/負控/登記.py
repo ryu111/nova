@@ -353,4 +353,18 @@ class 變異:
         該紅=("tests/單元/test_禁令指令.py::test_命令前綴包住真的git仍然要擋",),
         最多秒=2.0,
     ),
+    變異(
+        識別="逾時訊息丟掉stderr開場白",
+        目標檔=Path("src/nova/載體/模型/轉接.py"),
+        操作=替換一次(
+            ("    if not 部分標準輸出.strip():\n        return 逾時回應\n"),
+            (
+                "    if not 部分標準輸出.strip():\n"
+                "        return replace(逾時回應, 文字=部分標準錯誤)\n"
+            ),
+        ),
+        必須覆蓋=frozenset({289, 290}),
+        該紅=("tests/單元/test_逾時撿回.py::Test逾時的回應::test_codex開場白不是停滯位置",),
+        最多秒=2.0,
+    ),
 )
