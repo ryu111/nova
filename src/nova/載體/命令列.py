@@ -29,6 +29,7 @@ from nova.契約.工作流 import (
     結束代碼,
     階段代碼,
     階段定義,
+    預設單次最多token,
 )
 from nova.契約.帳本 import 一條規則的帳, 摘要
 from nova.契約.成果 import 成果
@@ -647,13 +648,14 @@ def _濾掉熔斷的(來源: str, 熔斷了: Callable[[str], bool]) -> list[str]
     return 留 or 家們[-1:]
 
 
-def _建腦(
+def _建腦(  # noqa: PLR0913 —— 記帳的旋鈕就是這麼多，包成資料類別會讓呼叫端更難讀
     來源: str,
     執行檔: Path | None,
     帳: 帳本,
     *,
     熔斷了: Callable[[str], bool] = lambda _: False,
     記全文: bool = True,
+    單次最多token: int = 預設單次最多token,
 ) -> 語言模型:
     """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。
 
@@ -668,7 +670,7 @@ def _建腦(
         raise ValueError(訊息)
     # 少裝一家不該讓整串垮掉（見 `缺席腦`）。只指定一家卻沒裝則當場炸。
     原始 = tuple(建立或缺席(cast(家族, 家), 執行檔=執行檔, 可以缺席=len(家們) > 1) for 家 in 家們)
-    腦們 = 記帳每一顆(原始, 帳, 記全文=記全文)
+    腦們 = 記帳每一顆(原始, 帳, 記全文=記全文, 單次最多token=單次最多token)
     return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
 
 
@@ -736,6 +738,7 @@ def _建TDD角色表(
     執行檔: Path | None,
     帳: 帳本,
     記全文: bool,
+    單次最多token: int = 預設單次最多token,
 ) -> Mapping[階段代碼, 角色]:
     """依藍圖建立 TDD 角色，讓每個角色共用同一條建腦路徑。"""
 
@@ -745,6 +748,7 @@ def _建TDD角色表(
             執行檔,
             帳,
             記全文=記全文,
+            單次最多token=單次最多token,
         )
 
     return cast(Mapping[階段代碼, 角色], 建角色表(藍圖們, 建腦=建腦))
@@ -1003,6 +1007,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                     執行檔=Path(參數.執行檔) if 參數.執行檔 else None,
                     帳=帳,
                     記全文=not 參數.不記全文,
+                    單次最多token=參數.單次最多token,
                 ),
                 跑判準=建判準(判準指令(參數.判準)),
                 跑重構判準=建重構判準(),
@@ -1017,8 +1022,12 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
             內層 = _邊跑邊印(執行) if 進度檔 is None else 進度執行器(_邊跑邊印(執行), 進度檔)
             果 = 跑工作流(
                 任務(描述=描述, 工作目錄=工作目錄, 前情=走過的),
-                執行一步=記帳執行器(內層, 帳),
-                停止=停止條件(最多步數=參數.最多步數, 最多token=參數.最多token),
+                執行一步=記帳執行器(內層, 帳, 單次最多token=參數.單次最多token),
+                停止=停止條件(
+                    最多步數=參數.最多步數,
+                    最多token=參數.最多token,
+                    單次最多token=參數.單次最多token,
+                ),
                 起點=階段代碼(參數.起點),
             )
     except (ValueError, FileNotFoundError) as 錯:

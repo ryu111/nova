@@ -7,7 +7,7 @@
 import argparse
 from collections.abc import Callable, Mapping
 
-from nova.契約.工作流 import 階段代碼, 預設最多token, 預設最多步數
+from nova.契約.工作流 import 階段代碼, 預設單次最多token, 預設最多token, 預設最多步數
 from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 預設逾時秒
 from nova.契約.觸發 import 喚醒來源
@@ -277,6 +277,12 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
         type=int,
         default=預設最多token,
         help="停止條件：累計花到這麼多 token 就不再發下一次呼叫",
+    )
+    剖析.add_argument(
+        "--單次最多token",
+        type=int,
+        default=預設單次最多token,
+        help="停止條件：單次呼叫花費超過這麼多 token 就在該步後以護欄停下並標記帳本",
     )
     剖析.add_argument("--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本")
     剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
