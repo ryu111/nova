@@ -8,7 +8,16 @@ import dataclasses
 
 import pytest
 
-from nova.契約.工作流 import 審查判定, 步驟結果, 種類, 結束, 結束代碼, 階段代碼, 階段定義
+from nova.契約.工作流 import (
+    出口標籤,
+    審查判定,
+    步驟結果,
+    種類,
+    結束,
+    結束代碼,
+    階段代碼,
+    階段定義,
+)
 from nova.契約.模型回應 import 終局
 from nova.迴圈.狀態機 import TDD階段表, 下一步, 卡住了, 卡住門檻, 查階段
 
@@ -117,12 +126,12 @@ class Test結果未知:
 
 
 def test_每個階段的下一步都指得到() -> None:
-    """轉移表指向不存在的階段——這支會紅。"""
+    """轉移表指向不存在的階段——這支會紅。**每一種出口都要查**，不只綠跟紅。"""
     代碼們 = {階段.代碼 for 階段 in TDD階段表}
     for 階段 in TDD階段表:
-        for 去處 in (階段.綠, 階段.紅):
+        for 標籤, 去處 in 階段.出口.items():
             if not isinstance(去處, 結束):
-                assert 去處 in 代碼們, f"{階段.代碼} 指向不存在的階段 {去處}"
+                assert 去處 in 代碼們, f"{階段.代碼} 的「{標籤}」指向不存在的階段 {去處}"
 
 
 def test_查不到的階段要當場炸() -> None:
@@ -138,7 +147,7 @@ def test_階段定義不可變() -> None:
 
 def test_enum的值都是ASCII() -> None:
     """識別字中文、值 ASCII——值要跨程序流動（journal、CLI 輸出）。"""
-    for 群 in (階段代碼, 種類, 結束代碼):
+    for 群 in (階段代碼, 種類, 結束代碼, 出口標籤):
         for 成員 in 群:
             assert 成員.value.isascii(), f"{成員!r} 的值不是 ASCII"
 

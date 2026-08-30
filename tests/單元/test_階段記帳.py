@@ -11,7 +11,17 @@ import json
 from contextlib import suppress
 from typing import Any
 
-from nova.契約.工作流 import 任務, 審查判定, 步驟結果, 種類, 階段代碼, 階段定義
+from nova.契約.工作流 import (
+    任務,
+    出口標籤,
+    審查判定,
+    步驟結果,
+    種類,
+    結束,
+    結束代碼,
+    階段代碼,
+    階段定義,
+)
 from nova.契約.帳本 import 事件種類
 from nova.契約.模型回應 import 用量, 終局
 from nova.載體.帳本 import 帳本, 建帳本
@@ -22,8 +32,11 @@ from nova.載體.階段記帳 import 記帳執行器
     名稱="實作",
     種類=種類.模型,
     期望綠=None,
-    綠=階段代碼.驗證綠,
-    紅=階段代碼.驗證綠,
+    出口={
+        出口標籤.綠: 階段代碼.驗證綠,
+        出口標籤.結果未知: 結束(結束代碼.護欄, "結果未知"),
+        出口標籤.確定失敗: 結束(結束代碼.中止, "做不出來"),
+    },
 )
 
 
