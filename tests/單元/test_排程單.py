@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.排程 import 不能當執行檔, 排程設定, 排程預算
+from nova.載體.排程 import 不能當執行檔, 怎麼跑, 排程設定, 排程預算
 from nova.載體.預算 import 上限 as 預算上限
 
 
@@ -34,7 +34,10 @@ def _設定(
     測試裡讀起來才是「使用者會打的那三個旗標」。
     """
     參 = {
-        "執行檔": Path("/Users/someone/nova/.venv/bin/nova"),
+        "跑法": 怎麼跑(
+            執行檔=Path("/Users/someone/nova/.venv/bin/nova-inbox"),
+            路徑環境="/usr/bin:/bin",
+        ),
         "專案": Path("/Users/someone/nova"),
         "狀態根": Path("/Users/someone/.local/state/nova"),
         "每幾分": 15,
@@ -64,7 +67,11 @@ def test_跑的是nova不是直譯器() -> None:
     """
     參數 = plistlib.loads(_設定().encode("utf-8"))["ProgramArguments"]
 
-    assert Path(參數[0]).name == "nova"
+    # 名字是 `nova-inbox`（硬連結出來的專用直譯器）不是 `nova`——
+    # console script 是 shebang 文字檔，kernel 執行的還是直譯器，
+    # 活動監視器就會顯示 `python3`。見 `確保啟動器在`。
+    assert Path(參數[0]).name.startswith("nova")
+    assert not 不能當執行檔(Path(參數[0]))
     assert Path(參數[0]).is_absolute()
 
 
@@ -121,7 +128,7 @@ def test_nova自己可以當執行檔() -> None:
 def test_執行檔名字不對就當場炸() -> None:
     """印出一份裝下去會看不出是誰的 plist，比不印更糟。"""
     with pytest.raises(ValueError, match="uv"):
-        _設定(執行檔=Path("/opt/homebrew/bin/uv"))
+        _設定(跑法=怎麼跑(執行檔=Path("/opt/homebrew/bin/uv")))
 
 
 class Test預算旗標要進得了排程:

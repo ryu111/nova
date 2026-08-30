@@ -160,15 +160,37 @@ def 確保啟動器在(直譯器: Path) -> Path:
 不鎖 = 排程預算()
 
 
-def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: int, 預算: 排程預算 = 不鎖) -> str:
+@dataclass(frozen=True, slots=True)
+class 怎麼跑:
+    """時鐘要跑哪個執行檔、用什麼 `PATH` 跑。
+
+    **兩個綁在一起是有原因的**：少了任何一個，另一個就沒意義——
+    指到對的執行檔但 `PATH` 不對，判準照樣跑不起來，而那個
+    `FileNotFoundError` 會被當成「測試紅了」（實測 2026-08-30，
+    一次醒來燒掉 997,031 token）。分成兩個參數就一定有人只給一個。
+    """
+
+    執行檔: Path
+    #: launchd 不跑登入 shell，不帶就是 `/usr/bin:/bin:/usr/sbin:/sbin`。
+    路徑環境: str = ""
+
+
+def 排程設定(
+    *,
+    跑法: 怎麼跑,
+    專案: Path,
+    狀態根: Path,
+    每幾分: int,
+    預算: 排程預算 = 不鎖,
+) -> str:
     """產生一份 launchd plist。**執行檔名字不對就當場炸。**
 
     印出一份裝下去會看不出是誰的 plist，比不印更糟——裝了之後
     使用者在「登入項目」看到一個叫 `uv` 的東西，而且不知道怎麼關掉。
     """
-    if 不能當執行檔(執行檔):
+    if 不能當執行檔(跑法.執行檔):
         訊息 = (
-            f"{執行檔.name} 不能當排程的執行檔："
+            f"{跑法.執行檔.name} 不能當排程的執行檔："
             "「登入項目與延伸功能」只顯示執行檔名，寫直譯器或代跑工具的話"
             "看不出是誰的 job。要指到 nova 自己那支"
         )
@@ -186,12 +208,19 @@ def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: i
         # **第一格是硬連結出來的專用直譯器**，不是 console script——
         # console script 是 shebang 文字檔，kernel 執行的是直譯器，
         # 活動監視器就會顯示 `python3.13`（見 `確保啟動器在`）。
-        "ProgramArguments": [str(執行檔), "-m", "nova", "工作流", "--從收件匣", *預算.旗標()],
+        "ProgramArguments": [str(跑法.執行檔), "-m", "nova", "工作流", "--從收件匣", *預算.旗標()],
         "WorkingDirectory": str(專案),
         "StartInterval": 每幾分 * _一分鐘幾秒,
         "RunAtLoad": False,
         # 名字由 kernel 決定、事後改不了，所以識別靠環境變數。
-        "EnvironmentVariables": {"APP_ROLE": "nova.inbox"},
+        #
+        # **`PATH` 一定要帶。** launchd 不跑登入 shell，程序拿到的是
+        # `/usr/bin:/bin:/usr/sbin:/sbin`——而 `uv` 住在 `~/.local/bin`。
+        # 少了它，預設判準 `uv run pytest -q` 在排程底下根本跑不起來。
+        # 實測 2026-08-30：那個 FileNotFoundError 被當成「測試紅了」，
+        # 工作流回去再實作一次，一次醒來燒掉 997,031 token。
+        # 由 `test_排程的環境跑得起預設判準` 背書（判準三：要驗可達性）。
+        "EnvironmentVariables": {"APP_ROLE": "nova.inbox", "PATH": 跑法.路徑環境},
         # **log 落在狀態目錄不落在專案裡**：它也是會被餵回模型的東西，
         # 落在工作目錄裡執行者就摸得到。
         "StandardOutPath": str(log目錄 / f"{標籤}.out.log"),
