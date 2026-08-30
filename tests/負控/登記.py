@@ -489,6 +489,19 @@ class 變異:
         最多秒=2.0,
     ),
     變異(
+        識別="帳本只算success收場的token",
+        目標檔=Path("src/nova/載體/帳本讀取.py"),
+        操作=替換一次(
+            "            if isinstance(值, int):\n",
+            '            if isinstance(值, int) and 事.get("outcome") == "success":\n',
+        ),
+        該紅=(
+            "tests/單元/test_帳本讀取.py::Test每一種收場的token都要算::test_unknown收場的token算進總計",
+            "tests/單元/test_帳本讀取.py::Test每一種收場的token都要算::test_失敗收場的token也算",
+        ),
+        最多秒=2.0,
+    ),
+    變異(
         識別="測試員提示拿掉讀取策略",
         目標檔=Path("src/nova/迴圈/角色提示.py"),
         操作=替換一次(
