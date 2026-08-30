@@ -18,6 +18,8 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 
 from nova.契約.工作流 import (
     任務,
@@ -76,6 +78,7 @@ def 跑工作流(
     索引 = 建索引(階段表)
     _檢查階段表(索引, 起點)
     軌跡: list[步驟結果] = []
+    工作區雜湊們: list[str | None] = []
     已花token = 0
     目前: 階段代碼 | 結束 = 起點
     for _ in range(停止.最多步數):
@@ -92,12 +95,17 @@ def 跑工作流(
                 f"{預算不足原因}——停在「{索引[目前].名稱}」之前（沒有預算上限的迴圈是成本漏洞）",
             )
             return 工作流結果(結束=收尾, 軌跡=tuple(軌跡))
-        沒進展 = 卡住了(tuple(軌跡), 階段表)
+        沒進展 = 卡住了(
+            tuple(軌跡),
+            階段表,
+            工作區雜湊們=tuple(工作區雜湊們) if 任務.工作目錄.is_dir() else None,
+        )
         if 沒進展 is not None:
             return 工作流結果(結束=結束(結束代碼.護欄, 沒進展), 軌跡=tuple(軌跡))
         定義 = 索引[目前]
         結果 = 執行一步(定義, 任務, tuple(軌跡))
         軌跡.append(結果)
+        工作區雜湊們.append(_工作區雜湊(任務.工作目錄) if 定義.種類 is 種類.判準 else None)
         已花token += 結果.花費.總token if 結果.花費 is not None else 0
         目前 = 下一步(定義, 結果)
     if isinstance(目前, 結束):
@@ -112,6 +120,25 @@ def _算剩餘階數(階段表: tuple[階段定義, ...], 目前: 階段代碼) 
     """算出從目前階段起，階段表還有幾個階段。"""
     目前位置 = next(位置 for 位置, 定義 in enumerate(階段表) if 定義.代碼 is 目前)
     return len(階段表) - 目前位置
+
+
+def _工作區雜湊(工作目錄: Path) -> str | None:
+    """以檔案路徑與內容雜湊組出工作區快照，忽略執行時快取。"""
+    if not 工作目錄.is_dir():
+        return None
+    總雜湊 = sha256()
+    for 檔案 in sorted(工作目錄.rglob("*")):
+        相對路徑 = 檔案.relative_to(工作目錄)
+        if not 檔案.is_file() or any(
+            片段 in {".git", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+            for 片段 in 相對路徑.parts
+        ):
+            continue
+        if 檔案.name == ".coverage":
+            continue
+        總雜湊.update(str(相對路徑).encode("utf-8"))
+        總雜湊.update(sha256(檔案.read_bytes()).digest())
+    return 總雜湊.hexdigest()
 
 
 def _預算不夠(已花: int, 上限: int, 估: int, 剩餘階數: int) -> str | None:
