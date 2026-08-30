@@ -17,6 +17,7 @@ from nova.載體.serial佔比 import 檢查serial佔比
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
 from nova.載體.程序 import 具名啟動
+from nova.載體.規範落點 import 檢查規範落點
 from nova.載體.語言 import 檢查繁體中文
 from nova.載體.豁免登記 import 檢查ruff豁免
 from nova.載體.閘 import 型別, 測試, 規則, 靜態
@@ -157,12 +158,12 @@ def 建規則表(根目錄: Path) -> list[規則]:
     階段安排就是資源排程：靜態檢查（秒級）先跑，型別次之，測試最後。
     一次只跑一條，避免 ruff 與 pytest 同時吃滿 CPU 讓對時間敏感的檢查無故變紅。
     """
-    全部 = frozenset({"提交", "ci"})
-    return [
+    提交與CI = frozenset({"提交", "ci"})
+    規則們 = [
         規則(
             代碼="lang-traditional",
             名稱="繁體中文（不准簡體字與日文新字體）",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=lambda: 檢查繁體中文(根目錄),
             階段=靜態,
@@ -170,7 +171,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
         規則(
             代碼="no-secrets",
             名稱="機密不進版控",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=lambda: 檢查機密(根目錄),
             階段=靜態,
@@ -178,7 +179,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
         規則(
             代碼="test-count",
             名稱="測試數不准減少",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=lambda: 檢查測試數(根目錄, 基準=決定基準(os.environ)),
             階段=靜態,
@@ -186,7 +187,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
         規則(
             代碼="ruff-check",
             名稱="ruff 靜態檢查",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=_外部指令(根目錄, "ruff", "check", "--no-cache", "."),
             階段=靜態,
@@ -194,7 +195,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
         規則(
             代碼="ruff-format",
             名稱="ruff 格式",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=_外部指令(根目錄, "ruff", "format", "--check", "--no-cache", "."),
             階段=靜態,
@@ -210,7 +211,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
         規則(
             代碼="mypy",
             名稱="型別（strict）",
-            閘點=全部,
+            閘點=提交與CI,
             負責層="載體",
             檢查=_外部指令(根目錄, "mypy", "--no-incremental"),
             階段=型別,
@@ -275,3 +276,21 @@ def 建規則表(根目錄: Path) -> list[規則]:
             階段=靜態,
         ),
     ]
+
+    def 檢查規範() -> tuple[bool, str]:
+        通過, 摘要 = 檢查規範落點(根目錄, {條.代碼 for 條 in 規則們})
+        if 通過:
+            sys.stdout.write(f"{摘要}\n")
+        return 通過, 摘要
+
+    規則們.append(
+        規則(
+            代碼="claude-location",
+            名稱="CLAUDE.md 規範落點",
+            閘點=frozenset({"ci"}),
+            負責層="載體",
+            檢查=檢查規範,
+            階段=靜態,
+        )
+    )
+    return 規則們

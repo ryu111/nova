@@ -96,6 +96,7 @@ from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, �
 from nova.載體.遮罩 import 遮罩
 from nova.載體.重構護欄 import 動到測試了嗎, 拍快照
 from nova.載體.閘 import 跑閘
+from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 超支了嗎
 from nova.迴圈 import 角色提示
@@ -161,6 +162,12 @@ def _子命令_閘(參數: argparse.Namespace) -> int:
     except ValueError as 錯:
         print(str(錯), file=sys.stderr)
         return 閘紅
+    落成閘紅票們(
+        結果表,
+        閘點=參數.閘點,
+        喚醒來源=參數.喚醒來源,
+        專案=根目錄,
+    )
     return _印結果(結果表)
 
 
