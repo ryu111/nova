@@ -85,6 +85,28 @@ class Test檢查指令:
         結果 = _跑("檢查指令", "--stdin", 輸入="{壞掉的")
         assert 結果.returncode == 2
 
+    def test_擋下來的訊息要帶真的會話識別碼(self) -> None:
+        """**佔位符等於沒給。**
+
+        2026-08-30 這道護欄第一次擋到人的時候，訊息裡寫的是字面的
+        `--會話 <會話識別碼>`。人照著複製會失敗；更糟的是那個佔位符含角括號，
+        複製下來執行會命中重導樣式**被護欄自己擋掉**——擋了就沒有出路。
+
+        hook 的 JSON 裡本來就有 `session_id`，接上就好。
+        `檢查編輯`（Edit／Write 那條）一直都是這樣做的，只有這條漏了。
+        """
+        載荷 = json.dumps(
+            {
+                "session_id": "阿貓-1234",
+                "tool_input": {"command": "echo x > src/nova/甲.py"},
+            }
+        )
+
+        結果 = _跑("檢查指令", "--stdin", 輸入=載荷)
+
+        assert 結果.returncode == 2, 結果.stdout + 結果.stderr
+        assert "阿貓-1234" in 結果.stderr, f"訊息裡沒有真的會話識別碼：{結果.stderr}"
+
 
 class Test閘:
     def test_未知閘點要報錯不是靜默全綠(self) -> None:

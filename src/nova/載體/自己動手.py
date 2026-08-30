@@ -47,12 +47,13 @@ def 在管轄範圍嗎(路徑: Path, *, 根目錄: Path) -> bool:
     `docs/` 底下，那等於沒擋到點開頭的地盤。
     """
     try:
-        相對 = 路徑.resolve().relative_to(根目錄.resolve())
+        絕對路徑 = 路徑 if 路徑.is_absolute() else (根目錄 / 路徑)
+        相對 = 絕對路徑.resolve().relative_to(根目錄.resolve())
     except ValueError:
         return False
     if not 相對.parts:
         return False
-    return not any(段.startswith(".") for 段 in 相對.parts)
+    return not any(段.startswith(".") or 段 == "scratchpad" for 段 in 相對.parts)
 
 
 def 繞過目錄(專案: Path) -> Path:
