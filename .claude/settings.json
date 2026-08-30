@@ -11,6 +11,17 @@
             "statusMessage": "nova 檢查指令"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --no-sync --project \"$CLAUDE_PROJECT_DIR\" nova 檢查編輯 --stdin",
+            "timeout": 15,
+            "statusMessage": "nova 檢查編輯"
+          }
+        ]
       }
     ]
   }

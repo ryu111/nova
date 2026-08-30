@@ -57,6 +57,17 @@ def _加檢查類(
     指令剖析.add_argument("命令", nargs="*", help="要檢查的指令字串")
     指令剖析.add_argument("--stdin", action="store_true", help="改從 stdin 讀 agent hook 的 JSON")
 
+    編輯剖析 = 子.add_parser(
+        "檢查編輯", help="agent hook 問「這個編輯可以嗎」（退出碼永遠 0，擋不擋看印出來的 JSON）"
+    )
+    編輯剖析.set_defaults(執行=處理們["檢查編輯"])
+    編輯剖析.add_argument("--stdin", action="store_true", help="從 stdin 讀 agent hook 的 JSON")
+
+    繞過剖析 = 子.add_parser("繞過", help="記下「這次為什麼自己動手，不走 nova」")
+    繞過剖析.set_defaults(執行=處理們["繞過"])
+    繞過剖析.add_argument("--會話", required=True, help="session id，被擋下來的訊息裡有")
+    繞過剖析.add_argument("--因為", required=True, help="nova 做不了的是哪一格")
+
     訊息剖析 = 子.add_parser("檢查提交訊息", help="檢查 commit 訊息是不是繁體中文")
     訊息剖析.set_defaults(執行=處理們["檢查提交訊息"])
     訊息剖析.add_argument("檔案", help="commit 訊息檔（git 會傳 .git/COMMIT_EDITMSG）")
