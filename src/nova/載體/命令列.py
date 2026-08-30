@@ -149,27 +149,38 @@ def _子命令_閘(參數: argparse.Namespace) -> int:
     return _印結果(結果表)
 
 
-def _取出指令(參數: argparse.Namespace) -> tuple[str | None, str]:
-    """回傳 (要檢查的指令, 錯誤訊息)。指令是 None 代表沒有東西要檢查。"""
+def _取出指令(參數: argparse.Namespace) -> tuple[str | None, str, str]:
+    """回傳 (要檢查的指令, 會話識別碼, 錯誤訊息)。指令是 None 代表沒有東西要檢查。
+
+    **會話識別碼要一起帶出來**：擋下來的訊息要告訴人怎麼記繞過理由，
+    而那句話裡的 `--會話` 填佔位符等於沒給——照抄會失敗，
+    而且佔位符含角括號的話，照抄下來執行還會被護欄自己擋掉。
+    """
     if not 參數.stdin:
-        return " ".join(參數.命令), ""
+        return " ".join(參數.命令), "", ""
     try:
         載荷 = json.load(sys.stdin)
     except (json.JSONDecodeError, UnicodeDecodeError) as 錯:
-        return None, f"stdin 不是合法 JSON（{錯}）——讀不懂就不放行"
+        return None, "", f"stdin 不是合法 JSON（{錯}）——讀不懂就不放行"
     工具輸入 = 載荷.get("tool_input") or 載荷
     指令 = 工具輸入.get("command")
-    return (指令 if isinstance(指令, str) else None), ""
+    會話 = 載荷.get("session_id")
+    return (
+        指令 if isinstance(指令, str) else None,
+        會話 if isinstance(會話, str) else "",
+        "",
+    )
 
 
 def _子命令_檢查指令(參數: argparse.Namespace) -> int:
-    指令, 錯誤 = _取出指令(參數)
+    指令, 會話, 錯誤 = _取出指令(參數)
     if 錯誤:
         print(錯誤, file=sys.stderr)
         return 阻擋
     if not 指令:
         return 放行
-    通過, 原因 = 檢查指令(指令)
+    專案 = 在哪跑(getattr(參數, "工作目錄", None))
+    通過, 原因 = 檢查指令(指令, 根目錄=專案, 會話=會話, 專案=專案)
     if 通過:
         return 放行
     print(f"nova 阻擋：{原因}", file=sys.stderr)
