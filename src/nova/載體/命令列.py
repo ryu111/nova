@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,7 +35,7 @@ from nova.契約.成果 import 成果
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類, 派法
-from nova.契約.角色 import 呼叫選項, 權限, 語言模型
+from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型
 from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
@@ -88,7 +88,6 @@ from nova.載體.禁令 import 檢查指令
 from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
-from nova.載體.角色 import 固定提示角色
 from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.遮罩 import 遮罩
@@ -98,6 +97,8 @@ from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 超支了嗎
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
+from nova.迴圈.角色工廠 import TDD角色藍圖 as TDD角色藍圖資料
+from nova.迴圈.角色工廠 import 建角色表, 角色藍圖
 
 放行, 閘紅, 阻擋 = 0, 1, 2
 #: 護欄生效：**按設計停了，不是壞了。** 外圈看到這個碼不准去「修」——
@@ -685,20 +686,46 @@ def _階段的派法(階段: 階段代碼) -> 派法:
     return 怎麼派(種)
 
 
-def _建角色(  # noqa: PLR0913 —— 全部是「建一顆角色」的參數，收成物件只是換個地方寫
-    來源: str,
-    執行檔: str | None,
-    系統提示: str,
-    可以做什麼: 權限,
-    帳: 帳本,
+def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
+    """把命令列的腦來源套到 TDD 藍圖，保留派工表的模型設定。"""
+
+    def _整理腦來源(來源: str) -> tuple[str, ...]:
+        return tuple(家.strip() for 家 in 來源.split(",") if 家.strip())
+
+    結果: list[角色藍圖] = []
+    for 藍圖 in TDD角色藍圖資料:
+        指名 = 參數.審查用 if 藍圖.識別碼 == 階段代碼.審查.value else 參數.用
+        if 指名:
+            結果.append(
+                dataclasses.replace(
+                    藍圖,
+                    派法=派法(腦們=_整理腦來源(指名)),
+                    模型=None,
+                )
+            )
+            continue
+        結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型))
+    return tuple(結果)
+
+
+def _建TDD角色表(
+    藍圖們: tuple[角色藍圖, ...],
     *,
-    模型: str | None = None,
-    記全文: bool = True,
-) -> 固定提示角色:
-    腦 = _建腦(來源, Path(執行檔) if 執行檔 else None, 帳, 記全文=記全文)
-    # 模型走**角色**不走腦：同一顆腦可以被不同角色用不同型號叫
-    # （推理階段要 sol，例行階段要便宜的預設）。
-    return 固定提示角色(名稱=腦.名稱, 系統提示=系統提示, 腦=腦, 權限=可以做什麼, 模型=模型)
+    執行檔: Path | None,
+    帳: 帳本,
+    記全文: bool,
+) -> Mapping[階段代碼, 角色]:
+    """依藍圖建立 TDD 角色，讓每個角色共用同一條建腦路徑。"""
+
+    def 建腦(角色派法: 派法) -> 語言模型:
+        return _建腦(
+            ",".join(角色派法.腦們),
+            執行檔,
+            帳,
+            記全文=記全文,
+        )
+
+    return cast(Mapping[階段代碼, 角色], 建角色表(藍圖們, 建腦=建腦))
 
 
 @contextmanager
@@ -935,32 +962,13 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
     這次.執行識別碼 = 識別
     try:
         with _開帳(參數, 執行識別碼=識別) as 帳:
-
-            def 建(階段: 階段代碼, 提示: str, 可以做什麼: 權限) -> 固定提示角色:
-                # **不給 `--用` 就照派工表**——策略寫在表裡卻沒人執行等於沒有策略。
-                指名 = 參數.審查用 if 階段 is 階段代碼.審查 else 參數.用
-                if 指名:
-                    return _建角色(
-                        指名, 參數.執行檔, 提示, 可以做什麼, 帳, 記全文=not 參數.不記全文
-                    )
-                派 = _階段的派法(階段)
-                return _建角色(
-                    ",".join(派.腦們),
-                    None,
-                    提示,
-                    可以做什麼,
-                    帳,
-                    模型=派.模型,
-                    記全文=not 參數.不記全文,
-                )
-
             執行 = 建TDD執行器(
-                角色表={
-                    階段代碼.測試: 建(階段代碼.測試, 角色提示.測試員, 權限.可編輯),
-                    階段代碼.實作: 建(階段代碼.實作, 角色提示.實作員, 權限.可編輯),
-                    階段代碼.重構: 建(階段代碼.重構, 角色提示.重構員, 權限.可編輯),
-                    階段代碼.審查: 建(階段代碼.審查, 角色提示.審查員, 權限.唯讀),
-                },
+                角色表=_建TDD角色表(
+                    _這次的TDD角色藍圖(參數),
+                    執行檔=Path(參數.執行檔) if 參數.執行檔 else None,
+                    帳=帳,
+                    記全文=not 參數.不記全文,
+                ),
                 跑判準=建判準(判準指令(參數.判準)),
             )
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。

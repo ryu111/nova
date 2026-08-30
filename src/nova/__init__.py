@@ -24,7 +24,8 @@ from nova.契約.工作流 import (
 from nova.契約.模型回應 import 回應 as 回應
 from nova.契約.模型回應 import 失敗代碼 as 失敗代碼
 from nova.契約.模型回應 import 終局 as 終局
-from nova.契約.角色 import 呼叫選項, 語言模型, 預設逾時秒
+from nova.契約.派工 import 派法
+from nova.契約.角色 import 呼叫選項, 角色, 語言模型, 預設逾時秒
 from nova.契約.角色 import 權限 as 權限
 from nova.契約.額度 import 家族額度 as 家族額度
 from nova.契約.額度 import 視窗 as 視窗
@@ -34,12 +35,11 @@ from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
-from nova.載體.角色 import 固定提示角色
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.額度 import 查詢額度
-from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 from nova.迴圈.工作流 import 工作流結果 as 工作流結果
+from nova.迴圈.角色工廠 import TDD角色藍圖, 建角色表
 
 #: `用` 可以給一家，也可以給一串（前一顆失敗就換下一顆）。
 #: 字串用逗號分隔也算一串，方便從命令列傳進來。
@@ -225,6 +225,16 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
         )
 
 
+def _建TDD角色表(執行者: 語言模型, 審查者: 語言模型) -> Mapping[階段代碼, 角色]:
+    """用兩顆已建好的腦，組出 TDD 的角色表。"""
+    審查派法 = TDD角色藍圖[-1].派法
+
+    def 建腦(角色派法: 派法) -> 語言模型:
+        return 審查者 if 角色派法 == 審查派法 else 執行者
+
+    return cast(Mapping[階段代碼, 角色], 建角色表(TDD角色藍圖, 建腦=建腦))
+
+
 def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物件只是換個地方列
     任務描述: str,
     *,
@@ -243,20 +253,7 @@ def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物�
     執行者 = _建腦(做事的, 執行檔, 帳)
     審查者 = _建腦(審查的, 審查執行檔, 帳)
     執行 = 建TDD執行器(
-        角色表={
-            階段代碼.測試: 固定提示角色(
-                名稱=執行者.名稱, 系統提示=角色提示.測試員, 腦=執行者, 權限=權限.可編輯
-            ),
-            階段代碼.實作: 固定提示角色(
-                名稱=執行者.名稱, 系統提示=角色提示.實作員, 腦=執行者, 權限=權限.可編輯
-            ),
-            階段代碼.重構: 固定提示角色(
-                名稱=執行者.名稱, 系統提示=角色提示.重構員, 腦=執行者, 權限=權限.可編輯
-            ),
-            階段代碼.審查: 固定提示角色(
-                名稱=審查者.名稱, 系統提示=角色提示.審查員, 腦=審查者, 權限=權限.唯讀
-            ),
-        },
+        角色表=_建TDD角色表(執行者, 審查者),
         跑判準=建判準() if 判準指令 is None else 建判準(判準指令),
     )
     目錄 = 工作目錄 or Path.cwd()
