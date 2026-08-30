@@ -30,6 +30,27 @@ class 階段代碼(StrEnum):
     審查 = "review"
 
 
+class 工作區狀態(StrEnum):
+    """結果未知收場時，工作區能被唯讀判定出的狀態。"""
+
+    綠 = "green"
+    紅 = "red"
+    沒被動過 = "untouched"
+
+
+type 規則代碼 = str
+
+
+@dataclass(frozen=True, slots=True)
+class 工作區判定:
+    """工作區唯讀判定的結構化證據。"""
+
+    狀態: 工作區狀態
+    綠的: tuple[規則代碼, ...] = ()
+    紅的: tuple[規則代碼, ...] = ()
+    未跑的階段: tuple[階段代碼, ...] = ()
+
+
 class 種類(StrEnum):
     """這個階段由誰做，以及**驗收權在誰手上**。
 
