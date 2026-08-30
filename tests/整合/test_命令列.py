@@ -269,6 +269,13 @@ class Test工作流不給用哪家就照派工表:
         推理 = 怎麼派(工作種類.推理).腦們[0]
         assert 例行 != 推理, "派工表挑出同一家，審查就變成自寫自評"
 
+    def test_例行階段的思考深度是high(self) -> None:
+        for 階段 in (階段代碼.測試, 階段代碼.實作, 階段代碼.重構):
+            assert _階段的派法(階段).思考深度 == "high", 階段
+
+    def test_審查階段的思考深度是max(self) -> None:
+        assert _階段的派法(階段代碼.審查).思考深度 == "max"
+
 
 class Test不給用哪家也不准自寫自評:
     """真跑才抓到的一個 `AttributeError`。

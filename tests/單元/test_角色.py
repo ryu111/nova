@@ -78,6 +78,11 @@ class Test固定提示角色:
         msg = "角色的系統提示是它的身分，不准被改掉"
         raise AssertionError(msg)
 
+    def test_思考深度會傳進呼叫選項(self) -> None:
+        腦 = 假腦()
+        固定提示角色(名稱="測試員", 系統提示="x", 腦=腦, 思考深度="high").做("任務")
+        assert 腦.選項們[0].思考深度 == "high"
+
 
 class Test換腦:
     def test_假腦符合語言模型協定(self) -> None:
