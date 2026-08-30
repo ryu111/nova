@@ -119,6 +119,42 @@ class 排程預算:
         return 旗
 
 
+#: 排程用的啟動器名字。**ASCII kebab-case**：`pkill`、log 過濾、launchctl
+#: 的字串比對都在讀它，中文會出問題（CLAUDE.md 的 ASCII 例外條款）。
+#: 形式是命名規範的 `<APP>-<role>`，跟 `APP_ROLE=nova.inbox` 對得起來。
+啟動器名 = "nova-inbox"
+
+
+def 確保啟動器在(直譯器: Path) -> Path:
+    """把直譯器硬連結成一個看得出是誰的名字，回傳那個路徑。
+
+    **程序名稱由 kernel 在 `exec` 當下依真正執行的那個二進位決定，事後改不了。**
+    `.venv/bin/nova` 是 shebang 文字檔，kernel 執行的是直譯器，所以
+    活動監視器顯示的是 `python3.13`——實測 2026-08-30，macOS 15。
+    一台機器上跑幾個 python 工具就會出現一排分不出誰是誰的 `python3`。
+
+    **硬連結不是複製**：同一份 inode，升級直譯器時不會留下一份舊的在跑。
+    而且它必須留在 `.venv/bin/` 裡——Python 是從 `sys.executable` 的上一層
+    找 `pyvenv.cfg`，搬出去就找不到 venv，`import nova` 當場炸。
+
+    **每次都對一次 inode**：直譯器升級之後 `.venv/bin/python` 指到新的那份，
+    舊的硬連結還在——於是排程拿舊直譯器配新套件跑，而錯誤只出現在
+    launchd 的 log 裡，沒有人會看到。不一樣就換掉。
+    """
+    # **一定要自己 `resolve()`，不要靠 `os.link` 跟著符號連結走。**
+    # `.venv/bin/python` 是符號連結，而「硬連結會不會跟著它走」**兩個平台不一樣**
+    # ——macOS 上會，Linux 上不會（2026-08-30 CI 實測：把這行拿掉之後
+    # `test_跟著符號連結走到真的那份` 在 macOS 全綠、在 Linux 當場紅）。
+    # 不跟著走的話連出來的是「指向符號連結的硬連結」，直譯器一升級就整個斷掉。
+    真身 = 直譯器.resolve()
+    落點 = 直譯器.parent / 啟動器名
+    if 落點.exists() and 落點.stat().st_ino == 真身.stat().st_ino:
+        return 落點
+    落點.unlink(missing_ok=True)
+    落點.hardlink_to(真身)
+    return 落點
+
+
 #: 不鎖。做成模組層的單例是因為 `排程預算()` 不准寫在參數預設值裡（ruff B008）——
 #: 它是 frozen 的所以其實安全，但那條規則沒有例外，而名字讀起來也更清楚。
 不鎖 = 排程預算()
@@ -147,7 +183,10 @@ def 排程設定(*, 執行檔: Path, 專案: Path, 狀態根: Path, 每幾分: i
         # 每一格是獨立的字串——`ProgramArguments` 不經過 shell，
         # `"--預算token 500000"` 塞成一格會變成一個沒人認得的旗標，
         # 而報錯是在 launchd 的 log 裡，沒有人會看到。
-        "ProgramArguments": [str(執行檔), "工作流", "--從收件匣", *預算.旗標()],
+        # **第一格是硬連結出來的專用直譯器**，不是 console script——
+        # console script 是 shebang 文字檔，kernel 執行的是直譯器，
+        # 活動監視器就會顯示 `python3.13`（見 `確保啟動器在`）。
+        "ProgramArguments": [str(執行檔), "-m", "nova", "工作流", "--從收件匣", *預算.旗標()],
         "WorkingDirectory": str(專案),
         "StartInterval": 每幾分 * _一分鐘幾秒,
         "RunAtLoad": False,
