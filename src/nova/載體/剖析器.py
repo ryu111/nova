@@ -47,6 +47,12 @@ def _加檢查類(
     閘剖析.set_defaults(執行=處理們["閘"])
     閘剖析.add_argument("閘點", help="提交 或 ci")
     閘剖析.add_argument(
+        "--喚醒來源",
+        choices=[來源.value for 來源 in 喚醒來源],
+        default=喚醒來源.人手動敲.value,
+        help="誰讓這次閘醒來；排程必須明傳 schedule",
+    )
+    閘剖析.add_argument(
         "--全部跑完", action="store_true", help="不提前停止，一次看到所有紅的（CI 用）"
     )
     閘剖析.add_argument(
