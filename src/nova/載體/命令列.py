@@ -36,7 +36,7 @@ from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型
-from nova.載體.判準 import 判準指令, 在哪跑, 建判準
+from nova.載體.判準 import 判準指令, 在哪跑, 建判準, 建重構判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
@@ -975,6 +975,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                     記全文=not 參數.不記全文,
                 ),
                 跑判準=建判準(判準指令(參數.判準)),
+                跑重構判準=建重構判準(),
             )
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
             # 拆成兩個旗標的話，一定有人只給其中一個，然後以為自己接上了。

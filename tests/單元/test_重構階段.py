@@ -16,7 +16,7 @@ nova 的落地有兩個關鍵決定：
    nova 目前沒有回滾機制，中止至少留下一個乾淨的「這裡壞了」訊號。
 """
 
-from nova.契約.工作流 import 審查判定, 步驟結果, 結束, 結束代碼, 階段代碼
+from nova.契約.工作流 import 審查判定, 步驟結果, 結束, 階段代碼
 from nova.契約.模型回應 import 終局
 from nova.迴圈.狀態機 import 下一步, 查階段
 
@@ -42,11 +42,10 @@ class Test重構在哪:
 
 
 class Test弄壞了怎麼辦:
-    def test_驗證重構紅了要停下來不准往前除錯(self) -> None:
-        """SOP：嚴禁 fix-forward。而且退回重構是無界回頭邊。"""
+    def test_驗證重構的lint或格式紅了要退回重構員(self) -> None:
+        """重構後的 lint／格式檢查紅了，要回到重構員整理，不准帶著紅往前走。"""
         下 = 下一步(查階段(階段代碼.驗證重構), 做結果(階段代碼.驗證重構, 綠=False))
-        assert isinstance(下, 結束)
-        assert 下.代碼 is 結束代碼.護欄
+        assert 下 is 階段代碼.重構
 
     def test_重構做不出來也是中止(self) -> None:
         下 = 下一步(查階段(階段代碼.重構), 做結果(階段代碼.重構, 終=終局.確定失敗))
