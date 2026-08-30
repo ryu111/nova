@@ -16,7 +16,7 @@ gh pr merge 缺少 --delete-branch），完全不檢查是否寫檔。
 2. 就地編輯：`sed -i` 之後的檔案參數
 3. tee：`tee` 或 `tee -a` 後面的 token
 4. 複製搬移：`cp`、`mv` 的最後一個 token
-5. python heredoc：內容同時出現寫檔呼叫（`write_text`、`open(` 帶 `"w"`/`"a"`/`"x"`）
+5. python heredoc：內容同時出現寫檔呼叫（`write_text`、`write_bytes`、`open(` 帶 `"w"`/`"a"`/`"x"`）
    與管轄範圍路徑字樣（`src/`、`tests/`、`docs/`）
 
 ## 放行原則（不准擋過頭）
@@ -31,7 +31,6 @@ from pathlib import Path
 import pytest
 
 from nova.載體.禁令 import 會寫到管轄範圍嗎, 檢查指令
-from nova.載體.自己動手 import 記下繞過
 
 根 = Path("/repo")
 
@@ -89,6 +88,11 @@ class Test就地編輯:
     def test_就地編輯非管轄檔案或唯讀sed要放行(self, 命令: str) -> None:
         assert 會寫到管轄範圍嗎(命令, 根目錄=根) is False
 
+    def test_就地編輯多檔案含管轄檔案要命中(self) -> None:
+        """`sed -i` 同時指定多個檔案時，只要有任一個是管轄檔案就要命中。"""
+        命令 = "sed -i 's/a/b/' src/nova/載體/禁令.py /tmp/temp.txt"
+        assert 會寫到管轄範圍嗎(命令, 根目錄=根) is True
+
 
 class TestTee寫入:
     """測試 `tee` 與 `tee -a` 寫檔形式。"""
@@ -133,6 +137,29 @@ class Test複製搬移:
     @pytest.mark.parametrize(
         "命令",
         [
+            "cp -t src/nova/載體/ /tmp/patch.py",
+            "mv -t src/nova/載體/ /tmp/patch.py",
+        ],
+    )
+    def test_複製搬移使用目標目錄旗標要命中(self, 命令: str) -> None:
+        """`cp -t` 或 `mv -t` 指定管轄目錄為目標時要命中。"""
+        assert 會寫到管轄範圍嗎(命令, 根目錄=根) is True
+
+    @pytest.mark.parametrize(
+        "命令",
+        [
+            "cp /tmp/patch.py src/nova/載體/禁令.py -f",
+            "mv /tmp/temp_test.py tests/單元/test_temp.py -f",
+            "cp /tmp/patch.py src/nova/載體/禁令.py -v",
+        ],
+    )
+    def test_複製搬移帶有尾隨旗標要命中(self, 命令: str) -> None:
+        """`cp` 或 `mv` 指令在目標路徑後方帶有旗標（如 `-f`、`-v`）時仍要命中。"""
+        assert 會寫到管轄範圍嗎(命令, 根目錄=根) is True
+
+    @pytest.mark.parametrize(
+        "命令",
+        [
             "cp src/nova/載體/禁令.py /tmp/backup.py",
             "mv docs/README.md /tmp/old_readme.md",
             "cp /tmp/x .remember/now.md",
@@ -156,6 +183,11 @@ class TestPythonHeredoc:
         ],
     )
     def test_python_heredoc寫入管轄檔案要命中(self, 命令: str) -> None:
+        assert 會寫到管轄範圍嗎(命令, 根目錄=根) is True
+
+    def test_python_heredoc呼叫write_bytes要命中(self) -> None:
+        """Python 腳本呼叫 write_bytes 寫入管轄路徑也要命中。"""
+        命令 = "python3 - <<'PY'\nPath('src/nova/載體/新模組.py').write_bytes(b'data')\nPY"
         assert 會寫到管轄範圍嗎(命令, 根目錄=根) is True
 
     @pytest.mark.parametrize(
@@ -196,27 +228,27 @@ class Test檢查指令整合:
     """測試 `檢查指令` 函式整合管轄寫入檢查後的行為。"""
 
     def test_寫入管轄檔案要被擋下並提示繞過或走nova(self) -> None:
-        通過, 原因 = 檢查指令("echo 'hello' > src/nova/載體/新模組.py", 根目錄=根)
+        通過, 原因 = 檢查指令("echo 'hello' > src/nova/載體/新模組.py", 專案=根)
         assert 通過 is False
         assert "nova 跑" in 原因 or "nova 繞過" in 原因, "擋下原因必須提示走 nova 或 nova 繞過"
 
     def test_寫入非管轄檔案要放行(self) -> None:
-        通過, _ = 檢查指令("echo 'temp' > /tmp/temp.txt", 根目錄=根)
+        通過, _ = 檢查指令("echo 'temp' > /tmp/temp.txt", 專案=根)
         assert 通過 is True
 
     def test_唯讀指令要放行(self) -> None:
-        通過, _ = 檢查指令("pytest tests/單元", 根目錄=根)
+        通過, _ = 檢查指令("pytest tests/單元", 專案=根)
         assert 通過 is True
 
     def test_原有禁令優先擋下(self) -> None:
         """原有三條硬禁令必須維持阻擋，且維持原有禁令原因。"""
-        通過, 原因 = 檢查指令("git commit --no-verify -m 'skip'", 根目錄=根)
+        通過, 原因 = 檢查指令("git commit --no-verify -m 'skip'", 專案=根)
         assert 通過 is False
         assert "--no-verify" in 原因
 
 
 class Test擋了要有出路:
-    """**這三支是這道護欄第一次真的擋到人之後補的。**
+    """**這支是這道護欄第一次真的擋到人之後補的。**
 
     2026-08-30 護欄接上的那一刻就把作者鎖在外面：想記一次繞過理由，
     `nova 繞過` 那條指令自己被擋下——因為訊息裡的佔位符含角括號，
@@ -236,25 +268,6 @@ class Test擋了要有出路:
         收緊成「要真的落在 `src/`、`tests/`、`docs/` 底下」，
         跟 python heredoc 那條用同一份前綴表。
         """
-        通過, _ = 檢查指令("echo 這是一句話 > 另一句話", 根目錄=根)
+        通過, _ = 檢查指令("echo 這是一句話 > 另一句話", 專案=根)
 
         assert 通過 is True, "重導目標不是受管轄的路徑，不該擋"
-
-    def test_說得出理由就放行(self, tmp_path: Path) -> None:
-        """**繞過必須對 Bash 這條路也有效。**
-
-        `檢查編輯`（Edit／Write 那條）本來就會先問 `說得出理由了嗎`，
-        `檢查指令`（Bash 那條）漏了——於是擋下來之後**沒有任何出路**，
-        連 `nova 繞過` 自己都執行不了。
-        """
-        記下繞過("s-1", "測試用的理由", 專案=tmp_path)
-
-        通過, _ = 檢查指令("echo x > src/nova/甲.py", 根目錄=根, 會話="s-1", 專案=tmp_path)
-
-        assert 通過 is True, "已經記下理由了還擋，那個繞過機制等於不存在"
-
-    def test_沒說理由就照擋(self, tmp_path: Path) -> None:
-        """**不能擋不住**——放行的條件是「說得出理由」，不是「有傳會話參數」。"""
-        通過, _ = 檢查指令("echo x > src/nova/甲.py", 根目錄=根, 會話="沒記過的", 專案=tmp_path)
-
-        assert 通過 is False

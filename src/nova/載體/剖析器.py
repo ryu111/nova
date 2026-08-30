@@ -53,7 +53,7 @@ def _加檢查類(
     )
     閘剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")
 
-    指令剖析 = 子.add_parser("檢查指令", help="判斷一條 shell 指令是否違反禁令")
+    指令剖析 = 子.add_parser("檢查指令", help="判斷一條 shell 指令是否違反禁令或寫入受管轄檔案")
     指令剖析.set_defaults(執行=處理們["檢查指令"])
     指令剖析.add_argument("命令", nargs="*", help="要檢查的指令字串")
     指令剖析.add_argument("--stdin", action="store_true", help="改從 stdin 讀 agent hook 的 JSON")

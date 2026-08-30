@@ -107,6 +107,63 @@ class Test檢查指令:
         assert 結果.returncode == 2, 結果.stdout + 結果.stderr
         assert "阿貓-1234" in 結果.stderr, f"訊息裡沒有真的會話識別碼：{結果.stderr}"
 
+    def test_說明文字要反映檢查受管轄寫入(self) -> None:
+        """檢查指令的 CLI 說明不能只寫違反禁令，必須反映也檢查寫入受管轄檔案。"""
+        結果 = _跑("--help")
+        assert 結果.returncode == 0
+        說明行 = [行 for 行 in 結果.stdout.splitlines() if "檢查指令" in 行]
+        assert 說明行, "help 輸出中找不到 檢查指令 子命令"
+        assert any("管轄" in 行 for 行 in 說明行), f"說明文字未提及管轄寫入：{說明行}"
+
+    def test_說得出理由就放行(self, tmp_path: Path) -> None:
+        """**繞過必須對 Bash 這條路也有效。**
+
+        `檢查編輯`（Edit／Write 那條）本來就會先問 `說得出理由了嗎`，
+        `檢查指令`（Bash 那條）漏了——於是擋下來之後**沒有任何出路**，
+        連 `nova 繞過` 自己都執行不了。
+        """
+        環境 = {"XDG_STATE_HOME": str(tmp_path / "state")}
+        專案 = tmp_path / "某專案"
+        (專案 / "src").mkdir(parents=True)
+
+        載荷 = json.dumps(
+            {
+                "session_id": "s-1",
+                "tool_input": {"command": "echo x > src/甲.py"},
+            }
+        )
+
+        未繞過 = _跑("檢查指令", "--stdin", 輸入=載荷, 環境=環境, 在=專案)
+        assert 未繞過.returncode == 2
+
+        _跑(
+            "繞過",
+            "--會話",
+            "s-1",
+            "--因為",
+            "測試用的理由",
+            環境=環境,
+            在=專案,
+        )
+
+        已繞過 = _跑("檢查指令", "--stdin", 輸入=載荷, 環境=環境, 在=專案)
+        assert 已繞過.returncode == 0, "已經記下理由了還擋，那個繞過機制等於不存在"
+
+    def test_沒說理由就照擋(self, tmp_path: Path) -> None:
+        """**不能擋不住**——放行的條件是「說得出理由」，不是「有傳會話參數」。"""
+        環境 = {"XDG_STATE_HOME": str(tmp_path / "state")}
+        專案 = tmp_path / "某專案"
+        (專案 / "src").mkdir(parents=True)
+
+        載荷 = json.dumps(
+            {
+                "session_id": "沒記過的",
+                "tool_input": {"command": "echo x > src/甲.py"},
+            }
+        )
+        結果 = _跑("檢查指令", "--stdin", 輸入=載荷, 環境=環境, 在=專案)
+        assert 結果.returncode == 2
+
 
 class Test閘:
     def test_未知閘點要報錯不是靜默全綠(self) -> None:

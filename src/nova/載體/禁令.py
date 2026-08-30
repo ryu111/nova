@@ -10,7 +10,7 @@ import re
 import shlex
 from pathlib import Path
 
-from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 說得出理由了嗎
+from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 相對專案路徑, 說得出理由了嗎
 
 #: 拆不開時用的關鍵詞掃描。這幾個字串夠獨特，直接在原文找不會誤傷。
 _危險詞 = ("--no-verify", "--admin")
@@ -18,11 +18,17 @@ _危險詞 = ("--no-verify", "--admin")
 #: 重導寫入的正規表達式（捕捉 > 或 >> 後方的目標路徑）
 _重導樣式 = re.compile(r"(?:>>|>)\s*(?:'([^']*)'|\"([^\"]*)\"|([^\s>&|;]+))")
 
-#: Python 寫檔呼叫樣式
-_PYTHON寫檔樣式 = re.compile(r'open\s*\([^)]*[\'"][wax]')
+#: Python open(...) 寫檔呼叫樣式（識別 'w'、'a'、'x' 等寫入模式）
+_PYTHON_OPEN寫檔樣式 = re.compile(r'open\s*\([^)]*[\'"][wax]')
 
-#: 管轄範圍關鍵目錄前綴
-_管轄前綴 = ("src/", "tests/", "docs/")
+#: Python 寫檔方法特徵詞
+_PYTHON寫檔方法名 = ("write_text", "write_bytes")
+
+#: 寫入護欄窄化管轄的頂層目錄名稱（單一不可變集合來源）
+_BASH寫入管轄目錄 = frozenset({"src", "tests", "docs"})
+
+#: Python 腳本寫檔偵測用的管轄目錄路徑特徵（由 _BASH寫入管轄目錄 衍生）
+_PYTHON腳本管轄特徵 = tuple(f"{目錄}/" for 目錄 in _BASH寫入管轄目錄)
 
 
 def _拆得開的判斷(詞集: set[str]) -> tuple[bool, str]:
@@ -54,15 +60,17 @@ def _拆不開的判斷(命令: str) -> tuple[bool, str]:
 
 
 def _python腳本寫入管轄嗎(命令: str) -> bool:
-    """判斷 Python heredoc 或 inline 指令是否同時包含寫檔呼叫與管轄路徑。"""
-    有寫檔 = "write_text" in 命令 or bool(_PYTHON寫檔樣式.search(命令))
+    """透過文字特徵掃描，判斷 Python 腳本或 heredoc 是否同時包含寫檔呼叫與管轄路徑特徵。"""
+    有寫檔 = any(方法 in 命令 for 方法 in _PYTHON寫檔方法名) or bool(
+        _PYTHON_OPEN寫檔樣式.search(命令)
+    )
     if not 有寫檔:
         return False
-    return any(前綴 in 命令 for 前綴 in _管轄前綴)
+    return any(特徵 in 命令 for 特徵 in _PYTHON腳本管轄特徵)
 
 
-def _是受管轄的路徑(目標: str, 根: Path) -> bool:
-    """這個 token 是不是真的指向受管轄的檔案。
+def _是Bash寫入管轄路徑(目標: str, 根: Path) -> bool:
+    """這個 token 是不是落在 Bash 寫入護欄窄化的管轄範圍。
 
     **不能只問 `在管轄範圍嗎`。** 它的語意是「這個路徑歸不歸 nova 管」，
     而對任何相對路徑都成立（只要不以 `.` 開頭、不在 `scratchpad` 底下）——
@@ -73,28 +81,50 @@ def _是受管轄的路徑(目標: str, 根: Path) -> bool:
     **它印給人照做的那句話，照做就被自己擋。**
 
     所以收緊成「要真的落在 `src/`、`tests/`、`docs/` 底下」，
-    跟 python heredoc 那條用同一份前綴表。漏掉 `README.md` 這種是刻意的：
+    跟 python heredoc 那條用同一份窄化目錄來源。漏掉 `README.md` 這種是刻意的：
     擋過頭的閘會被繞過，繞過一次就等於不存在。
     """
-    相對 = 目標.removeprefix(f"{根}/") if 目標.startswith(str(根)) else 目標
-    if not any(相對.startswith(前綴) for 前綴 in _管轄前綴):
+    路徑 = Path(目標)
+    if not 在管轄範圍嗎(路徑, 根目錄=根):
         return False
-    return 在管轄範圍嗎(Path(目標), 根目錄=根)
+    相對 = 相對專案路徑(路徑, 根目錄=根)
+    return bool(相對 and 相對.parts and 相對.parts[0] in _BASH寫入管轄目錄)
 
 
 def _重導寫入管轄嗎(命令: str, 根: Path) -> bool:
     """檢查命令中的 > 或 >> 重導目標是否落在管轄範圍。"""
     for 匹配 in _重導樣式.finditer(命令):
-        目標 = next(filter(None, 匹配.groups()), None)
-        if 目標 and _是受管轄的路徑(目標, 根):
+        目標 = next((組 for 組 in 匹配.groups() if 組), None)
+        if 目標 and _是Bash寫入管轄路徑(目標, 根):
             return True
     return False
 
 
+#: 指令管道與串接運算子
+_指令分隔詞 = {"|", "||", ";", "&&", "&"}
+
+
+def _擷取_cp_mv_目標(詞列: list[str]) -> str:
+    """從 cp 或 mv 參數中擷取寫入目標。
+
+    優先解析 -t / --target-directory，否則取最後一個非選項參數。
+    """
+    for i, 詞 in enumerate(詞列):
+        if 詞 in ("-t", "--target-directory") and i + 1 < len(詞列):
+            return 詞列[i + 1]
+        if 詞.startswith("-t") and 詞 != "-t":
+            return 詞.removeprefix("-t")
+        if 詞.startswith("--target-directory="):
+            return 詞.split("=", 1)[1]
+    位置參數 = [詞 for 詞 in 詞列[1:] if not 詞.startswith("-")]
+    return 位置參數[-1] if 位置參數 else ""
+
+
 def _cp_mv寫入管轄嗎(詞列: list[str], 根: Path) -> bool:
-    if 詞列[0] in ("cp", "mv") and len(詞列) > 1:
-        return _是受管轄的路徑(詞列[-1], 根)
-    return False
+    if 詞列[0] not in ("cp", "mv") or len(詞列) <= 1:
+        return False
+    目標 = _擷取_cp_mv_目標(詞列)
+    return bool(目標 and _是Bash寫入管轄路徑(目標, 根))
 
 
 def _tee寫入管轄嗎(詞列: list[str], 根: Path) -> bool:
@@ -102,24 +132,26 @@ def _tee寫入管轄嗎(詞列: list[str], 根: Path) -> bool:
         return False
     位置 = 詞列.index("tee")
     return any(
-        _是受管轄的路徑(參數, 根) for 參數 in 詞列[位置 + 1 :] if 參數 and not 參數.startswith("-")
+        _是Bash寫入管轄路徑(參數, 根)
+        for 參數 in 詞列[位置 + 1 :]
+        if 參數 and not 參數.startswith("-")
     )
 
 
 def _sed寫入管轄嗎(詞列: list[str], 根: Path) -> bool:
     if 詞列[0] != "sed":
         return False
-    有就地旗標 = any(t == "-i" or t.startswith("-i") or t == "--in-place" for t in 詞列)
-    if not 有就地旗標 or not 詞列[-1] or 詞列[-1].startswith("-"):
+    有就地旗標 = any(詞.startswith(("-i", "--in-place")) for 詞 in 詞列)
+    if not 有就地旗標:
         return False
-    return _是受管轄的路徑(詞列[-1], 根)
+    return any(_是Bash寫入管轄路徑(詞, 根) for 詞 in 詞列[1:] if 詞 and not 詞.startswith("-"))
 
 
 def _分拆子命令(詞列: list[str]) -> list[list[str]]:
     子命令們: list[list[str]] = []
     目前: list[str] = []
     for 詞 in 詞列:
-        if 詞 in ("|", "||", ";", "&&", "&"):
+        if 詞 in _指令分隔詞:
             if 目前:
                 子命令們.append(目前)
                 目前 = []
@@ -130,29 +162,25 @@ def _分拆子命令(詞列: list[str]) -> list[list[str]]:
     return 子命令們
 
 
+def _子命令寫入管轄嗎(子詞列: list[str], 根: Path) -> bool:
+    return _cp_mv寫入管轄嗎(子詞列, 根) or _tee寫入管轄嗎(子詞列, 根) or _sed寫入管轄嗎(子詞列, 根)
+
+
 def _詞列會寫到管轄嗎(詞列: list[str], *, 根: Path) -> bool:
     """從已剖析的詞列中檢查 sed -i、tee、cp、mv 是否寫入管轄範圍。"""
-    for 子詞列 in _分拆子命令(詞列):
-        if not 子詞列:
-            continue
-        if _cp_mv寫入管轄嗎(子詞列, 根) or _tee寫入管轄嗎(子詞列, 根) or _sed寫入管轄嗎(子詞列, 根):
-            return True
-    return False
+    return any(_子命令寫入管轄嗎(子詞列, 根) for 子詞列 in _分拆子命令(詞列))
 
 
 def 會寫到管轄範圍嗎(命令: str, 根目錄: Path | None = None) -> bool:
     """判斷 shell 指令是否會寫入受管轄的檔案（純函式）。"""
     根 = 根目錄 if 根目錄 is not None else Path.cwd()
 
-    # 5. python heredoc
     if _python腳本寫入管轄嗎(命令):
         return True
 
-    # 1. 重導
     if _重導寫入管轄嗎(命令, 根):
         return True
 
-    # 2, 3, 4: sed -i, tee, cp, mv
     try:
         詞列 = shlex.split(命令)
     except ValueError:
@@ -172,10 +200,9 @@ def _檢查硬禁令(命令: str) -> tuple[bool, str]:
 
 def 檢查指令(
     命令: str,
-    根目錄: Path | None = None,
+    專案: Path | None = None,
     *,
     會話: str = "",
-    專案: Path | None = None,
 ) -> tuple[bool, str]:
     """判斷一條 shell 指令是否違反禁令或寫入管轄檔案。回傳 (放行, 原因)。
 
@@ -189,8 +216,9 @@ def 檢查指令(
     放行, 原因 = _檢查硬禁令(命令)
     if not 放行:
         return False, 原因
-    if not 會寫到管轄範圍嗎(命令, 根目錄=根目錄):
+    專案目錄 = 專案 if 專案 is not None else Path.cwd()
+    if not 會寫到管轄範圍嗎(命令, 根目錄=專案目錄):
         return True, ""
-    if 會話 and 說得出理由了嗎(會話, 專案=專案 or (根目錄 or Path.cwd())):
+    if 會話 and 說得出理由了嗎(會話, 專案=專案目錄):
         return True, ""
     return False, 擋的話要說什麼(會話 or "你這次的會話識別碼")
