@@ -141,13 +141,17 @@ def 確保啟動器在(直譯器: Path) -> Path:
     舊的硬連結還在——於是排程拿舊直譯器配新套件跑，而錯誤只出現在
     launchd 的 log 裡，沒有人會看到。不一樣就換掉。
     """
+    # **一定要自己 `resolve()`，不要靠 `os.link` 跟著符號連結走。**
+    # `.venv/bin/python` 是符號連結，而「硬連結會不會跟著它走」**兩個平台不一樣**
+    # ——macOS 上會，Linux 上不會（2026-08-30 CI 實測：把這行拿掉之後
+    # `test_跟著符號連結走到真的那份` 在 macOS 全綠、在 Linux 當場紅）。
+    # 不跟著走的話連出來的是「指向符號連結的硬連結」，直譯器一升級就整個斷掉。
+    真身 = 直譯器.resolve()
     落點 = 直譯器.parent / 啟動器名
-    # `os.link` 與 `Path.stat` 都預設跟著符號連結走（`.venv/bin/python` 就是），
-    # 所以這裡不必先 `resolve()`——加了也不會變，是多餘的一步。
-    if 落點.exists() and 落點.stat().st_ino == 直譯器.stat().st_ino:
+    if 落點.exists() and 落點.stat().st_ino == 真身.stat().st_ino:
         return 落點
     落點.unlink(missing_ok=True)
-    落點.hardlink_to(直譯器)
+    落點.hardlink_to(真身)
     return 落點
 
 
