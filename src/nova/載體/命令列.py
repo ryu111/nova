@@ -350,7 +350,7 @@ def _丟到背景(參數: argparse.Namespace) -> int:
     # 使用者拿到的識別碼在 `nova 帳本` 上查不到——而那看起來像「帳沒記」。
     識別 = 新執行識別碼()
     落點 = 落點目錄 / f"{識別}.md"
-    with 落點.open("w", encoding="utf-8") as 手:
+    with 落點.open("x", encoding="utf-8") as 手:
         subprocess.Popen(  # noqa: S603 —— 就是這支自己，參數原封不動
             [sys.executable, "-m", "nova", *參],
             stdout=手,

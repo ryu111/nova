@@ -29,14 +29,19 @@ def 已處理目錄(專案: Path | None = None) -> Path:
 
 
 def 歸檔(一筆: 成果, *, 目錄: Path | None = None) -> Path:
-    """把一筆成果寫下去。檔名就是執行識別碼，所以 `ls` 就是時序。"""
+    """把一筆成果寫下去。檔名就是執行識別碼，所以 `ls` 就是時序。
+
+    **同號寫第二次當場炸，不准靜默覆寫**：`write_text` 是覆寫，
+    而成果是拿來當證據的東西——被蓋掉的那一次就永遠說不出它做了什麼。
+
+    炸在這裡是安全的：呼叫端 `_歸檔成果` 接住 `OSError` 只印 stderr，
+    所以**工作結果不會被一筆記不下來的帳吃掉**。
+    """
     在哪 = 目錄 or 已處理目錄()
     在哪.mkdir(parents=True, exist_ok=True)
     落點 = 在哪 / f"{一筆.執行識別碼}.json"
-    落點.write_text(
-        json.dumps(成果轉字典(一筆), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    with 落點.open("x", encoding="utf-8") as 檔:
+        檔.write(json.dumps(成果轉字典(一筆), ensure_ascii=False, indent=2) + "\n")
     return 落點
 
 
