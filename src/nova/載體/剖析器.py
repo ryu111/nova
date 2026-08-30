@@ -83,6 +83,12 @@ def _加委派類(
     問剖析.set_defaults(執行=處理們["問"])
     問剖析.add_argument("提示", nargs="*", help="要問的話。不給就從 stdin 讀")
     問剖析.add_argument(
+        "--提示檔",
+        default=None,
+        help="從檔案讀題目。長的、多行的、有反引號的一律走這條"
+        "——argv 會被 shell 展開，吃掉之後沒有殘跡",
+    )
+    問剖析.add_argument(
         "--用",
         default=None,
         help="哪一家：claude、codex、agy。逗號分隔＝接力（前一顆失敗換下一顆）",
@@ -206,6 +212,12 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
         help="審查員用哪一家。必須跟 --用 不同。不給就照派工表（推理＝sol）",
     )
     剖析.add_argument("--工作目錄", default=None, help="在哪裡工作。預設是現在這個目錄")
+    剖析.add_argument(
+        "--提示檔",
+        default=None,
+        help="從檔案讀題目。長的、多行的、有反引號的一律走這條"
+        "——argv 會被 shell 展開，吃掉之後沒有殘跡",
+    )
     剖析.add_argument("--判準", default=None, help='判準指令，預設 "uv run pytest -q"')
     剖析.add_argument(
         "--預算token",
@@ -305,6 +317,12 @@ def _加觀測類(
     圖剖析 = 子.add_parser("生圖", help="叫 agy 生一張圖（三家裡只有它有）")
     圖剖析.set_defaults(執行=處理們["生圖"])
     圖剖析.add_argument("描述", nargs="*", help="要生什麼。不給就從 stdin 讀")
+    圖剖析.add_argument(
+        "--提示檔",
+        default=None,
+        help="從檔案讀題目。長的、多行的、有反引號的一律走這條"
+        "——argv 會被 shell 展開，吃掉之後沒有殘跡",
+    )
     圖剖析.add_argument("--工作目錄", default=None, help="圖要落在哪。預設是現在這個目錄")
     圖剖析.add_argument("--執行檔", default=None, help="agy CLI 的絕對路徑")
     圖剖析.add_argument("--逾時", type=float, default=預設逾時秒, help="秒。生圖比問話慢很多")

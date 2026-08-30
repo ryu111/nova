@@ -51,6 +51,7 @@ from nova.載體.帳本 import (
 )
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件, 還在跑的有哪些
 from nova.載體.排程 import 啟動器名, 怎麼跑, 排程標籤, 排程設定, 排程預算, 確保啟動器在
+from nova.載體.提示來源 import 提示走錯路, 讀提示
 from nova.載體.收件 import (
     丟一件,
     你敲,
@@ -277,16 +278,33 @@ class _要問的東西:
     屍: Path | None
 
 
+def _問的提示(參數: argparse.Namespace) -> str | int:
+    """這次要問什麼。**回 int ＝ 問不出來，那個數字就是退出碼。**
+
+    抽出來是因為 ruff `PLR0911`（回傳點太多），而那條規則說的是對的：
+    `_問的前置` 一次要管三件事（讀題目、挑腦、備權限），每件都有自己的
+    失敗出口。讀題目自成一件，拆出來就少三個出口。
+    """
+    try:
+        提示 = 讀提示(argv片段=參數.提示, 提示檔=參數.提示檔)
+    except (提示走錯路, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    if not 提示.strip():
+        print("沒有提示可以問（用參數給、--提示檔、或從 stdin 餵）", file=sys.stderr)
+        return 阻擋
+    return 提示
+
+
 def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     """打出去之前要檢查與準備的全部。**回 int ＝ 別打了，那個數字就是退出碼。**
 
     抽出來不只為了 C901——「檢查與準備」跟「打出去並回報」是兩件事，
     而且**只有這一段有權力讓那個請求不要發生**。
     """
-    提示 = " ".join(參數.提示) if 參數.提示 else sys.stdin.read()
-    if not 提示.strip():
-        print("沒有提示可以問（用參數給，或從 stdin 餵）", file=sys.stderr)
-        return 阻擋
+    提示 = _問的提示(參數)
+    if isinstance(提示, int):
+        return 提示
     挑法 = _挑腦(參數)
     if 挑法 is None:
         return 阻擋
@@ -716,7 +734,11 @@ def _這次要做什麼(參數: argparse.Namespace) -> _題目 | int:
             print(f"收件匣是空的（{匣}）", file=sys.stderr)
             return 放行
         return _題目(描述=收件.任務, 收件=收件)
-    描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
+    try:
+        描述 = 讀提示(argv片段=參數.任務, 提示檔=參數.提示檔)
+    except (提示走錯路, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
     if not 描述.strip():
         print("沒有任務可以做（用參數給、從 stdin 餵，或丟進收件匣）", file=sys.stderr)
         return 阻擋
@@ -738,7 +760,11 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
     下一次醒來就做得到；先搶鎖的話撞到就整個掉了，
     而使用者以為他派出去了。
     """
-    描述 = " ".join(參數.任務) if 參數.任務 else sys.stdin.read()
+    try:
+        描述 = 讀提示(argv片段=參數.任務, 提示檔=參數.提示檔)
+    except (提示走錯路, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
     try:
         丟一件(描述, 來源=你敲, 目錄=收件目錄(在哪跑(None)))
     except (ValueError, OSError) as 錯:
@@ -1331,7 +1357,11 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
     沒有權限旗標是刻意的：可編輯下這條路會靜默假成功
     （見 `src/nova/載體/生圖.py` 的模組 docstring）。
     """
-    描述 = " ".join(參數.描述) if 參數.描述 else sys.stdin.read()
+    try:
+        描述 = 讀提示(argv片段=參數.描述, 提示檔=參數.提示檔)
+    except (提示走錯路, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
     if not 描述.strip():
         print("沒有描述可以生（用參數給，或從 stdin 餵）", file=sys.stderr)
         return 阻擋
