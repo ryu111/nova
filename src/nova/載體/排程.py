@@ -25,6 +25,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from nova.契約.觸發 import 喚醒來源
 from nova.載體.預算 import 上限 as 預算上限
 
 _一分鐘幾秒 = 60
@@ -208,7 +209,16 @@ def 排程設定(
         # **第一格是硬連結出來的專用直譯器**，不是 console script——
         # console script 是 shebang 文字檔，kernel 執行的是直譯器，
         # 活動監視器就會顯示 `python3.13`（見 `確保啟動器在`）。
-        "ProgramArguments": [str(跑法.執行檔), "-m", "nova", "工作流", "--從收件匣", *預算.旗標()],
+        "ProgramArguments": [
+            str(跑法.執行檔),
+            "-m",
+            "nova",
+            "工作流",
+            "--從收件匣",
+            "--喚醒來源",
+            喚醒來源.排程到期.value,
+            *預算.旗標(),
+        ],
         "WorkingDirectory": str(專案),
         "StartInterval": 每幾分 * _一分鐘幾秒,
         "RunAtLoad": False,
