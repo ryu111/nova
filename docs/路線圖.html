@@ -150,7 +150,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
  "節點": [
   {
    "id": "閘",
-   "標": "nova 閘（11 條）",
+   "標": "nova 閘（12 條）",
    "副": "載體/閘.py ＋ 規則表.py",
    "x": 40,
    "y": 64,
@@ -166,8 +166,8 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
     "tests/負控/登記.py",
     "tests/負控/執行器.py"
    ],
-   "閘數": 11,
-   "註": "第 10 條 <code>ruff-exemptions</code> 守 ruff 豁免不准偷偷長大；第 11 條 <code>registered-mutation</code> 把「宣稱的負控」變成會執行的閘——登記在 <code>tests/負控/登記.py</code>，點名的測試沒走到破壞點會先報 <code>WRONG_TEST</code>，不會含糊成 survived。"
+   "閘數": 12,
+   "註": "第 10 條 <code>ruff-exemptions</code> 守 ruff 豁免不准偷偷長大；第 11 條 <code>registered-mutation</code> 把「宣稱的負控」變成會執行的閘；第 12 條 <code>claude-location</code> 檢查 CLAUDE.md 與 typed 登記同步——登記在 <code>tests/負控/登記.py</code>，點名的測試沒走到破壞點會先報 <code>WRONG_TEST</code>，不會含糊成 survived。"
   },
   {
    "id": "禁令",
@@ -725,7 +725,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "檔": [
     "src/nova/載體/命令列.py"
    ],
-   "註": "--審查用 是必要參數而且不能跟 --用 同家——自己審自己等於沒審"
+   "註": "判準是對話不是家族名（#140）：同一家開新對話已經是不同審查者。結構保證在固定提示角色沒有續接欄位"
   },
   {
    "id": "真cli",

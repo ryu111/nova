@@ -47,20 +47,39 @@ class Test三家各自實作同一個旋鈕:
         # 兩條 `-c` 同一個鍵，哪一條贏是 codex 的實作細節，那等於沒有保證。
         assert sum(1 for 格 in 參 if "model_reasoning_effort" in 格) == 1, 參
 
-    def test_agy換型號後綴(self) -> None:
-        """**agy 沒有旗標，深度是型號的一部分**（`agy models` 實測）。"""
-        參 = _參數("agy", 思考深度="low")
+    def test_agy的深度旋鈕對gemini只剩一格(self) -> None:
+        """**agy 沒有旗標，深度是型號的一部分**（`agy models` 實測）。
 
-        assert "gemini-3.7-flash-low" in 參
-        assert "gemini-3.7-flash-high" not in 參
+        但使用者 2026-08-31 裁定 gemini 那族只用 `gemini-3.7-flash-high`，
+        所以那個旋鈕對 gemini 實際上只剩一格——**給別的深度要當場炸，
+        不准默默用 high**。默默降級的話使用者會以為叫到了 low，
+        帳照付、深度沒動，而且沒有任何訊息。
+        """
+        with pytest.raises(ValueError, match="gemini"):
+            _參數("agy", 思考深度="low")
 
-    def test_agy自己指定的型號也換得掉(self) -> None:
-        參 = _參數("agy", 模型="gemini-3.1-pro-high", 思考深度="low")
+    def test_agy跑別家型號時不准加深度後綴(self) -> None:
+        """agy 也代跑 claude／gpt 的型號，**那些型號沒有深度後綴這回事**。
 
-        assert "gemini-3.1-pro-low" in 參
+        `agy models` 列得出 `claude-sonnet-4-6`、`claude-opus-4-6-thinking`、
+        `gpt-oss-120b-medium`。無條件補後綴會送出 `claude-sonnet-4-6-high`
+        這種不存在的型號——而那條通道的額度是獨立的一池，
+        走不到就等於整池浪費。
+        """
+        for 型 in ("claude-sonnet-4-6", "claude-opus-4-6-thinking"):
+            參 = _參數("agy", 模型=型, 思考深度="high")
+            assert 型 in 參, f"{型} 被改掉了：{參}"
 
+    def test_agy指定別族的型號時原樣送出(self) -> None:
+        """claude／gpt 是 agy 代跑的**另一個額度池**，型號沒有深度後綴這回事。
 
-class Test沒給就維持各家現況:
+        （gemini 族換型號那條路已經被白名單關掉，見
+        `tests/單元/test_型號白名單.py`。）
+        """
+        參 = _參數("agy", 模型="claude-sonnet-4-6", 思考深度="low")
+
+        assert "claude-sonnet-4-6" in 參
+
     def test_codex維持原本寫死的那階(self) -> None:
         """**不給不等於變淺。** 改掉預設會讓既有的委派安靜地變笨。"""
         參 = _參數("codex", 模型="gpt-5.6-luna")
