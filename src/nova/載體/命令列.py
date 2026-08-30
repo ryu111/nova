@@ -41,7 +41,7 @@ from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
-from nova.載體.排程 import 啟動器名, 排程標籤, 排程設定, 排程預算, 確保啟動器在
+from nova.載體.排程 import 啟動器名, 怎麼跑, 排程標籤, 排程設定, 排程預算, 確保啟動器在
 from nova.載體.收件 import (
     丟一件,
     你敲,
@@ -1024,7 +1024,9 @@ def _子命令_排程(參數: argparse.Namespace) -> int:
     print(f"啟動器：{執行檔}（活動監視器會顯示 {啟動器名}）", file=sys.stderr)
     try:
         設定 = 排程設定(
-            執行檔=執行檔,
+            # **執行檔與 PATH 綁在一起**：launchd 不跑登入 shell，
+            # 少了 PATH 判準指令就找不到，而那個錯會被當成「測試紅了」。
+            跑法=怎麼跑(執行檔=執行檔, 路徑環境=os.environ.get("PATH", "")),
             專案=專案,
             狀態根=狀態根目錄(),
             每幾分=參數.每幾分,

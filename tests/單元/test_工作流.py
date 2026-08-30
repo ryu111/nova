@@ -11,6 +11,7 @@ import pytest
 from nova.契約.工作流 import (
     任務,
     停止條件,
+    判準終局,
     執行器,
     審查判定,
     步驟結果,
@@ -83,8 +84,9 @@ def _執行器(
     }
     剩 = list(判準序列)
 
-    def 跑判準(_: 任務) -> tuple[bool, str]:
-        return (剩.pop(0) if 剩 else True), "假判準"
+    def 跑判準(_: 任務) -> tuple[判準終局, str]:
+        綠 = 剩.pop(0) if 剩 else True
+        return (判準終局.綠 if 綠 else 判準終局.紅), "假判準"
 
     執行 = 建TDD執行器(
         角色表={
@@ -370,13 +372,13 @@ class Test接線在建構時就要對:
             階段代碼.審查: 假角色("審查"),
         }
         with pytest.raises(ValueError, match=階段代碼.重構.value):
-            建TDD執行器(角色表=缺重構, 跑判準=lambda _: (True, ""))
+            建TDD執行器(角色表=缺重構, 跑判準=lambda _: (判準終局.綠, ""))
 
     def test_要哪些角色是從階段表推導的(self) -> None:
         """守衛寫死四個的話，下次加階段忘了改守衛，又回到跑到一半才炸。"""
         該有的 = {定義.代碼 for 定義 in TDD階段表 if 定義.種類 is not 種類.判準}
         with pytest.raises(ValueError) as 錯:
-            建TDD執行器(角色表={}, 跑判準=lambda _: (True, ""))
+            建TDD執行器(角色表={}, 跑判準=lambda _: (判準終局.綠, ""))
         for 代碼 in 該有的:
             assert 代碼.value in str(錯.value)
 
@@ -403,7 +405,7 @@ class Test跨context的記憶:
                 階段代碼.重構: 假角色("重構"),
                 階段代碼.審查: 假角色("審查", _假回應(文字=過關的審查回覆)),
             },
-            跑判準=lambda _: (True, "假判準"),
+            跑判準=lambda _: (判準終局.綠, "假判準"),
         )
         執行(查階段(階段代碼.測試), 任, ())
         assert "實作寫到一半被預算擋下" in 人.收到[0]
@@ -418,7 +420,7 @@ class Test跨context的記憶:
                 階段代碼.重構: 假角色("重構"),
                 階段代碼.審查: 假角色("審查", _假回應(文字=過關的審查回覆)),
             },
-            跑判準=lambda _: (True, "假判準"),
+            跑判準=lambda _: (判準終局.綠, "假判準"),
         )
         執行(查階段(階段代碼.測試), 一件事, ())
         assert "前情" not in 人.收到[0]
@@ -448,9 +450,10 @@ class Test卡住了就停:
         次 = iter(range(99))
         人 = {"測試": 假角色("測試"), "實作": 假角色("實作")}
 
-        def 跑判準(_: 任務) -> tuple[bool, str]:
+        def 跑判準(_: 任務) -> tuple[判準終局, str]:
             n = next(次)
-            return (n >= 6), f"還剩 {99 - n} 個錯"  # noqa: PLR2004 —— 第 7 次才綠
+            綠 = n >= 6  # noqa: PLR2004 —— 第 7 次才綠
+            return (判準終局.綠 if 綠 else 判準終局.紅), f"還剩 {99 - n} 個錯"
 
         執行 = 建TDD執行器(
             角色表={
@@ -488,7 +491,7 @@ class Test三個停止條件都是護欄:
                 階段代碼.重構: 假角色("重構"),
                 階段代碼.審查: 假角色("審查", _假回應(文字=過關的審查回覆)),
             },
-            跑判準=lambda _: (False, f"第 {next(次)} 種紅"),
+            跑判準=lambda _: (判準終局.紅, f"第 {next(次)} 種紅"),
         )
         果 = 跑工作流(一件事, 執行一步=執行, 停止=停止條件(最多步數=4, 最多token=10**9))
         assert 果.結束.代碼 is 結束代碼.護欄

@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from nova.載體.判準 import 預設判準指令
+
 nova執行檔 = Path(sys.executable).parent / "nova"
 
 
@@ -131,3 +133,35 @@ def test_印出來的檔名跟plist裡的Label是同一個(tmp_path: Path) -> No
     檔名們 = [段 for 段 in 說明.split() if 段.endswith(".plist")]
     assert 檔名們, 說明
     assert all(段.endswith(f"{標籤}.plist") for 段 in 檔名們), f"檔名跟 Label 對不上：\n{說明}"
+
+
+def test_排程的環境跑得起預設判準(tmp_path: Path) -> None:
+    """**判準三：墊片證明的是轉遞形狀，不是可達性。**
+
+    launchd 不跑登入 shell，程序拿到的 `PATH` 是
+    `/usr/bin:/bin:/usr/sbin:/sbin`——而 `uv` 住在 `~/.local/bin`。
+    所以預設判準 `uv run pytest -q` 在排程底下**根本跑不起來**。
+
+    2026-08-30 實測的代價：判準跑不起來被回報成「紅」，工作流回去
+    「再實作一次」，一次醒來燒掉 997,031 token，三次共 1,720,140。
+
+    這一支用 plist 裡宣告的環境（而且**只有**那些）去跑判準的執行檔。
+    plist 沒帶 `PATH` 的話，這裡當場 `FileNotFoundError`。
+    """
+    狀態, 專案 = _沒有預算的時候(tmp_path)
+    印出來 = _跑("排程", 狀態=狀態, 在=專案).stdout
+    設定 = plistlib.loads(印出來.split("</plist>")[0].encode("utf-8") + b"</plist>")
+    環境 = 設定["EnvironmentVariables"]
+
+    跑完 = subprocess.run(
+        [預設判準指令[0], "--version"],
+        cwd=專案,
+        env=環境,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert 跑完.returncode == 0, (
+        f"排程的環境跑不起 {預設判準指令[0]}：{跑完.stderr}\nPATH={環境.get('PATH')!r}"
+    )
