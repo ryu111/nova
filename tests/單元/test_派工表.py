@@ -10,8 +10,8 @@
 
 import pytest
 
-from nova.契約.派工 import 工作種類
-from nova.載體.模型.轉接 import codex高階模型, 家族, 高階模型們
+from nova.契約.派工 import 工作種類, 派法
+from nova.載體.模型.轉接 import codex高階模型, 家族, 思考深度們, 高階模型們
 from nova.載體.派工表 import 怎麼派
 
 
@@ -87,3 +87,33 @@ def test_例行與推理不准重疊() -> None:
     例行 = set(怎麼派(工作種類.例行).腦們)
     推理 = set(怎麼派(工作種類.推理).腦們)
     assert not (例行 & 推理), f"重疊的家：{例行 & 推理}——工作流會被自寫自評擋下"
+
+
+def test_派法必須明確指定思考深度() -> None:
+    """決策 0002：把「你必須記得的事」變成「你不得不傳的參數」。
+
+    不給預設值，逼每一次定義派法都要想清楚這件事該動多少腦。
+    """
+    with pytest.raises(TypeError):
+        派法(腦們=("agy",))  # type: ignore[call-arg]
+
+
+def test_每一格都說得出思考深度() -> None:
+    """每一種工作都要明確指定思考深度，不吃黑箱預設。"""
+    for 種 in 工作種類:
+        assert 怎麼派(種).思考深度 in 思考深度們, 種
+
+
+def test_例行工作的思考深度是high() -> None:
+    """使用者的策略：例行（agy 打頭、claude 備援）用 high。"""
+    assert 怎麼派(工作種類.例行).思考深度 == "high"
+
+
+def test_例行不准用max() -> None:
+    """codex 預設是 max，例行用 max 會每一次都在用最貴的檔位。"""
+    assert 怎麼派(工作種類.例行).思考深度 != "max"
+
+
+def test_推理工作的思考深度是max() -> None:
+    """使用者的策略：「需要動腦推理的給 sol max」。"""
+    assert 怎麼派(工作種類.推理).思考深度 == "max"

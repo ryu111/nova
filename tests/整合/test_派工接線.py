@@ -43,6 +43,20 @@ class Test照表挑腦:
         參數 = json.loads(紀錄.read_text(encoding="utf-8"))["argv"]
         assert "gpt-5.6-sol" in 參數
 
+    def test_例行工作會帶上深度high(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+        """例行工作照派工表走 high 深度。"""
+        假, 紀錄 = 做假CLI("agy")
+        跑(["問", "--工作", "routine", "--執行檔", str(假), "在嗎"], tmp_path)
+        參數 = json.loads(紀錄.read_text(encoding="utf-8"))["argv"]
+        assert "gemini-3.7-flash-high" in 參數
+
+    def test_推理工作會帶上深度max(self, tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+        """推理工作照派工表走 max 深度。"""
+        假, 紀錄 = 做假CLI("codex")
+        跑(["問", "--工作", "reasoning", "--執行檔", str(假), "在嗎"], tmp_path)
+        參數 = json.loads(紀錄.read_text(encoding="utf-8"))["argv"]
+        assert 'model_reasoning_effort="max"' in 參數
+
 
 class Test互斥:
     """每一支都要給 `--執行檔`，即使正常路徑根本走不到那裡。
@@ -64,6 +78,19 @@ class Test互斥:
         """`--工作` 已經決定了模型。再給一個等於偷偷推翻策略。"""
         assert (
             跑(["問", "--工作", "reasoning", "--模型", "gpt-4", *_不出網路, "在嗎"], tmp_path) != 0
+        )
+        assert "不要同時" in capsys.readouterr().err
+
+    def test_工作跟思考深度不准同時給(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`--工作` 已經決定了思考深度。再給一個等於偷偷推翻策略。"""
+        assert (
+            跑(
+                ["問", "--工作", "reasoning", "--思考深度", "low", *_不出網路, "在嗎"],
+                tmp_path,
+            )
+            != 0
         )
         assert "不要同時" in capsys.readouterr().err
 
