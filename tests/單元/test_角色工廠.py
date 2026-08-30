@@ -8,7 +8,7 @@ from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型, 預設選項
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 固定提示角色
-from nova.迴圈.角色工廠 import 建角色, 建角色表, 角色藍圖
+from nova.迴圈.角色工廠 import 建角色, 建角色表, 系統架構師角色藍圖, 角色藍圖
 from nova.迴圈.角色提示 import 實作員, 審查員, 測試員, 重構員
 
 
@@ -140,6 +140,18 @@ def test_研究角色不改變_TDD_角色表() -> None:
         "你是研究工作流裡的對抗員。",
         "你是研究工作流裡的整合員。",
     ]
+
+
+def test_系統架構師只讀且不執行自己的決策() -> None:
+    """架構師只能產出決策資料，不能寫 code 或越過 PlanWorker 執行它。"""
+    角色表 = 建角色表(系統架構師角色藍圖, 建腦=_建假腦)
+    角色 = _取角色(角色表, "系統架構師")
+
+    assert 角色.權限 is 權限.唯讀
+    assert "不准寫 code" in 角色.系統提示
+    assert "不准執行自己產的決策" in 角色.系統提示
+    assert "PlanWorker" in 角色.什麼時候派我
+    assert "只決定這次先做哪幾步" in 角色.什麼時候派我
 
 
 def test_藍圖的模型與思考深度要傳進角色() -> None:
