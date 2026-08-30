@@ -724,6 +724,8 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
         結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型, 思考深度=藍圖.派法.思考深度))
     if 參數.逾時 is not None:
         結果 = [dataclasses.replace(藍圖, 逾時秒=參數.逾時) for 藍圖 in 結果]
+    if getattr(參數, "模型", None):
+        結果 = [dataclasses.replace(藍圖, 模型=參數.模型) for 藍圖 in 結果]
     return tuple(結果)
 
 

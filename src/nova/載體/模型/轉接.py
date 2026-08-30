@@ -191,9 +191,17 @@ def _agy型號(選項: 呼叫選項) -> str:
     走不到等於整池浪費。
     """
     型 = 選項.模型 or agy預設模型
-    if not 選項.思考深度 or not 型.startswith(_agy有深度後綴的族):
+    if not 型.startswith(_agy有深度後綴的族):
         return 型
-    return _agy後綴.sub("", 型) + f"-{選項.思考深度}"
+    組好 = _agy後綴.sub("", 型) + f"-{選項.思考深度}" if 選項.思考深度 else 型
+    if 組好 != agy預設模型:
+        訊息 = (
+            f"agy 的 gemini 只准 {agy預設模型}，你給的是 {組好}"
+            "——那一族共用同一份額度，換型號只會用更貴的單價吃同一池。"
+            "claude／gpt 那些是另一個池，不受這條限制"
+        )
+        raise ValueError(訊息)
+    return 組好
 
 
 def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:

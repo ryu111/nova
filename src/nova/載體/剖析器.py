@@ -235,6 +235,12 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
         "--逾時", type=float, default=None, help="每一階最多跑幾秒。不給就用各階段預設"
     )
     剖析.add_argument(
+        "--模型",
+        default=None,
+        help="這一次用哪顆型號，蓋掉派工表的策略。"
+        "用在『這一家的某個池用完了、但它代跑的另一個池還有』",
+    )
+    剖析.add_argument(
         "--提示檔",
         default=None,
         help="從檔案讀題目。長的、多行的、有反引號的一律走這條"

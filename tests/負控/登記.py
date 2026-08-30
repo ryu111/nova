@@ -502,12 +502,30 @@ class 變異:
         識別="agy把別家型號也加深度後綴",
         目標檔=Path("src/nova/載體/模型/轉接.py"),
         操作=替換一次(
-            "if not 選項.思考深度 or not 型.startswith(_agy有深度後綴的族):",
-            "if not 選項.思考深度:",
+            "    if not 型.startswith(_agy有深度後綴的族):\n        return 型\n",
+            "",
         ),
         該紅=(
             "tests/整合/test_思考深度.py::Test三家各自實作同一個旋鈕::test_agy跑別家型號時不准加深度後綴",
         ),
         最多秒=3.0,
+    ),
+    變異(
+        識別="gemini白名單被拆掉",
+        目標檔=Path("src/nova/載體/模型/轉接.py"),
+        操作=替換一次("    if 組好 != agy預設模型:", "    if False:"),
+        該紅=("tests/單元/test_型號白名單.py::test_gemini族的其他型號一律當場擋[gemini-3.1-pro]",),
+        最多秒=3.0,
+    ),
+    變異(
+        識別="模型旗標沒接到藍圖",
+        目標檔=Path("src/nova/載體/命令列.py"),
+        操作=替換一次(
+            '    if getattr(參數, "模型", None):\n'
+            "        結果 = [dataclasses.replace(藍圖, 模型=參數.模型) for 藍圖 in 結果]\n",
+            "",
+        ),
+        該紅=("tests/整合/test_模型旗標.py::test_模型旗標真的傳到呼叫選項",),
+        最多秒=5.0,
     ),
 )
