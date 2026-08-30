@@ -8,6 +8,7 @@ system prompt），讓「換腦但行為一樣」成立。哪幾條旗標做這�
 由 `tests/整合/test_模型轉接.py::Test把各家載體關到最小` 背書。
 """
 
+import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -104,6 +105,8 @@ def _claude組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     參數 += ["--system-prompt", ""]  # 順便終結上面的變長參數，不要調換順序
     if 選項.模型:
         參數 += ["--model", 選項.模型]
+    if 選項.思考深度:
+        參數 += ["--effort", 選項.思考深度]
     return [*參數, 提示]
 
 
@@ -143,7 +146,10 @@ codex推理強度 = "max"
 
 def _codex共通參數(選項: 呼叫選項) -> list[str]:
     """`exec` 與 `exec resume` 都吃的那幾條。"""
-    參數 = ["--json", "--skip-git-repo-check", "-c", f'model_reasoning_effort="{codex推理強度}"']
+    # **取代寫死那條，不是再加一條**：兩條 `-c` 同一個鍵，
+    # 哪一條贏是 codex 的實作細節，那等於沒有保證。
+    深 = 選項.思考深度 or codex推理強度
+    參數 = ["--json", "--skip-git-repo-check", "-c", f'model_reasoning_effort="{深}"']
     if 選項.隔離設定:
         # codex 的隔離旗標不影響認證（auth.json 另外存），所以沒有 claude 那個取捨。
         參數 += ["--ignore-user-config", "--ignore-rules"]
@@ -181,6 +187,18 @@ def _codex組參數(提示: str, 選項: 呼叫選項) -> list[str]:
 agy預設模型 = "gemini-3.7-flash-high"
 
 
+def _agy型號(選項: 呼叫選項) -> str:
+    """agy 的深度**是型號的一部分**，所以旋鈕轉的是型號後綴。
+
+    後綴不存在就補上去（`gemini-3.1-pro` → `gemini-3.1-pro-low`），
+    已經有就換掉——不換的話 `--模型 …-high --思考深度 low` 會安靜地照 high 跑。
+    """
+    型 = 選項.模型 or agy預設模型
+    if not 選項.思考深度:
+        return 型
+    return _agy後綴.sub("", 型) + f"-{選項.思考深度}"
+
+
 def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
     # agy 查不到設定隔離的旗標（見設計文件 02 缺口），所以 隔離設定 對它是 no-op。
     模式 = "plan" if 選項.權限 is 權限.唯讀 else "accept-edits"
@@ -207,7 +225,7 @@ def _agy組參數(提示: str, 選項: 呼叫選項) -> list[str]:
         # 而 nova 唯一的唯讀呼叫端是工作流的審查員。理由寫在
         # `test_agy三種權限都要給add_dir` 的 docstring 裡。
         參數 += ["--add-dir", str(選項.工作目錄)]
-    參數 += ["--model", 選項.模型 or agy預設模型]
+    參數 += ["--model", _agy型號(選項)]
     if 選項.續接:
         參數 += ["--conversation", 選項.續接]
     # agy 一律會留對話，沒有 --ephemeral 這種東西，所以 保留對話 對它是 no-op。
@@ -326,6 +344,36 @@ def 建立(家: 家族, *, 執行檔: Path | None = None) -> 語言模型:
     return 建命令列(家, 執行檔=執行檔)
 
 
+#: 思考深度的統一詞彙。**順序就是深淺**，最後一個最深。
+#: 值走 ASCII（要原樣傳進三家的 CLI，CLAUDE.md 的跨程序例外）。
+思考深度們 = ("low", "medium", "high", "xhigh", "max")
+
+#: agy 沒有旗標，深度是型號後綴（`agy models` 實測），而它只有三階。
+#: **不足的那幾階不准默默降級**——降了使用者會以為叫到最深，
+#: 帳照付、深度沒開、沒有訊息。
+agy有的深度 = ("low", "medium", "high")
+_agy後綴 = re.compile(r"-(?:low|medium|high)$")
+
+
+def _檢查深度(家: str, 深: str | None) -> None:
+    """統一介面先擋一次：不認得的值當場炸，訊息指得回 nova。
+
+    傳下去的話報錯的是 CLI，而它的訊息說不出「nova 收了一個打錯的旗標」。
+    """
+    if 深 is None:
+        return
+    if 深 not in 思考深度們:
+        訊息 = f"不認得的思考深度 {深!r}——只准 {'、'.join(思考深度們)}"
+        raise ValueError(訊息)
+    if 家 == "agy" and 深 not in agy有的深度:
+        訊息 = (
+            f"agy 只有 {'、'.join(agy有的深度)} 三階（深度是型號後綴，不是旗標），"
+            f"給不了 {深!r}。**不自動降級**：降了你會以為叫到最深，"
+            f"而帳照付、深度沒開。要更深就換一家"
+        )
+        raise ValueError(訊息)
+
+
 def 建命令列(家: 家族, *, 執行檔: Path | None = None) -> 命令列模型:
     """只做 CLI 那三家。**回的是具體型別不是 Protocol。**
 
@@ -339,7 +387,17 @@ def 建命令列(家: 家族, *, 執行檔: Path | None = None) -> 命令列模�
         訊息 = f"不認得的 LLM CLI：{家}（可用：{可用}）"
         raise ValueError(訊息)
     組, 析 = _規格[家]
-    return 命令列模型(名稱=家, 執行檔=執行檔 or 找執行檔(家), 組參數=組, 解析=析)
+
+    def 組並先擋(提示: str, 選項: 呼叫選項) -> list[str]:
+        """**擋在組參數這一層**，不是在命令列那一層。
+
+        擋在上面的話，任何繞過命令列直接建腦的呼叫端都會漏掉這道檢查——
+        而漏掉的症狀是「安靜地沒有生效」，那是最難發現的一種。
+        """
+        _檢查深度(家, 選項.思考深度)
+        return 組(提示, 選項)
+
+    return 命令列模型(名稱=家, 執行檔=執行檔 or 找執行檔(家), 組參數=組並先擋, 解析=析)
 
 
 #: 認證失敗時的家別提示。錯誤訊息只說「沒登入」，不會說是哪個旗標害的。

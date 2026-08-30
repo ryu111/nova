@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping
 from nova.契約.工作流 import 階段代碼, 預設最多token, 預設最多步數
 from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 預設逾時秒
+from nova.載體.模型.轉接 import 思考深度們
 
 #: 一個子命令的處理函式。`argparse.Namespace` → 退出碼。
 處理型 = Callable[[argparse.Namespace], int]
@@ -94,6 +95,13 @@ def _加委派類(
     )
     問剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
     問剖析.add_argument(
+        "--思考深度",
+        default=None,
+        choices=list(思考深度們),
+        help="想多深。三家機制不同（claude --effort、codex TOML、agy 型號後綴），"
+        "統一介面吸收掉。agy 只有 low/medium/high，給更深會當場擋下不會默默降級",
+    )
+    問剖析.add_argument(
         "--預算token",
         type=int,
         default=None,
@@ -152,6 +160,11 @@ def _加委派類(
         "--輸出檔",
         default=None,
         help="叫它邊做邊寫進這個檔。逾時被殺之後還撿得回進度（要搭 --可編輯）",
+    )
+    問剖析.add_argument(
+        "--背景",
+        action="store_true",
+        help="丟到背景跑，立刻回。印出識別碼與輸出檔；看還在跑什麼用 nova 狀態",
     )
     問剖析.add_argument(
         "--熔斷",

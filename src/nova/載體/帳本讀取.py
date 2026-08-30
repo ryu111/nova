@@ -11,6 +11,7 @@
 import json
 from collections import Counter
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -187,6 +188,58 @@ def _總成本(各家: tuple[一家的帳, ...]) -> float | None:
             return None
         總 += 家.成本美金
     return 總
+
+
+@dataclass(frozen=True, slots=True)
+class 還在跑的:
+    """一筆「發出去了但沒寫下結果」的執行。
+
+    **這是兜底那一層。** `nova 問 --背景` 會自己印識別碼，但只要有人
+    用 `nohup` 或別的方式繞過去，這裡照樣看得見——判準不是「誰啟動的」，
+    是**帳本上有 `call_started` 沒有對應的 `call_finished`**。
+
+    分不出「還在跑」與「被殺掉」是**刻意的**：兩者在帳本上長得一模一樣，
+    而硬猜（例如去看 pid 還在不在）會在跨機器、跨重開機的時候說謊。
+    多久了交給人判斷——所以 `起` 一定要給。
+    """
+
+    執行識別碼: str
+    起: str
+    #: 正在跑的是哪一顆。**從 `call_started` 讀，不是從 `各家` 讀**——
+    #: `各家` 只統計收尾過的呼叫，而還在跑的那一筆按定義就沒收尾，
+    #: 拿它去問會得到「還沒叫到模型」，剛好把最想知道的那格弄丟。
+    家們: tuple[str, ...]
+
+
+def 還在跑的有哪些(目錄: Path) -> list[還在跑的]:
+    """掃帳本，把沒收尾的挑出來。**最近的排前面。**
+
+    讀不動的檔案跳過不炸：這條路是給 `nova 狀態` 用的，
+    而**「還沒有狀態」不是錯誤**——炸掉會讓狀態列一直閃紅。
+    """
+    出 = []
+    for 路 in 列出執行(目錄):
+        try:
+            摘 = 讀一次執行(路)
+            開著的 = _開著的是誰(路, set(摘.沒收尾的呼叫))
+        except OSError:
+            continue
+        if not 摘.沒收尾的呼叫:
+            continue
+        出.append(還在跑的(執行識別碼=摘.執行識別碼, 起=摘.起, 家們=開著的))
+    return 出
+
+
+def _開著的是誰(路徑: Path, 開著: set[int]) -> tuple[str, ...]:
+    """那幾筆沒收尾的呼叫是叫誰。有型號就連型號一起給。"""
+    名字 = []
+    for 事 in 讀原始事件(路徑):
+        if 事.get("event") != 事件種類.呼叫開始.value or 事.get("call") not in 開著:
+            continue
+        家 = str(事.get("family", "?"))
+        型 = 事.get("model")
+        名字.append(f"{家}／{型}" if 型 else 家)
+    return tuple(名字)
 
 
 def 統計規則(目錄: Path) -> tuple[一條規則的帳, ...]:

@@ -11,6 +11,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -39,8 +40,16 @@ from nova.載體.判準 import 判準指令, 在哪跑, 建判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
-from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
-from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
+from nova.載體.帳本 import (
+    不記帳本,
+    專案識別,
+    帳本,
+    指定識別碼的環境變數,
+    新執行識別碼,
+    開帳本,
+    預設帳本目錄,
+)
+from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件, 還在跑的有哪些
 from nova.載體.排程 import 啟動器名, 怎麼跑, 排程標籤, 排程設定, 排程預算, 確保啟動器在
 from nova.載體.收件 import (
     丟一件,
@@ -298,12 +307,55 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     return _要問的東西(提示=提示, 用=用, 模=模, 可以做什麼=可以做什麼, 屍=屍)
 
 
+#: 背景輸出放哪。跟帳本、收件匣同一個專案資料夾——住專案外面、用專案當鍵。
+_背景資料夾 = "背景"
+
+
+def _丟到背景(參數: argparse.Namespace) -> int:
+    """把同一條指令重新發射成一個獨立的背景程序，立刻回。
+
+    **背景化要內聚在 nova 自己，不能靠外面的殼。** 2026-08-30 我用
+    `nohup uv run nova 問 … &` 派了兩份研究，使用者的介面上什麼都看不到；
+    我的修法是「以後改用 harness 的背景任務功能」——**那是懇求**，
+    而且那個功能是 Claude Code 的，換一個 harness 就整個消失。
+
+    重新發射走 `sys.argv`（真實命令列）而不是重組參數：重組會漏掉旗標，
+    而漏掉的那次剛好就是最難查的那次。
+    """
+    參 = [格 for 格 in sys.argv[1:] if 格 != "--背景"]
+    if len(參) == len(sys.argv[1:]):
+        print("--背景 只能從命令列用（重新發射靠的是 sys.argv）", file=sys.stderr)
+        return 阻擋
+    落點目錄 = 狀態根目錄() / "專案" / 專案識別(在哪跑(參數.工作目錄)) / _背景資料夾
+    落點目錄.mkdir(parents=True, exist_ok=True)
+    # **一件事只准有一個號碼。** 這裡編一個、帳本另外編一個的話，
+    # 使用者拿到的識別碼在 `nova 帳本` 上查不到——而那看起來像「帳沒記」。
+    識別 = 新執行識別碼()
+    落點 = 落點目錄 / f"{識別}.md"
+    with 落點.open("w", encoding="utf-8") as 手:
+        subprocess.Popen(  # noqa: S603 —— 就是這支自己，參數原封不動
+            [sys.executable, "-m", "nova", *參],
+            stdout=手,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,  # 父程序結束不會把它一起帶走
+            cwd=Path.cwd(),
+            env={**os.environ, 指定識別碼的環境變數: 識別},
+        )
+    print(f"丟到背景了。識別碼：{識別}")
+    print(f"輸出寫在：{落點}")
+    print("看還在跑什麼：nova 狀態")
+    return 放行
+
+
 def _子命令_問(參數: argparse.Namespace) -> int:
     """把一件事委派給別家 LLM CLI。
 
     這是統一介面的第一個真實呼叫端——用 codex／agy 接手工作，
     分擔 Claude 的壓力與使用額度。
     """
+    if 參數.背景:
+        return _丟到背景(參數)
     這次 = _問的前置(參數)
     if isinstance(這次, int):
         return 這次
@@ -319,6 +371,7 @@ def _子命令_問(參數: argparse.Namespace) -> int:
                 這次.提示,
                 選項=呼叫選項(
                     模型=這次.模,
+                    思考深度=參數.思考深度,
                     工作目錄=Path(參數.工作目錄) if 參數.工作目錄 else None,
                     逾時秒=參數.逾時,
                     權限=這次.可以做什麼,
@@ -1077,6 +1130,24 @@ def _子命令_秘密(參數: argparse.Namespace) -> int:
     return 放行
 
 
+def _印還在跑的(帳本目錄: Path) -> None:
+    """把「發出去了但沒寫下結果」的執行列出來。**沒有就一個字都不印。**
+
+    每次都印一行「還在跑 0 筆」會讓真的有事那一次被忽略。
+
+    **分不出「還在跑」與「被殺掉」是刻意的**：兩者在帳本上長得一模一樣，
+    而硬猜（去看 pid 還在不在）會在跨機器、跨重開機的時候說謊。
+    多久了交給人判斷，所以起始時間一定要印。
+    """
+    跑著的 = 還在跑的有哪些(帳本目錄)
+    if not 跑著的:
+        return
+    print(f"  還在跑 {len(跑著的)} 筆（有發出去、還沒寫下結果）：")
+    for 一筆 in 跑著的:
+        家 = "、".join(一筆.家們) or "還沒叫到模型"
+        print(f"    {一筆.執行識別碼}  {家}  起 {一筆.起}")
+
+
 def _子命令_狀態(參數: argparse.Namespace) -> int:
     """現在怎麼樣，以及**有什麼需要你**。
 
@@ -1094,12 +1165,24 @@ def _子命令_狀態(參數: argparse.Namespace) -> int:
     現 = 讀現況(路徑)
     if 現 is None:
         print("  （還沒醒來過。跑一次 nova 跑 或 nova 工作流 --從收件匣 就會有）")
-        return 放行
+    else:
+        _印上次醒來(現)
+        _印佇列(專案)
+    # **不管醒來過沒有都要印。** 背景派出去的活跟「排程有沒有醒過」無關——
+    # 提早 return 的話，第一次用 nova 的人派了一份研究出去卻什麼都看不到。
+    _印還在跑的(預設帳本目錄(專案))
+    return 放行
+
+
+def _印上次醒來(現: 現況) -> None:
     print(f"  上次醒來 {現.上次醒來}：{形容(現.上次結果)}（退出碼 {現.上次退出碼}）")
     if 現.上次理由:
         print(f"    {現.上次理由}")
     if 現.上次執行識別碼:
         print(f"    帳在 nova 帳本 {現.上次執行識別碼}")
+
+
+def _印佇列(專案: Path) -> None:
     匣 = 收件目錄(專案)
     處理中 = 匣 / "處理中"
     卡住的 = len([路 for 路 in 處理中.glob("*") if 路.is_file()]) if 處理中.is_dir() else 0
@@ -1108,7 +1191,6 @@ def _子命令_狀態(參數: argparse.Namespace) -> int:
         # **需要你的那一格。** `處理中/` 裡的不自動放回佇列（可能做了一半，
         # 重跑會把副作用再做一次），所以只能靠人決定。
         print(f"  ⚠ 卡住的 {卡住的} 件——收下了卻沒收尾，看 nova 收件")
-    return 放行
 
 
 def _子命令_收件(參數: argparse.Namespace) -> int:

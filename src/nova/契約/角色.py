@@ -47,6 +47,15 @@ class 呼叫選項:
     """
 
     模型: str | None = None
+    #: 思考深度（`codex` 的 `model_reasoning_effort`）。**跟型號是兩個旋鈕。**
+    #:
+    #: 2026-08-30 踩過：把「luna-max」當成型號傳下去 → `model-not-found`。
+    #: `max` 是深度，`gpt-5.6-luna` 才是型號。
+    #:
+    #: **只有 codex 吃。** agy 的推理強度包在型號裡（`gemini-3.7-flash-high`），
+    #: claude 沒有這個旋鈕——給了那兩家會當場炸，不會默默忽略：
+    #: 默默忽略的話使用者以為叫它想深了，帳照付而深度沒開。
+    思考深度: str | None = None
     工作目錄: 路徑 | None = None
     逾時秒: float = 預設逾時秒
     #: 預設最嚴的那一邊——忘了設不會變成放行。
