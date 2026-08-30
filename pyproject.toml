@@ -25,6 +25,7 @@ dev = [
     "pre-commit>=4.6.2",
     "pytest-xdist>=3.8.0",
     "pytest-randomly>=4.1.0",
+    "coverage>=7.10",
     "pyyaml>=6.0.3",
     "types-pyyaml>=6.0.12.20260815",
 ]
@@ -35,11 +36,12 @@ dev = [
 testpaths = ["tests"]
 # 刻意不放 -n：強制平行會毀掉 TDD 內圈（worker 啟動成本吃掉 pre-commit 的秒級預算，
 # 而且 -x 在平行下語義會劣化）。平行只由閘的規則定義開啟，見 src/nova/載體/規則表.py
-# 預設排除 真cli：`uv run pytest` 不該偷偷燒 token。要跑就明寫 -m 真cli（後給的 -m 會蓋掉）。
-addopts = "--import-mode=importlib -ra --strict-markers --strict-config -m \"not 真cli\""
+# 預設排除真的外部測試：`uv run pytest` 不該偷偷燒資源。要跑就明寫 -m（後給的 -m 會蓋掉）。
+addopts = "--import-mode=importlib -ra --strict-markers --strict-config -m \"not 真cli and not 真端點\""
 markers = [
     "serial: 不可與其他測試平行跑（會搶同一份資源，例如檔案系統或巢狀 pytest）",
     "真cli: 真的呼叫外部 LLM CLI（會燒 token、需要認證）。兩個閘都排除，手動 -m 真cli 跑",
+    "真端點: 真的呼叫本機推論伺服器（會吃本機算力）。兩個閘都排除，手動 -m 真端點 跑",
 ]
 
 [tool.ruff]

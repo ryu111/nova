@@ -183,7 +183,12 @@ def _檢查角色表(角色表: Mapping[階段代碼, 角色]) -> None:
         raise ValueError(訊息)
 
 
-def 建TDD執行器(*, 角色表: Mapping[階段代碼, 角色], 跑判準: 判準) -> 執行器:
+def 建TDD執行器(
+    *,
+    角色表: Mapping[階段代碼, 角色],
+    跑判準: 判準,
+    跑重構判準: 判準 | None = None,
+) -> 執行器:
     """把角色表與機械判準接成一個執行器。
 
     這就是 `BaseWorkflow(task, 測試, 實作, 驗證, review)` 的形狀——但**驗證不是角色**，
@@ -196,7 +201,20 @@ def 建TDD執行器(*, 角色表: Mapping[階段代碼, 角色], 跑判準: 判�
 
     def 執行一步(定義: 階段定義, 任: 任務, 軌跡: tuple[步驟結果, ...]) -> 步驟結果:
         if 定義.種類 is 種類.判準:
-            收場, 證據 = 跑判準(任)
+            if 定義.代碼 is 階段代碼.驗證重構 and 跑重構判準 is not None:
+                pytest收場, pytest證據 = 跑判準(任)
+                ruff收場, ruff證據 = 跑重構判準(任)
+                收場們 = (pytest收場, ruff收場)
+                if pytest收場 is 判準終局.紅:
+                    證據 = f"[pytest] {pytest證據}\n[ruff] {ruff證據}"
+                else:
+                    證據 = f"[ruff] {ruff證據}\n[pytest] {pytest證據}"
+                if any(項 is 判準終局.跑不起來 for 項 in 收場們):
+                    收場 = 判準終局.跑不起來
+                else:
+                    收場 = 判準終局.綠 if all(項 is 判準終局.綠 for 項 in 收場們) else 判準終局.紅
+            else:
+                收場, 證據 = 跑判準(任)
             if 收場 is 判準終局.跑不起來:
                 # **不是紅，是這一步根本沒跑到。** 終局標成確定失敗，
                 # 狀態機就會收在「中止」讓人去查環境，而不是回去再實作一次。

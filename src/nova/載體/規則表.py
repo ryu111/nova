@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 
 from nova.載體.serial佔比 import 檢查serial佔比
@@ -17,6 +18,7 @@ from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
 from nova.載體.程序 import 具名啟動
 from nova.載體.語言 import 檢查繁體中文
+from nova.載體.豁免登記 import 檢查ruff豁免
 from nova.載體.閘 import 型別, 測試, 規則, 靜態
 
 # CI 要跟 base branch 比，本機 commit 前跟 HEAD 比。用環境變數傳遞，
@@ -198,6 +200,14 @@ def 建規則表(根目錄: Path) -> list[規則]:
             階段=靜態,
         ),
         規則(
+            代碼="ruff-exemptions",
+            名稱="ruff 豁免登記",
+            閘點=frozenset({"ci"}),
+            負責層="載體",
+            檢查=partial(檢查ruff豁免, 根目錄),
+            階段=靜態,
+        ),
+        規則(
             代碼="mypy",
             名稱="型別（strict）",
             閘點=全部,
@@ -223,7 +233,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
                 根目錄,
                 "pytest",
                 "-m",
-                "not serial and not 真cli",
+                "not serial and not 真cli and not 真端點",
                 "-n",
                 str(平行度()),
                 "--dist",
@@ -238,8 +248,22 @@ def 建規則表(根目錄: Path) -> list[規則]:
             閘點=frozenset({"ci"}),
             負責層="載體",
             檢查=_外部指令(
-                根目錄, "pytest", "-m", "serial and not 真cli", "-q", "-p", "no:randomly"
+                根目錄,
+                "pytest",
+                "-m",
+                "serial and not 真cli and not 真端點",
+                "-q",
+                "-p",
+                "no:randomly",
             ),
+            階段=測試,
+        ),
+        規則(
+            代碼="registered-mutation",
+            名稱="登記負控（精確變異）",
+            閘點=frozenset({"ci"}),
+            負責層="測試",
+            檢查=_外部指令(根目錄, "pytest", "tests/負控/test_登記的變異會被殺.py", "-q"),
             階段=測試,
         ),
         規則(
