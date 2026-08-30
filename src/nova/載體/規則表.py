@@ -6,6 +6,7 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -83,6 +84,30 @@ def 決定基準(環境: Mapping[str, str]) -> str:
     return 環境.get(基準環境變數, "HEAD")
 
 
+def _丟掉pycache(根目錄: Path) -> None:
+    """把 `src/` 與 `tests/` 底下的 `__pycache__` 清掉。**跑測試前一定要做。**
+
+    **Python 的快取鍵也不含內容**：`.pyc` 檔頭記的是 source 的 `size` ＋
+    **整數秒** `mtime`。同一秒內改兩次而長度剛好一樣，下一次 import 就吃到
+    舊的那份——而「一個字元換一個字元」（`open("x")` ↔ `open("a")`）
+    正是長度不變的改法，做負控時是常態。
+
+    這一條比 ruff 與 mypy 那兩條嚴重：它不是「靜態檢查放行了」，
+    是**跑起來的根本不是你剛寫的那份程式碼**，而且 `inspect.getsource()`
+    讀的是 `.py`，印出來完全正常，從原始碼一輩子看不出問題。
+
+    **`PYTHONDONTWRITEBYTECODE=1` 不能代替**：它只擋寫、不擋讀。
+
+    只掃 `src/` 與 `tests/`——`.venv` 底下有上萬個 `__pycache__`，
+    清它們只會讓下一次 import 變慢，擋不到任何東西。
+
+    實測代價：`pytest tests/單元` 有 pyc 0.86 秒、冷編 1.02 秒。
+    """
+    for 頂層 in ("src", "tests"):
+        for 目錄 in (根目錄 / 頂層).rglob("__pycache__"):
+            shutil.rmtree(目錄, ignore_errors=True)
+
+
 def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str]]:
     """把一條外部指令包成檢查函式。
 
@@ -91,7 +116,8 @@ def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str
     """
     工具目錄 = Path(sys.executable).parent
 
-    # ruff 兩條帶 `--no-cache`、mypy 帶 `--no-incremental`，理由不是潔癖：
+    # ruff 帶 `--no-cache`、mypy 帶 `--no-incremental`、pytest 之前清 pycache，
+    # 理由不是潔癖：
     # **兩家的快取鍵都不含內容**。ruff 是（路徑、大小、mtime 奈秒）；
     # mypy 是（路徑、大小、**整數秒** mtime）——mypy 只在 mtime 對不上時才去比
     # 內容雜湊，所以「同一秒內改兩次、長度剛好一樣」直接吃到上一次的結論。
@@ -104,6 +130,8 @@ def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str
 
     def 檢查() -> tuple[bool, str]:
         執行檔 = 工具目錄 / 指令[0]
+        if 指令[0] == "pytest":
+            _丟掉pycache(根目錄)
         # pytest 與 mypy 是 python shebang 腳本，直接跑會在活動監視器上顯示成
         # python3.13，跟其他每一支 python 程序分不開。角色就用工具自己的名字。
         完整, 角色標記 = 具名啟動(執行檔 if 執行檔.exists() else Path(指令[0]), 指令[1:])
