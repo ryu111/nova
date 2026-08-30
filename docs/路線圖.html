@@ -150,7 +150,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
  "節點": [
   {
    "id": "閘",
-   "標": "nova 閘（10 條）",
+   "標": "nova 閘（11 條）",
    "副": "載體/閘.py ＋ 規則表.py",
    "x": 40,
    "y": 64,
@@ -161,9 +161,13 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "檔": [
     "src/nova/載體/閘.py",
     "src/nova/載體/規則表.py",
-    "src/nova/載體/serial佔比.py"
+    "src/nova/載體/serial佔比.py",
+    "src/nova/載體/豁免登記.py",
+    "tests/負控/登記.py",
+    "tests/負控/執行器.py"
    ],
-   "閘數": 10
+   "閘數": 11,
+   "註": "第 10 條 <code>ruff-exemptions</code> 守 ruff 豁免不准偷偷長大；第 11 條 <code>registered-mutation</code> 把「宣稱的負控」變成會執行的閘——登記在 <code>tests/負控/登記.py</code>，點名的測試沒走到破壞點會先報 <code>WRONG_TEST</code>，不會含糊成 survived。"
   },
   {
    "id": "禁令",
