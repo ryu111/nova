@@ -1,20 +1,13 @@
-"""本地模型：介面的基準形狀。
+"""本地模型的整合測試。
 
-**它跑得動，才證明真的沒綁定任何一家。** claude／codex／agy 各自帶著一整套載體
-（工具、sandbox、session）；本地模型只有腦。`語言模型` Protocol 只要求
-`名稱` 與 `詢問`——如果那個 Protocol 其實是 CLI 形狀的，這一格就裝不進去。
-
-形狀是 OpenAI 相容的 HTTP 端點（本機跑 omlx-server／llama.cpp／ollama 都是這個形狀）。
-
-**最重要的一條是「做不到就明講」**：本地模型沒有工具，被要求可編輯的時候
-不准假裝做得到——那會讓工作流以為檔案改好了，然後在驗證階段才發現什麼都沒發生。
-
-會綁 socket，所以住整合層。
+假伺服器驗轉遞形狀，`真端點` 驗真的可達性；兩者都會碰 socket，所以住整合層。
+設計理由見 `src/nova/載體/模型/本地.py`。
 """
 
 import json
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -36,7 +29,7 @@ _型號表 = {"data": [{"id": "Ornith-1.5-9B-MLX"}, {"id": "Ornith-1.5-9B-MLX-4b
 
 
 class _假伺服器(BaseHTTPRequestHandler):
-    """OpenAI 相容端點的最小替身。`狀態碼` 是類別屬性，測試改它來模擬壞掉。"""
+    """OpenAI 相容端點的最小替身。`狀態碼` 只控制對話回應，測試改它來模擬上游錯誤。"""
 
     狀態碼 = 200
     #: 裝慢幾秒。**假伺服器太快的話逾時那條路根本測不到**——
@@ -72,6 +65,7 @@ class _假伺服器(BaseHTTPRequestHandler):
 def 假端點() -> Iterator[str]:
     _假伺服器.狀態碼 = 200
     _假伺服器.慢幾秒 = 0.0
+    _假伺服器.收到的請求 = {}
     伺服器 = HTTPServer(("127.0.0.1", 0), _假伺服器)
     threading.Thread(target=伺服器.serve_forever, daemon=True).start()
     try:
@@ -159,6 +153,8 @@ class Test做不到就明講:
 
 
 class Test壞掉的時候:
+    """這裡驗真的 socket 行為；例外分類的窮舉在單元層。"""
+
     def test_伺服器回500是上游確定失敗(self, 假端點: str) -> None:
         _假伺服器.狀態碼 = 500
 
@@ -183,7 +179,7 @@ class Test壞掉的時候:
         伺服器要真的裝慢——第一版只把逾時設成 0.001 秒，但假伺服器
         在 1 毫秒內就回完了，那條路根本沒走到。
         """
-        _假伺服器.慢幾秒 = 1.0
+        _假伺服器.慢幾秒 = 0.3
 
         答 = 本地腦(網址=假端點).詢問("在嗎", 選項=呼叫選項(逾時秒=0.15))
 
@@ -203,18 +199,36 @@ def test_工作目錄被忽略但不會炸(假端點: str, tmp_path: Path) -> No
     assert 答.終局 is 終局.成功
 
 
-def _本機有推論伺服器() -> bool:
-    """真的連得上才跑。連不上就跳過，並且**說清楚為什麼跳過**。"""
+@pytest.fixture
+def 真端點網址() -> str:
+    """探真端點；本機沒開服務就跳過。"""
+    網址 = 預設本地網址()
     try:
-        with urllib.request.urlopen(f"{預設本地網址()}/models", timeout=2) as 回:  # noqa: S310
-            return bool(回.status == 200)  # noqa: PLR2004 —— 200 就是 200
+        with urllib.request.urlopen(f"{網址}/models", timeout=2):  # noqa: S310
+            pass
+    except urllib.error.HTTPError:
+        # HTTPError 代表已經連到端點，不能把上游錯誤當成服務沒開而跳過。
+        raise
     except OSError:
-        return False
+        pytest.skip(f"本機沒有推論伺服器（{網址}）")
+
+    return 網址
 
 
-@pytest.mark.真cli
-@pytest.mark.skipif(not _本機有推論伺服器(), reason=f"本機沒有推論伺服器（{預設本地網址()}）")
-def test_真的打一次本機推論伺服器() -> None:
+@pytest.mark.真端點
+def test_真端點列得出模型清單(真端點網址: str) -> None:
+    with urllib.request.urlopen(f"{真端點網址}/models", timeout=2) as 回:  # noqa: S310
+        型號表 = json.loads(回.read().decode("utf-8"))
+
+    型號們 = 型號表.get("data")
+    assert isinstance(型號們, list) and 型號們, "真伺服器的模型清單不能是空的"
+    assert all(
+        isinstance(型號, dict) and isinstance(型號.get("id"), str) and 型號["id"] for 型號 in 型號們
+    ), "模型清單的每一項都要有型號識別碼"
+
+
+@pytest.mark.真端點
+def test_真的打一次本機推論伺服器(真端點網址: str) -> None:
     """**假伺服器證明的是轉遞形狀，不是可達性**（CLAUDE.md 判準三）。
 
     假的 `http.server` 測得出「參數有沒有組對、錯誤有沒有分類對」，
@@ -224,9 +238,10 @@ def test_真的打一次本機推論伺服器() -> None:
     這一支要本機真的跑著 omlx-server／llama.cpp／ollama。
     連不上就跳過，不會讓套件變紅。
     """
-    答 = 本地腦(網址=預設本地網址()).詢問("只回兩個字：收到")
+    答 = 本地腦(網址=真端點網址).詢問("只回四個字：本地通了")
 
     assert 答.終局 is 終局.成功, 答.文字
     assert 答.文字.strip()
-    assert 答.用量.輸入token > 0, "真伺服器一定會回 usage，回 0 代表欄位讀錯了"
+    assert 答.用量.輸入token > 0, "真伺服器一定會回輸入用量，回 0 代表欄位讀錯了"
+    assert 答.用量.輸出token > 0, "真伺服器一定會回輸出用量，回 0 代表欄位讀錯了"
     assert 答.用量.成本美金 == 0.0

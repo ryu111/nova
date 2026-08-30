@@ -81,25 +81,36 @@ def test_涵蓋宣告不能指向自己() -> None:
         assert 條.涵蓋於 != 條.代碼, f"{條.代碼} 宣告自己涵蓋自己，等於沒宣告"
 
 
-def test_兩個閘都排除真cli() -> None:
-    """真 CLI 測試會燒 token、需要認證——不准溜進任何一個閘。
+def test_兩個閘都排除真cli與真端點() -> None:
+    """真 CLI 與真端點測試會碰外部資源——不准溜進任何一個閘。
 
-    忘了排除的話 CI 會在沒有認證的機器上紅，而且是紅在跟改動無關的地方。
+    忘了排除的話 CI 會在沒有資源的機器上紅，而且是紅在跟改動無關的地方。
     """
     根目錄 = Path(__file__).resolve().parents[2]
+    命令列們: list[tuple[str, ...]] = []
     for 條 in 建規則表(根目錄):
         if not 條.代碼.startswith("pytest"):
             continue
-        指令 = getattr(條.檢查, "__closure__", None)
-        assert 指令 is not None, f"{條.代碼} 不是包出來的外部指令，這支測試要改寫"
-    原始碼 = (根目錄 / "src" / "nova" / "載體" / "規則表.py").read_text(encoding="utf-8")
-    pytest行 = [
-        行 for 行 in 原始碼.splitlines() if '"pytest"' in 行 or "pytest" in 行 and '"-m"' in 行
-    ]
-    帶標記的 = [行 for 行 in pytest行 if '"-m"' in 行]
+        閉包 = getattr(條.檢查, "__closure__", None)
+        assert 閉包 is not None, f"{條.代碼} 不是包出來的外部指令，這支測試要改寫"
+        命令 = next(
+            (
+                格.cell_contents
+                for 格 in 閉包
+                if isinstance(格.cell_contents, tuple)
+                and 格.cell_contents
+                and 格.cell_contents[0] == "pytest"
+            ),
+            None,
+        )
+        assert isinstance(命令, tuple), f"{條.代碼} 找不到 pytest 命令列"
+        命令列們.append(tuple(str(項) for 項 in 命令))
+    帶標記的 = [命令 for 命令 in 命令列們 if "-m" in 命令]
     assert 帶標記的, "找不到帶 -m 的 pytest 規則"
-    for 行 in 帶標記的:
-        assert "not 真cli" in 行, f"這條 pytest 規則沒排除真cli：{行.strip()}"
+    for 命令 in 帶標記的:
+        命令字串 = " ".join(命令)
+        assert "not 真cli" in 命令字串, f"這條 pytest 規則沒排除真cli：{命令}"
+        assert "not 真端點" in 命令字串, f"這條 pytest 規則沒排除真端點：{命令}"
 
 
 class Test平行度:
