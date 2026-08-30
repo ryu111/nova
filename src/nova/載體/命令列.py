@@ -41,7 +41,7 @@ from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.已處理 import 列出成果, 已處理目錄, 歸檔
 from nova.載體.帳本 import 不記帳本, 帳本, 新執行識別碼, 開帳本, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 統計規則, 讀一次執行, 讀原始事件
-from nova.載體.排程 import 排程標籤, 排程設定, 排程預算
+from nova.載體.排程 import 啟動器名, 排程標籤, 排程設定, 排程預算, 確保啟動器在
 from nova.載體.收件 import (
     丟一件,
     你敲,
@@ -1012,7 +1012,16 @@ def _子命令_排程(參數: argparse.Namespace) -> int:
     同一條界線：nova 產生，人安裝。
     """
     專案 = 在哪跑(None)
-    執行檔 = Path(sys.executable).parent / "nova"
+    # **在自己的 venv 裡建一個看得出是誰的啟動器**，不是使用者系統上的狀態，
+    # 所以這一步 nova 自己做（`launchctl load` 那一步才是人的）。
+    # 每次重印都建一次：`uv sync` 之類的動作可能把它清掉，而清掉之後
+    # launchd 的 job 會永久壞掉，背景項目卻還在那裡。
+    try:
+        執行檔 = 確保啟動器在(Path(sys.executable))
+    except OSError as 錯:
+        print(f"建不出啟動器 {啟動器名}：{錯}", file=sys.stderr)
+        return 阻擋
+    print(f"啟動器：{執行檔}（活動監視器會顯示 {啟動器名}）", file=sys.stderr)
     try:
         設定 = 排程設定(
             執行檔=執行檔,
