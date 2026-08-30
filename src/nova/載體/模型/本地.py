@@ -65,20 +65,21 @@ class 本地腦:
         """問一次。**做不到的事在打出去之前就明講。**"""
         做不到 = _做不到的地方(選項)
         if 做不到 is not None:
-            return _壞掉(做不到, 失敗代碼.用法錯誤, 結束碼=2)
+            return _建立失敗回應(做不到, 失敗代碼.用法錯誤, 結束碼=2)
         try:
             型號 = 選項.模型 or self._第一個型號(選項.逾時秒)
-            回來 = self._要一次(提示, 型號=型號, 逾時秒=選項.逾時秒)
+            回來 = self._送出對話(提示, 型號=型號, 逾時秒=選項.逾時秒)
         except TimeoutError:
             # **請求可能已經出門了。** 確定失敗會讓上層放心重跑，而那會重做副作用。
-            return _壞掉(f"{self.網址} 超過 {選項.逾時秒} 秒沒回應", 失敗代碼.逾時, 未知=True)
+            return _建立失敗回應(
+                f"{self.網址} 超過 {選項.逾時秒} 秒沒回應", 失敗代碼.逾時, 未知=True
+            )
         except urllib.error.HTTPError as 錯:
-            return _壞掉(f"{self.網址} 回 HTTP {錯.code}", 失敗代碼.上游, 結束碼=錯.code)
+            return _建立失敗回應(f"{self.網址} 回 HTTP {錯.code}", 失敗代碼.上游, 結束碼=錯.code)
         except (urllib.error.URLError, OSError) as 錯:
-            # 「伺服器沒開」跟「CLI 沒裝」是同一件事：那個東西根本不在。
-            return _壞掉(f"連不上 {self.網址}（{錯}）", 失敗代碼.未安裝)
+            return _處理連線錯誤(self.網址, 選項.逾時秒, 錯)
         except (ValueError, KeyError, IndexError) as 錯:
-            return _壞掉(f"{self.網址} 的回應看不懂（{錯}）", 失敗代碼.上游)
+            return _建立失敗回應(f"{self.網址} 的回應看不懂（{錯}）", 失敗代碼.上游)
         return _讀成回應(回來)
 
     def _第一個型號(self, 逾時秒: float) -> str:
@@ -86,7 +87,7 @@ class 本地腦:
         表 = self._打(f"{self.網址}/models", 內容=None, 逾時秒=min(逾時秒, _探型號逾時秒))
         return str(表["data"][0]["id"])
 
-    def _要一次(self, 提示: str, *, 型號: str, 逾時秒: float) -> dict[str, Any]:
+    def _送出對話(self, 提示: str, *, 型號: str, 逾時秒: float) -> dict[str, Any]:
         return self._打(
             f"{self.網址}/chat/completions",
             內容={"model": 型號, "messages": [{"role": "user", "content": 提示}]},
@@ -115,7 +116,15 @@ def _做不到的地方(選項: 呼叫選項) -> str | None:
     return None
 
 
-def _壞掉(訊息: str, 代碼: 失敗代碼, *, 結束碼: int = 1, 未知: bool = False) -> 回應:
+def _處理連線錯誤(網址: str, 逾時秒: float, 錯誤: urllib.error.URLError | OSError) -> 回應:
+    """把連線失敗分成「未安裝」與「結果未知」。"""
+    是逾時 = isinstance(錯誤, urllib.error.URLError) and isinstance(錯誤.reason, TimeoutError)
+    if 是逾時:
+        return _建立失敗回應(f"{網址} 超過 {逾時秒} 秒沒回應", 失敗代碼.逾時, 未知=True)
+    return _建立失敗回應(f"連不上 {網址}（{錯誤}）", 失敗代碼.未安裝)
+
+
+def _建立失敗回應(訊息: str, 代碼: 失敗代碼, *, 結束碼: int = 1, 未知: bool = False) -> 回應:
     return 回應(
         文字=訊息,
         終局=終局.結果未知 if 未知 else 終局.確定失敗,

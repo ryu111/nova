@@ -223,7 +223,7 @@ def 建規則表(根目錄: Path) -> list[規則]:
                 根目錄,
                 "pytest",
                 "-m",
-                "not serial and not 真cli",
+                "not serial and not 真cli and not 真端點",
                 "-n",
                 str(平行度()),
                 "--dist",
@@ -238,7 +238,13 @@ def 建規則表(根目錄: Path) -> list[規則]:
             閘點=frozenset({"ci"}),
             負責層="載體",
             檢查=_外部指令(
-                根目錄, "pytest", "-m", "serial and not 真cli", "-q", "-p", "no:randomly"
+                根目錄,
+                "pytest",
+                "-m",
+                "serial and not 真cli and not 真端點",
+                "-q",
+                "-p",
+                "no:randomly",
             ),
             階段=測試,
         ),
