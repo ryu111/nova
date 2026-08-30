@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from time import monotonic
 
+from nova.契約.工作流 import 預設單次最多token
 from nova.契約.帳本 import 事件, 事件種類
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.角色 import 呼叫選項, 語言模型, 預設選項
@@ -60,6 +61,8 @@ class 記帳腦:
     #: 記不記模型講的話（遮罩過）。**預設記**——「它說了什麼」是帳本
     #: 唯一答不出來的問題。要關的人關得掉，但關掉不是預設。
     記全文: bool = True
+    #: 單次呼叫的 token 上限。
+    單次最多token: int = 預設單次最多token
 
     @property
     def 名稱(self) -> str:
@@ -101,6 +104,8 @@ class 記帳腦:
         例外可能發生在請求出門之後，副作用可能已經產生了。
         """
         全文 = _遮過再截斷(答, 記全文=self.記全文)
+        花費 = 答.用量 if 答 else None
+        超標 = True if (花費 is not None and 花費.總token > self.單次最多token) else None
         return 事件(
             種類=事件種類.呼叫結束,
             呼叫編號=編號,
@@ -108,15 +113,16 @@ class 記帳腦:
             接力第幾顆=self.接力第幾顆,
             終局=(答.終局 if 答 else 終局.結果未知).value,
             失敗代碼=答.失敗代碼.value if 答 else None,
-            輸入token=答.用量.輸入token if 答 else None,
-            輸出token=答.用量.輸出token if 答 else None,
-            成本美金=答.用量.成本美金 if 答 else None,
+            輸入token=花費.輸入token if 花費 else None,
+            輸出token=花費.輸出token if 花費 else None,
+            成本美金=花費.成本美金 if 花費 else None,
             耗時毫秒=耗時,
             文字長度=len(答.文字) if 答 else None,
             文字雜湊=_指紋(答.文字) if 答 else None,
             文字=全文.文字 if 全文 else None,
             遮掉幾處=全文.遮掉幾處 if 全文 else None,
             文字截斷=True if 全文 and 全文.截斷 else None,
+            單次token超標=超標,
         )
 
 
@@ -155,12 +161,25 @@ def _遮過再截斷(答: 回應 | None, *, 記全文: bool) -> _落盤的全文
     )
 
 
-def 記帳每一顆(腦們: Sequence[語言模型], 帳: 帳本, *, 記全文: bool = True) -> tuple[語言模型, ...]:
+def 記帳每一顆(
+    腦們: Sequence[語言模型],
+    帳: 帳本,
+    *,
+    記全文: bool = True,
+    單次最多token: int = 預設單次最多token,
+) -> tuple[語言模型, ...]:
     """把一串腦各包一層，順便編好 `接力第幾顆`。
 
     存在的理由是**別讓呼叫端自己數**：手寫索引遲早會錯一格，
     而錯一格的帳本看起來完全正常。
     """
     return tuple(
-        記帳腦(內層=腦, 帳=帳, 接力第幾顆=序, 記全文=記全文) for 序, 腦 in enumerate(腦們, start=1)
+        記帳腦(
+            內層=腦,
+            帳=帳,
+            接力第幾顆=序,
+            記全文=記全文,
+            單次最多token=單次最多token,
+        )
+        for 序, 腦 in enumerate(腦們, start=1)
     )

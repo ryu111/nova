@@ -17,7 +17,13 @@
 from hashlib import sha256
 from time import monotonic
 
-from nova.契約.工作流 import 任務, 執行器, 步驟結果, 階段定義
+from nova.契約.工作流 import (
+    任務,
+    執行器,
+    步驟結果,
+    階段定義,
+    預設單次最多token,
+)
 from nova.契約.帳本 import 事件, 事件種類
 from nova.契約.模型回應 import 終局
 from nova.載體.帳本 import 帳本
@@ -25,7 +31,12 @@ from nova.載體.帳本 import 帳本
 _雜湊長度 = 16
 
 
-def 記帳執行器(內層: 執行器, 帳: 帳本) -> 執行器:
+def 記帳執行器(
+    內層: 執行器,
+    帳: 帳本,
+    *,
+    單次最多token: int = 預設單次最多token,
+) -> 執行器:
     """包住一個執行器，前後各記一筆。**不改結果**——改了狀態機就走錯路。
 
     開始事件寫在跑之前：階段跑到一半被殺掉時，結束事件永遠不會寫出來，
@@ -40,15 +51,31 @@ def 記帳執行器(內層: 執行器, 帳: 帳本) -> 執行器:
         try:
             結果 = 內層(定義, 任, 軌跡)
         finally:
-            帳.記一筆(_結束事件(編號, 定義, 結果, round((monotonic() - 起) * 1000)))
+            帳.記一筆(
+                _結束事件(
+                    編號,
+                    定義,
+                    結果,
+                    round((monotonic() - 起) * 1000),
+                    單次最多token=單次最多token,
+                )
+            )
         return 結果
 
     return 執行一步
 
 
-def _結束事件(編號: int, 定義: 階段定義, 結果: 步驟結果 | None, 耗時: int) -> 事件:
+def _結束事件(
+    編號: int,
+    定義: 階段定義,
+    結果: 步驟結果 | None,
+    耗時: int,
+    *,
+    單次最多token: int = 預設單次最多token,
+) -> 事件:
     """`結果 is None` ＝ 內層丟了例外，那是**結果未知**不是確定失敗。"""
     花費 = 結果.花費 if 結果 else None
+    超標 = True if (花費 is not None and 花費.總token > 單次最多token) else None
     return 事件(
         種類=事件種類.階段結束,
         呼叫編號=編號,
@@ -61,6 +88,7 @@ def _結束事件(編號: int, 定義: 階段定義, 結果: 步驟結果 | None
         耗時毫秒=耗時,
         文字長度=len(結果.證據) if 結果 else None,
         文字雜湊=_指紋(結果.證據) if 結果 else None,
+        單次token超標=超標,
     )
 
 

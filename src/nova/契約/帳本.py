@@ -99,6 +99,8 @@ class 事件:
     遮掉幾處: int | None = None
     #: 太長被截掉了。沒截就不落盤這一格（不是落 false）。
     文字截斷: bool | None = None
+    #: 單次呼叫花費超過門檻。沒超就不落盤這一格。
+    單次token超標: bool | None = None
 
 
 #: 中文欄位名 → 落盤用的 ASCII 鍵。**單一來源**，由
@@ -130,6 +132,7 @@ class 事件:
     "文字": "text",
     "遮掉幾處": "redactions",
     "文字截斷": "text_truncated",
+    "單次token超標": "single_token_exceeded",
 }
 
 #: sink 自己補上去的三個鍵，事件本身不准有同名欄位
