@@ -213,9 +213,9 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
         重疊 = "、".join(sorted(重疊的家))
         訊息 = f"審查要換一顆腦：{重疊} 同時出現在做事與審查的鏈上"
         raise ValueError(訊息)
-    審查理由 = 審查資格理由(審查的)
-    if 審查理由 is not None:
-        raise ValueError(審查理由)
+    不合格理由 = 審查資格理由(審查的)
+    if 不合格理由 is not None:
+        raise ValueError(不合格理由)
     with _開帳(帳本目錄) as 帳:
         return _跑一輪(
             任務描述,

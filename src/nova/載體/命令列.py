@@ -803,8 +803,8 @@ def _工作流前置檢查(參數: argparse.Namespace, 工作目錄: Path, 進�
     重疊 = 執行家們 & 審查家們
     if 重疊:
         return f"審查要換一顆腦：{'、'.join(sorted(重疊))} 同時出現在 --用 與 --審查用"
-    if (理由 := 審查資格理由(審查家們)) is not None:
-        return 理由
+    if (不合格理由 := 審查資格理由(審查家們)) is not None:
+        return 不合格理由
     if 進度檔 is not None:
         # 模型動得到工作目錄整棵樹。進度檔住在裡面的話，
         # 它會往裡面寫，而那份東西下一輪會被當成前情餵回去。
