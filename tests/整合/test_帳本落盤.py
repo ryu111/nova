@@ -30,12 +30,28 @@ def test_目錄不存在會自己建(tmp_path: Path) -> None:
     assert (深 / "r.jsonl").exists()
 
 
-def test_同一個識別碼是接在後面不是蓋掉(tmp_path: Path) -> None:
-    """append-only。用 `w` 開的話續接同一次執行會把前面的證據洗掉。"""
-    for _ in range(2):
-        with 開帳本(tmp_path, 執行識別碼="r") as 帳:
-            帳.記一筆(事件(種類=事件種類.呼叫開始))
-    assert len((tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()) == 2
+def test_同一個識別碼開第二次要當場炸(tmp_path: Path) -> None:
+    """**撞號不准靜默合併。**
+
+    這支本來叫 `test_同一個識別碼是接在後面不是蓋掉`，守的是「用 `a` 開，
+    續接同一次執行不會洗掉前面的證據」。**那個需求沒有呼叫端**——
+    `開帳本` 的三個呼叫端沒有任何一個會對同一個號開第二次檔。
+
+    所以 `a` 實際擋住的不是「洗掉」，是把**兩次不同執行**的事件交錯合併進
+    同一本帳，而合併之後沒有人分得出哪一行是哪一次跑的。
+
+    而且撞號不只是機率問題：`NOVA_RUN_ID` 只驗格式不驗歸屬
+    （`帳本.py` 的 `新執行識別碼`），一個殘留在環境裡的值就會讓每一次執行
+    都用同一個檔名——那是必然路徑，不是碰運氣。
+    """
+    with 開帳本(tmp_path, 執行識別碼="r") as 帳:
+        帳.記一筆(事件(種類=事件種類.呼叫開始))
+
+    with pytest.raises(FileExistsError, match="r.jsonl"), 開帳本(tmp_path, 執行識別碼="r"):
+        pass
+
+    # 第一份的證據原封不動——連「開了又關」都不准動到它。
+    assert len((tmp_path / "r.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
 def test_開檔失敗要當場炸(tmp_path: Path) -> None:

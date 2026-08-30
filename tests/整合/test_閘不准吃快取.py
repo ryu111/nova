@@ -30,6 +30,7 @@ mypy 的快取鍵是（路徑、大小、**整數秒** mtime）。它只在 mtim
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -189,3 +190,80 @@ def test_閘的mypy規則不會被假快取騙過去(tmp_path: Path) -> None:
     綠, 輸出 = 規則們["mypy"].檢查()
 
     assert not 綠, f"閘被假快取騙過去了：{輸出}"
+
+
+#: 回 1 的版本。
+_回1 = b"def f() -> int:\n    return 1\n"
+#: **跟上面一模一樣的長度**，一個字元換一個字元。
+_回2 = b"def f() -> int:\n    return 2\n"
+
+
+def _做出會騙人的pyc(工地: Path) -> Path:
+    """先讓 Python 編一份 `.pyc`，再把 `.py` 換掉但不動大小與**整數秒** mtime。
+
+    Python 判斷 `.pyc` 新不新鮮，看的是它檔頭記的
+    **source 的 `size` ＋ 整數秒 `mtime`**——不含內容。
+    """
+    模組 = 工地 / "某模組.py"
+    模組.write_bytes(_回1)
+    subprocess.run(
+        [sys.executable, "-c", "import 某模組"], cwd=工地, capture_output=True, check=False
+    )
+
+    先前 = 模組.stat()
+    模組.write_bytes(_回2)
+    os.utime(模組, ns=(先前.st_atime_ns, 先前.st_mtime_ns))
+    現在 = 模組.stat()
+    assert 現在.st_size == 先前.st_size, "重現前提：大小要一樣"
+    assert int(現在.st_mtime) == int(先前.st_mtime), "重現前提：整數秒 mtime 要一樣"
+    return 模組
+
+
+def test_pycache的快取真的會給假綠(tmp_path: Path) -> None:
+    """先證明那個坑是真的。**這一個比 ruff 與 mypy 那兩個嚴重**——
+
+    它不是「靜態檢查放行了」，是**跑起來的根本不是你剛寫的那份程式碼**。
+    而且 `inspect.getsource()` 讀的是 `.py`，印出來完全正常。
+    """
+    _做出會騙人的pyc(tmp_path)
+
+    吃快取 = subprocess.run(
+        [sys.executable, "-c", "import 某模組; print(某模組.f())"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    for 目錄 in tmp_path.rglob("__pycache__"):
+        shutil.rmtree(目錄)
+    清掉了 = subprocess.run(
+        [sys.executable, "-c", "import 某模組; print(某模組.f())"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert 吃快取.stdout.strip() == "1", f"這個坑不存在了？{吃快取.stdout}"
+    assert 清掉了.stdout.strip() == "2", "清掉之後還是舊的，那重現寫錯了"
+
+
+def test_pytest的閘跑之前會把pycache清掉() -> None:
+    """**要驗「閘會叫它」，不是「那個函式會清目錄」。**
+
+    第一版直接呼叫 `_丟掉pycache(專案根目錄)` 然後斷言目錄空了——
+    負控當場證明那是假綠：把閘裡那一行呼叫刪掉，這支照樣過。
+    測到的是函式本身，不是**它被接上去了沒**。
+
+    所以走 `建規則表` 那條路，真的跑一次閘的 pytest 規則。
+    代價是那條規則要跑完（單元層約 1 秒），買到的是「這個保證真的接上了」。
+    """
+    種的 = 專案根目錄 / "src" / "nova" / "__pycache__"
+    種的.mkdir(parents=True, exist_ok=True)
+    假的 = 種的 / "假的.cpython-999.pyc"
+    假的.write_bytes("我不是真的 pyc".encode())
+
+    規則們 = {規則.代碼: 規則 for 規則 in 建規則表(專案根目錄)}
+    規則們["pytest-unit"].檢查()
+
+    assert not 假的.exists(), "閘跑 pytest 之前沒有把 __pycache__ 清掉"
