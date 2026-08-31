@@ -116,6 +116,7 @@ class 記帳腦:
             輸入token=花費.輸入token if 花費 else None,
             輸出token=花費.輸出token if 花費 else None,
             快取讀取token=花費.快取讀取token if 花費 else None,
+            快取建立token=花費.快取建立token if 花費 else None,
             成本美金=花費.成本美金 if 花費 else None,
             耗時毫秒=耗時,
             文字長度=len(答.文字) if 答 else None,
