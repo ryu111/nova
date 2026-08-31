@@ -173,3 +173,28 @@ class Test不准寫的路徑:
         (工作區 / "tests" / "test_甲.py").write_text("assert 甲() == 1", encoding="utf-8")
         箱 = 工具箱(工作區, 權限.可編輯, 不准寫=("tests",))
         assert "甲()" in 箱.執行("read_file", {"path": "tests/test_甲.py"})
+
+
+class Test沒有工作目錄就不給工具:
+    """**「沒指定範圍」不該被解讀成「範圍是這裡」。**
+
+    工具迴圈原本寫成 `選項.工作目錄 if 選項.工作目錄 else Path.cwd()`——
+    `nova 問 --用 local` 隨手一問，模型就拿到讀取當前所在目錄的能力。
+    使用者以為自己只是問了一句話。
+
+    fail-closed：沒有明確的工作目錄就不送工具。模型少了工具只是回得笨一點，
+    多了工具卻沒有範圍是**它讀得到你剛好 cd 進去的任何地方**。
+    """
+
+    def test_沒給工作目錄就是空工具集(self) -> None:
+        assert 工具箱(None, 權限.唯讀).規格() == []
+
+    def test_沒給工作目錄時可編輯也一樣空(self) -> None:
+        """可編輯更該擋——沒有範圍的寫入比沒有範圍的讀取更貴。"""
+        assert 工具箱(None, 權限.可編輯).規格() == []
+
+    def test_沒給工作目錄時執行任何工具都要拒絕(self) -> None:
+        """規格是空的，模型仍可能硬叫——那時候不准真的去讀。"""
+        for 名, 參 in (("read_file", {"path": "任何.txt"}), ("grep", {"pattern": "x"})):
+            with pytest.raises(工具錯誤, match="工作目錄"):
+                工具箱(None, 權限.唯讀).執行(名, 參)

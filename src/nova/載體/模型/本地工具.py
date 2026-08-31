@@ -69,7 +69,12 @@ class 工具箱:
     （執行時仍然再擋一次：模型硬叫一個沒給它的工具時不准真的寫下去。）
     """
 
-    工作目錄: Path
+    #: `None` ＝ **沒有指定範圍**，那時候一把工具都不給（fail-closed）。
+    #:
+    #: 原本寫成「沒給就用 `Path.cwd()`」——`nova 問 --用 local` 隨手一問，
+    #: 模型就拿到讀取當前所在目錄的能力，而使用者以為自己只是問了一句話。
+    #: **「沒指定範圍」不該被解讀成「範圍是這裡」。**
+    工作目錄: Path | None
     可以做什麼: 權限
     #: 這些子樹底下**讀得到但寫不進去**。
     #:
@@ -87,7 +92,13 @@ class 工具箱:
         return self.可以做什麼 is not 權限.唯讀
 
     def 規格(self) -> list[dict[str, Any]]:
-        """OpenAI 相容的 `tools` 陣列。"""
+        """OpenAI 相容的 `tools` 陣列。**沒有工作目錄就一把都不給。**
+
+        少了工具模型只是回得笨一點；多了工具卻沒有範圍，是它讀得到你剛好
+        `cd` 進去的任何地方。
+        """
+        if self.工作目錄 is None:
+            return []
         工具們 = [
             _規格("read_file", "讀取工作目錄下的一個檔案", {"path": "相對於工作目錄的路徑"}),
             _規格(
@@ -121,6 +132,9 @@ class 工具箱:
         raise 工具錯誤(訊息)
 
     def _圈在裡面(self, 路徑字串: str) -> Path:
+        if self.工作目錄 is None:
+            訊息 = "這一輪沒有指定工作目錄，任何檔案都不准碰。"
+            raise 工具錯誤(訊息)
         """把模型給的路徑解析成真實路徑，**確認它沒有跑出工作目錄**。
 
         判斷要在解析**之後**做：`工作目錄/../../etc/passwd` 字串上看起來在裡面，
@@ -168,6 +182,8 @@ class 工具箱:
 
     def _擋下不准寫的(self, 目標: Path, 路徑字串: str) -> None:
         """`tests` 擋住時 `tests-資料` 不該跟著被擋——**比路徑節點，不比字元**。"""
+        if self.工作目錄 is None:
+            return
         根 = self.工作目錄.resolve()
         for 子樹 in self.不准寫:
             if 目標.is_relative_to((根 / 子樹).resolve()):
@@ -179,6 +195,9 @@ class 工具箱:
     def _搜(self, 樣式: str) -> str:
         if not 樣式:
             訊息 = "grep 要給 pattern"
+            raise 工具錯誤(訊息)
+        if self.工作目錄 is None:
+            訊息 = "這一輪沒有指定工作目錄，不能搜尋。"
             raise 工具錯誤(訊息)
         根 = self.工作目錄.resolve()
         命中: list[str] = []
