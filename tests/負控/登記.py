@@ -573,8 +573,8 @@ class 變異:
         識別="總計不算快取讀取token",
         目標檔=Path("src/nova/載體/帳本讀取.py"),
         操作=替換一次(
-            "總token=sum(家.輸入token + 家.輸出token + 家.快取讀取token for 家 in 各家),",
-            "總token=sum(家.輸入token + 家.輸出token for 家 in 各家),",
+            "家.輸入token + 家.輸出token + 家.快取讀取token + 家.快取建立token",
+            "家.輸入token + 家.輸出token + 家.快取建立token",
         ),
         該紅=(
             "tests/單元/test_帳本讀取.py::Test快取讀取的token也要算::test_快取讀取的token算進總計",
@@ -595,6 +595,26 @@ class 變異:
             ),
         ),
         最多秒=10.0,
+    ),
+    變異(
+        識別="總計不算快取建立token",
+        目標檔=Path("src/nova/載體/帳本讀取.py"),
+        操作=替換一次(
+            "家.輸入token + 家.輸出token + 家.快取讀取token + 家.快取建立token",
+            "家.輸入token + 家.輸出token + 家.快取讀取token",
+        ),
+        該紅=("tests/單元/test_帳本讀取.py::Test快取建立要進總帳::test_進總token",),
+        最多秒=2.0,
+    ),
+    變異(
+        識別="claude的快取建立沒解析",
+        目標檔=Path("src/nova/載體/模型/解析.py"),
+        操作=替換一次(
+            '快取建立token=用了.get("cache_creation_input_tokens"),',
+            "快取建立token=None,",
+        ),
+        該紅=("tests/單元/test_模型解析.py::Test快取建立token::test_claude的快取建立要記下來",),
+        最多秒=2.0,
     ),
     變異(
         識別="帳本只算success收場的token",

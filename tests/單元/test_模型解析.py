@@ -371,3 +371,23 @@ class Test額度字串三家都要涵蓋:
             "Please retry in 39.844676573s.",
         ):
             assert 解析codex("", 1, 講法).失敗代碼 is not 失敗代碼.額度耗盡, 講法
+
+
+class Test快取建立token:
+    """claude 的 `cache_creation_input_tokens` 是**真的付費的 input**（1.25×）。
+
+    少了這一欄，`claude_ok.json` 這種「輸入 10、快取讀取 0、快取建立 16,668」的
+    呼叫在帳本裡只留下 10——**99.94% 的量憑空消失**，而所有成本比較都
+    建立在那個數字上。快取建立**不是**快取讀取的子集，兩欄要分開記。
+    """
+
+    def test_claude的快取建立要記下來(self) -> None:
+        assert 解析claude(讀("claude_ok.json"), 0).用量.快取建立token == 16668
+
+    def test_快取建立與快取讀取是兩欄(self) -> None:
+        用 = 解析claude(讀("claude_ok2.json"), 0).用量
+        assert (用.快取建立token, 用.快取讀取token) == (8094, 8570)
+
+    def test_不給快取建立的家是None不是0(self) -> None:
+        """給不出來就別給。0 會被誤讀成「量過，是零」。"""
+        assert 解析codex(讀("codex_ok2.jsonl"), 0).用量.快取建立token is None
