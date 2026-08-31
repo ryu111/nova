@@ -36,6 +36,8 @@ from typing import cast
         "per-file-ignores:tests/**:SLF001",
         "per-file-ignores:tests/**:S603",
         "per-file-ignores:tests/**:S607",
+        # 併成 `X not in (甲, 乙)` 會讓斷言訊息看不出是哪一邊壞掉，那正是測試的價值。
+        "per-file-ignores:tests/**:PLR1714",
     }
 )
 
