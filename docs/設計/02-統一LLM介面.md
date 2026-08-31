@@ -87,7 +87,7 @@ claude / codex / agy           腦 + 一整套自帶載體（工具、session、
 | 工具 | `--tools <白名單>`＋`--allowedTools <同一份>` | `--sandbox read-only` | `--mode plan` |
 | 家目錄設定 | `--setting-sources ""` ＋ `--strict-mcp-config` | `--ignore-user-config --ignore-rules` | ❌ 查不到旗標，對 agy 是 no-op |
 | MCP server | `--strict-mcp-config`（`--tools` 管不到，見下） | 沒查 | 沒查 |
-| 自帶 system prompt | `--system-prompt ""`（**只換掉，關不掉**，見缺口 4） | 查不到 | 查不到 |
+| 自帶 system prompt | `--system-prompt ""`（**只換掉，關不掉**） | `-c developer_instructions="…"`（同上，只換不關） | `.agents/rules/*.md` ＋ **必須 `--add-dir`**（同上） |
 
 **這張表每一格都要有測試背書**，不然「有沒有真的關掉」只能靠讀 code——
 依最高原則第一條，那等於沒有保證。
@@ -540,6 +540,61 @@ if 選項.隔離設定:
 
 不給 `--mcp-config` 就等於零台 MCP server，正是想要的結果。
 
+## 角色提示走 system 層還是併進 user prompt：查完了，答案是併進 user prompt
+
+nova 現在把角色提示用 `\n\n---\n\n` 併進使用者提示（`載體/角色.py` 的 `組提示()`），
+理由原本寫的是「只有 claude 有 `--system-prompt`」。**那個理由已經過時**——
+三家的路 2026-08-31 全部找到了。但結論不變，而且現在有實測背書。
+
+### 三家各自的路（都驗過，不是從文件抄的）
+
+| 家 | 怎麼給 | 走哪 | 驗證方式 |
+|---|---|---|---|
+| claude | `--append-system-prompt` / `--system-prompt[-file]` | argv | 既有 |
+| codex | `-c developer_instructions="…"` | argv | 回「喵喵」；**多行也收得到**（規則放第 2 行的金絲雀通過） |
+| agy | `.agents/rules/*.md` 或 `GEMINI.md` ＋ **必須 `--add-dir`** | 工作目錄的檔案 | 回「汪汪」 |
+| 本地 | `{"role": "system", …}` | HTTP body | 完全可控，**目前刻意沒接** |
+
+**agy 那一格踩過兩個坑**：
+
+1. 文件寫的 `~/.gemini/config/agents/<名>/agent.md` ＋ `--agent`——**那個目錄根本不存在**，
+   `agy agent` 列出來是空的。官方 skill `agy-customizations` 說的才是真的路。
+2. **`-p` print mode 不做 cwd 的階層 discovery。** cwd 就在工作區裡、`GEMINI.md`
+   也在，照樣讀不到；加 `--add-dir <工作區>` 才生效。
+   兩格對照跑過：不加 → 正常回答，加了 → 「汪汪」。
+
+四個環境變數全部不吃（`GEMINI_SYSTEM_MD`、`GEMINI_SYSTEM_PROMPT`、
+`AGY_SYSTEM_PROMPT`、`GEMINI_INSTRUCTIONS`）。
+
+### 為什麼還是不搬
+
+**成本軸：沒有好處。** codex A/B（n=3，同一題、同一組規則）：
+
+| 組 | 規則放哪 | input | cached | output 平均 | 遵守「回答限 3 行」 |
+|---|---|---|---|---|---|
+| A | 併進 user prompt（現況） | ~24,960 | 20,992 | 144 | **3/3** |
+| B | `developer_instructions` | ~24,973 | 20,992 | 187 | **1/3** |
+
+input 差不到 40 token（就是規則本身的長度），cached 完全相同。
+**搬過去沒有省到任何東西，遵守度反而更差。**
+
+先驗過 confound 才敢下這個結論：`-c` 的值是 TOML 解析的，而 TOML basic string
+不允許原始換行——如果被截在第一行，B 組根本沒收到「回答限 3 行」那句，
+結果就會是假的。金絲雀（把指令放第 2 行）回「喵喵」，證明多行有收到。
+
+**架構軸：agy 那條路要付的代價更大。** 它要求把規則寫進**工作目錄裡的檔案**，
+那正是 CLAUDE.md「會被餵回模型的東西，執行者不准碰」擋的東西；而且
+`--add-dir` 會把那個目錄加進 agy 的工作區，等於反轉「把各家載體關到最小」。
+**路存在，nova 拒絕走。**
+
+**方向軸：官方往反方向搬。** claude 的 `--exclude-dynamic-system-prompt-sections`
+是把段落從 system **搬進 user**，理由寫的是改善跨使用者的 prompt cache 重用。
+
+### 這一格的效力範圍
+
+n=3、一個題目、一種規則（輸出長度限制）。寫成「這個測試裡沒有好處、遵守度更差」，
+**不是**「system prompt 對遵守度沒用」這種通則。要推翻它，拿另一組 A/B 來。
+
 ## 已知缺口
 
 1. **真 CLI 的 contract test 不接進 CI。** agy 的 CI 認證環境變數查不到（用 Google OAuth，
@@ -562,8 +617,9 @@ if 選項.隔離設定:
    也就是說 `--mode plan`／`--sandbox read-only` 擋住的是**工具會不會被執行**，
    不是**模型腦裡有什麼**。「換腦但行為一樣」目前只在「工具不會亂動檔案」這一層成立，
    在「模型收到什麼指令」這一層還沒成立。
-   查證方向：codex 的 `-c/--config` 能不能覆寫 instructions、agy 有沒有對應開關。
-   **在補齊之前不要宣稱三家行為一致。**
+   **2026-08-31 查完了，三家的路都找到了**——結論是**不要搬**，見下節。
+   **在補齊之前不要宣稱三家行為一致**這句仍然成立：那 14,515／17,341
+   是各家內建的 system prompt，三家都只能「換掉自己那份」，關不掉。
 （原本的缺口 5「終態是二值」已修，見下節。）
 
 

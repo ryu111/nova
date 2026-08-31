@@ -36,7 +36,7 @@ class 假腦:
 
 class Test組提示:
     def test_系統提示併在前面(self) -> None:
-        """只有 claude 有 --system-prompt，codex 與 agy 沒有。
+        """三家都有路，但實測之後選擇併進 user prompt（設計文件 02）。
 
         走最小公倍數併進提示字串，三家收到的東西才一樣——換腦但行為一樣。
         """
