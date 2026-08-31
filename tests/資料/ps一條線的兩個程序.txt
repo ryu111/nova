@@ -1,0 +1,3 @@
+ 4534       06:38 二  9月/ 1 02:17:03 2026   /Users/sbu/nova/.venv/bin/nova-inbox -m nova 工作流 --從收件匣
+11339       00:28 二  9月/ 1 02:23:13 2026   uv run nova 工作流 --提示檔 /Users/sbu/.local/state/nova/專案/nova-10449efd/收件/20260831T163151Z-mcp-nova-線-漏報一條確實在跑的線-而那是我的-4f9796.md --工作目錄 /Users/sbu/nova-wt-線漏報 --審查用 agy --預算token 25000000
+11344       00:28 二  9月/ 1 02:23:13 2026   /Users/sbu/nova/.venv/bin/python3 /Users/sbu/nova/.venv/bin/nova 工作流 --提示檔 /Users/sbu/.local/state/nova/專案/nova-10449efd/收件/20260831T163151Z-mcp-nova-線-漏報一條確實在跑的線-而那是我的-4f9796.md --工作目錄 /Users/sbu/nova-wt-線漏報 --審查用 agy --預算token 25000000

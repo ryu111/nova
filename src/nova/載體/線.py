@@ -21,7 +21,8 @@ from nova.載體.重構護欄 import 不拍的目錄
 
 _PS欄位數 = 8
 _PS欄位分割數 = 7
-_LSTART欄數 = 5
+_PS命令欄 = 7
+_PS_LSTART之前的欄數 = 2  # pid 與 etime
 _成功退出碼 = 0
 _確定失敗退出碼 = 1
 _結果未知退出碼 = 3
@@ -316,35 +317,73 @@ def _解析一行ps(行: str, 本身pid: int) -> tuple[_程序資料 | None, boo
     欄 = 行.split(None, _PS欄位分割數)
     if len(欄) != _PS欄位數:
         return None, False
+    pid原文, 跑多久, 命令原文 = 欄[0], 欄[1], 欄[_PS命令欄]
     try:
-        詞 = shlex.split(欄[7])
+        詞 = shlex.split(命令原文)
     except ValueError:
-        詞 = 欄[7].split()
+        # 命令列可能有未配對的引號（claude 子程序的提示文就是這樣），
+        # 退回純空白切詞，別讓整行掉了。
+        詞 = 命令原文.split()
     if not _是nova命令(詞):
         return None, False
     try:
-        pid = int(欄[0])
+        pid = int(pid原文)
     except ValueError:
         return None, False
     if pid == 本身pid:
         return None, False
-    工作目錄 = _命令指定的工作目錄(詞) or _程序工作目錄(pid)
+    工作目錄 = _命令指定的工作目錄(詞) or _程序工作目錄(pid) or _裝在哪棵樹(詞)
     if 工作目錄 is None:
         return None, True
-    啟動時間 = " ".join(欄[2 : 2 + _LSTART欄數])
-    return _程序資料(工作目錄=工作目錄, 跑多久=欄[1], 啟動時間=啟動時間), False
+    程序 = _程序資料(
+        工作目錄=工作目錄,
+        跑多久=跑多久,
+        啟動時間=_lstart原文(行, 命令原文),
+    )
+    return 程序, False
+
+
+def _lstart原文(行: str, 命令: str) -> str:
+    """從原始那一行裡切出 lstart 那段，連內部空白一起保留。
+
+    `ps` 的 lstart 欄位自己就帶對齊用的空白（`二  9月/ 1 …`），
+    先 split 再 join 會把它壓成單一空白，印出來跟 `ps` 看到的不一樣。
+    """
+    # 呼叫端已確認欄數是 8，這裡一定切得出這一段，而且 `命令` 一定是它的結尾
+    lstart與命令 = 行.split(None, _PS_LSTART之前的欄數)[_PS_LSTART之前的欄數]
+    return lstart與命令.removesuffix(命令).strip()
 
 
 def _是nova命令(詞: list[str]) -> bool:
+    """判斷這行程序是不是一條 nova 線。
+
+    只認「被執行的那個程式」，不掃整行參數：claude 子程序的命令列裡有
+    `--add-dir /Users/sbu/nova` 這種東西，掃整行會把它誤認成一條線。
+    """
     if not 詞:
         return False
     第一個 = Path(詞[0]).name
-    if 第一個 == "nova" or 第一個.startswith("nova-"):
+    if _名字是nova(第一個):
         return True
     if 第一個.startswith("python"):
-        for 編號, 一詞 in enumerate(詞):
-            if 一詞 == "-m" and 編號 + 1 < len(詞) and 詞[編號 + 1].startswith("nova"):
-                return True
+        # `python -m nova …` 與 `…/bin/python3 …/bin/nova 工作流 …` 兩種形狀
+        return _接著跑的是nova(詞[1:])
+    if 第一個 == "uv" and len(詞) > 1 and 詞[1] == "run":
+        # `uv run nova 工作流 …`
+        return _接著跑的是nova(詞[2:])
+    return False
+
+
+def _名字是nova(名: str) -> bool:
+    return 名 == "nova" or 名.startswith(("nova-", "nova."))
+
+
+def _接著跑的是nova(其餘: list[str]) -> bool:
+    """看前導詞後面第一個實名的詞是不是 nova 本體；看到就下結論，不再往後掃。"""
+    for 一詞 in 其餘:
+        if 一詞.startswith("-"):  # 跳過 `-m` 這類開關，只看它後面要跑的東西
+            continue
+        return _名字是nova(Path(一詞).name)
     return False
 
 
@@ -354,6 +393,20 @@ def _命令指定的工作目錄(詞: list[str]) -> Path | None:
             return Path(詞[編號 + 1]).resolve()
         if 一詞.startswith("--工作目錄="):
             return Path(一詞.split("=", 1)[1]).resolve()
+    return None
+
+
+def _裝在哪棵樹(詞: list[str]) -> Path | None:
+    """命令列沒寫 `--工作目錄`、程序又已經不在時，退一步看它是從哪棵樹的 `.venv` 跑的。
+
+    收件匣 daemon 是 `/Users/sbu/nova/.venv/bin/nova-inbox …` 這種形狀，
+    裝在哪棵樹的 `.venv` 裡就算在那棵樹上跑。推不出來就回 `None`，維持「查不到」。
+    """
+    if not 詞:
+        return None
+    for 上層 in Path(詞[0]).parents:
+        if 上層.name == ".venv":
+            return 上層.parent.resolve()
     return None
 
 
