@@ -74,6 +74,80 @@ def 列出執行(目錄: Path) -> list[Path]:
     return sorted(目錄.glob("*.jsonl"), reverse=True)
 
 
+#: 分層之前那批舊帳本（`$XDG_STATE_HOME/nova/帳本`）的歸屬標籤。
+#: 刻意**不長成 `<名字>-<8 位十六進位>`**，那是 `帳本.專案識別()` 的形狀——
+#: 撞到的話舊的那批會被算進某個真專案的帳裡，等於憑空捏造歸屬。
+全域帳本識別 = "（分層之前）"
+
+
+@dataclass(frozen=True, slots=True)
+class 跨專案盤點結果:
+    """一次跨專案掃描的結果：撈到什麼，以及**漏了幾個**。
+
+    跳過的檔要數得出來——跟 `摘要.壞掉的行` 同一條規則：
+    證據不完整不准長得像事情沒發生。
+    """
+
+    執行們: tuple[tuple[str, Path], ...]
+    跳過的檔: int
+
+
+def 跨專案盤點(狀態根: Path) -> 跨專案盤點結果:
+    """掃 `<狀態根>/專案/*/帳本` 加上舊的 `<狀態根>/帳本`，合成一條時間軸。
+
+    **順序是時間序不是專案序**：六條線並行跑完，要問的是
+    「那個時候同時在跑什麼」，按專案分組排就答不出來。
+    檔名開頭是時戳，所以字典序反過來就是新的在前。
+    """
+    收: list[tuple[str, Path]] = []
+    跳過的檔 = 0
+    for 識別, 目錄 in _所有帳本目錄(狀態根):
+        for 檔 in 目錄.glob("*.jsonl"):
+            if _撈得到(檔):
+                收.append((識別, 檔))
+            else:
+                跳過的檔 += 1
+    收.sort(key=_時序鍵, reverse=True)
+    return 跨專案盤點結果(執行們=tuple(收), 跳過的檔=跳過的檔)
+
+
+def _撈得到(檔: Path) -> bool:
+    """這個帳本檔現在拿得到嗎。
+
+    斷掉的 symlink 讓 `is_file()` 回 False，權限擋住的路徑則直接丟 OSError——
+    對盤點來說兩種是同一件事：撈不到，記一筆跳過，不要炸掉整份列表。
+    """
+    try:
+        return 檔.is_file()
+    except OSError:
+        return False
+
+
+def _時序鍵(筆: tuple[str, Path]) -> str:
+    """排序拿檔名不拿路徑：路徑開頭是專案目錄，照它排就變成專案序。"""
+    _識別, 檔 = 筆
+    return 檔.name
+
+
+def 跨專案列出執行(狀態根: Path) -> list[tuple[str, Path]]:
+    """所有專案的執行，新的在前，每一筆帶得出屬於哪個專案。
+
+    目錄不存在就是空 list：全新的機器上這條路根本沒有東西，
+    **「還沒有帳」不是錯誤**。
+    """
+    return list(跨專案盤點(狀態根).執行們)
+
+
+def _所有帳本目錄(狀態根: Path) -> list[tuple[str, Path]]:
+    """(專案識別, 帳本目錄)。舊的全域位置掛在 `全域帳本識別` 底下。"""
+    出: list[tuple[str, Path]] = []
+    專案根 = 狀態根 / "專案"
+    if 專案根.is_dir():
+        出.extend((專案.name, 專案 / "帳本") for 專案 in 專案根.iterdir())
+    出.append((全域帳本識別, 狀態根 / "帳本"))
+    return [(識別, 目錄) for 識別, 目錄 in 出 if 目錄.is_dir()]
+
+
 def _解析(行: str) -> dict[str, Any] | None:
     """一行 → 事件，認不得就回 None。
 
