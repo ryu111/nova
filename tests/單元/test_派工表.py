@@ -25,18 +25,24 @@ def test_每個工作種類都要有派法() -> None:
         assert 怎麼派(種).腦們, 種
 
 
-def test_例行工作第一順位是claude() -> None:
-    """**量到之後翻面的**：agy 便宜不成立，例行改 claude 打頭。
+def test_例行工作第一順位是agy() -> None:
+    """**量到之後仍保留的成本事實**：agy 比 claude 貴，但 claude 要留給主 agent。
 
     2026-08-31 三格實驗（記在 `docs/負控紀錄.md` 旁的觀察）：agy 跑真任務單階
     375,061／410,294 input token，claude 同一份工作約 8,600——**46 倍**。
     原因不是 CLI 把工作區打包（空目錄 13,720 vs nova 目錄 13,726，只差 6 個），
     是模型自己在工具迴圈裡選擇讀滿 repo。
 
-    在角色提示教會 agy 怎麼找之前，例行的第一順位是 claude。
-    agy 留在備援，額度耗盡時仍然接得住。
+    使用者 2026-09-01 決定自動派工不使用 claude，所以例行先用 agy，
+    再由 codex 與 local 接力；local 只放最後一順位。
     """
-    assert 怎麼派(工作種類.例行).腦們[0] == "claude"
+    assert 怎麼派(工作種類.例行).腦們[0] == "agy"
+
+
+def test_自動派工兩列都不含claude() -> None:
+    """使用者 2026-09-01 的決定：claude 留給主 agent，不進自動派工列。"""
+    assert "claude" not in 怎麼派(工作種類.例行).腦們
+    assert "claude" not in 怎麼派(工作種類.推理).腦們
 
 
 def test_例行工作要有備援() -> None:
@@ -112,7 +118,7 @@ def test_每一格都說得出思考深度() -> None:
 
 
 def test_例行工作的思考深度是high() -> None:
-    """使用者的策略：例行（agy 打頭、claude 備援）用 high。"""
+    """使用者的策略：例行（agy 打頭、codex 與 local 備援）用 high。"""
     assert 怎麼派(工作種類.例行).思考深度 == "high"
 
 

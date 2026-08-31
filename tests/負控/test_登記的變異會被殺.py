@@ -22,7 +22,7 @@ def test_本地腦的防護都有固定負控() -> None:
     應被負控釘住 = {
         "tests/整合/test_命令列.py::Test本地腦沒有審查資格::test_本地腦不准當審查員",
         "tests/單元/test_派工門面.py::test_門面不准本地腦當審查員",
-        "tests/單元/test_本地派工.py::test_能力未量到前本地腦只保留手動指定",
+        "tests/單元/test_本地派工.py::test_本地腦只作例行最後備援",
     }
     已登記 = {測試 for 一筆 in 登記 for 測試 in 一筆.該紅}
 
