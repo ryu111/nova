@@ -167,7 +167,7 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
     "tests/負控/執行器.py"
    ],
    "閘數": 12,
-   "註": "第 10 條 <code>ruff-exemptions</code> 守 ruff 豁免不准偷偷長大；第 11 條 <code>registered-mutation</code> 把「宣稱的負控」變成會執行的閘；第 12 條 <code>claude-location</code> 檢查 CLAUDE.md 與 typed 登記同步——登記在 <code>tests/負控/登記.py</code>，點名的測試沒走到破壞點會先報 <code>WRONG_TEST</code>，不會含糊成 survived。"
+   "註": "第 10 條 <code>ruff-exemptions</code> 守 ruff 豁免不准偷偷長大；第 11 條 <code>registered-mutation</code> 把「宣稱的負控」變成會執行的閘；第 12 條 <code>claude-location</code> 檢查 CLAUDE.md 與 typed 登記同步——登記在 <code>tests/負控/登記.py</code>，點名的測試沒走到破壞點會先報 <code>WRONG_TEST</code>，不會含糊成 survived。 變異閘 2026-08-31 收到 <b>93 刀</b>。"
   },
   {
    "id": "禁令",
@@ -451,14 +451,15 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "態": "好",
    "檔": [
     "src/nova/契約/帳本.py",
-    "src/nova/載體/帳本讀取.py",
     "src/nova/契約/成果.py",
     "src/nova/載體/命令列.py",
+    "src/nova/載體/帳本讀取.py",
+    "src/nova/載體/模型/解析.py",
     "tests/單元/test_帳本讀取.py",
     "tests/單元/test_帳的顯示.py",
     "tests/整合/test_已處理.py"
    ],
-   "註": "寫端本來就有（記帳.py 寫 cost_usd），這一輪補的是讀端：按家與總計加總、nova 帳本與 nova 已處理 都顯示。<b>有一顆給不出來就整個不給</b>——只有 claude 回成本，把有的那幾家加起來是低報，而低報的成本比沒有成本更危險，它看起來像個數字"
+   "註": "寫端本來就有（記帳.py 寫 cost_usd），這一輪補的是讀端：按家與總計加總、nova 帳本與 nova 已處理 都顯示。<b>有一顆給不出來就整個不給</b>——只有 claude 回成本，把有的那幾家加起來是低報，而低報的成本比沒有成本更危險，它看起來像個數字。<b>2026-08-31 補上 cache_creation</b>：那是真的付費的 input（按 <b>1.25×</b> 計價），而且不是快取讀取的子集——實錄 <code>claude_ok.json</code> 輸入 10、讀取 0、<b>建立 16,668</b>。帳本以前只記那個 10，<b>99.94% 的量憑空消失</b>，而在那之前所有「哪一家比較貴」的比較都建立在那個數字上"
   },
   {
    "id": "終態",
@@ -540,9 +541,11 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "態": "好",
    "檔": [
     "src/nova/載體/模型/本地.py",
+    "src/nova/載體/模型/本地工具.py",
+    "tests/整合/test_本地工具迴圈.py",
     "tests/整合/test_本地模型.py"
    ],
-   "註": "介面的基準形狀就是它——只有腦。<b>它裝得進來就證明 語言模型 Protocol 是模型形狀不是 CLI 形狀</b>：形狀是 OpenAI 相容的 HTTP 端點（omlx-server／llama.cpp／ollama），走 urllib 不加相依。<b>做不到的事一律明講</b>——沒有工具就不准默默接受可編輯，那會讓工作流以為檔案改好了。成本回 0 不是 None：本地跑沒有 API 帳單，那是事實不是估算。實測 <code>nova 問 --用 local</code> 對真的 omlx-server 通了"
+   "註": "介面的基準形狀就是它——只有腦。<b>它裝得進來就證明 語言模型 Protocol 是模型形狀不是 CLI 形狀</b>：形狀是 OpenAI 相容的 HTTP 端點（omlx-server／llama.cpp／ollama），走 urllib 不加相依。<b>做不到的事一律明講</b>——沒有工具就不准默默接受可編輯，那會讓工作流以為檔案改好了。成本回 0 不是 None：本地跑沒有 API 帳單，那是事實不是估算。實測 <code>nova 問 --用 local</code> 對真的 omlx-server 通了。<b>回合快用完會催收尾</b>——帳本挖出來的病是「不知道該收尾了」，不是「規則被上下文淹掉」（重複讀取只有 7.1%／0.0%，28 次工具呼叫 <code>write_file</code> <b>零次</b>，全部撞上 8 回合上限）。剩 3 回合起塞倒數提醒，最後 2 回合把 <code>grep</code> 與 <code>read_file</code> 從 tools 陣列拿掉——<b>提醒是懇求，收掉工具才是保證</b>，模型連發出那個呼叫的形狀都沒有。實測同一題從「撞滿 8 回合 aborted」變成「<b>回合 5 收尾 success</b>」"
   },
   {
    "id": "回應",
@@ -664,8 +667,11 @@ textarea{width:100%;min-height:110px;background:var(--底);color:var(--字);bord
    "態": "好",
    "檔": [
     "src/nova/契約/角色.py",
-    "src/nova/載體/角色.py"
-   ]
+    "src/nova/載體/命令列.py",
+    "src/nova/載體/角色.py",
+    "tests/單元/test_角色.py"
+   ],
+   "註": "固定系統提示 ＋ 可換的腦，<b>組合不繼承</b>。<b>系統提示是用併的，不是走各家的 system prompt 旗標</b>——2026-08-31 把三家的路全查完了（codex <code>-c developer_instructions=</code>、agy <code>.agents/rules/*.md</code> ＋ <b>必須 <code>--add-dir</code></b>、本地 <code>role: system</code>），實測之後<b>還是選擇併進 user prompt</b>：codex A/B（n=3）遵守度 3/3 → 1/3、本地 9B（n=5）5/5 → 3/5、claude 兩組都 3/3 但 output 多 25%。<b>沒有任何一家往搬過去的方向。</b>agy 那條路代價更大：要把規則寫進工作目錄裡的檔案，那正是「會被餵回模型的東西執行者不准碰」擋的；<code>--add-dir</code> 還會反轉「把各家載體關到最小」。<b>路存在，nova 拒絕走。</b>併接<b>只准有一份實作</b>——命令列原本自己抄了一份分隔符字面量，兩份剛好長得一樣所以沒有東西會紅，現在由雙向負控釘住"
   },
   {
    "id": "狀態機",
