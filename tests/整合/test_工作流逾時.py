@@ -11,7 +11,8 @@ from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.契約.角色 import 呼叫選項, 預設逾時秒, 預設選項
 from nova.載體 import 命令列
 from nova.載體.模型.轉接 import codex高階模型, 建立, 決定逾時秒
-from nova.迴圈.角色工廠 import TDD角色藍圖
+from nova.載體.派工表 import 怎麼派
+from nova.迴圈.角色工廠 import 建TDD角色藍圖
 
 
 class 記錄腦:
@@ -75,7 +76,7 @@ def test_跑與工作流的逾時真的傳到呼叫選項(
 
 def test_TDD階段的預設逾時比單次問話長() -> None:
     """工作流每一階的預設不能再和單次 `問` 共用 1800 秒。"""
-    for 藍圖 in TDD角色藍圖:
+    for 藍圖 in 建TDD角色藍圖(怎麼派):
         assert 藍圖.逾時秒 > 預設逾時秒, f"{藍圖.識別碼} 還在用單次問話的逾時"
 
 

@@ -32,16 +32,19 @@ from nova.契約.額度 import 家族額度 as 家族額度
 from nova.契約.額度 import 視窗 as 視窗
 from nova.契約.額度 import 額度快照 as 額度快照
 from nova.載體.判準 import 建判準, 建重構判準
+from nova.載體.工作區 import 判定工作區, 拍工作區快照
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
 from nova.載體.模型.本地 import 審查資格理由
 from nova.載體.模型.記帳 import 記帳每一顆
 from nova.載體.模型.轉接 import 家族, 建立或缺席
+from nova.載體.派工表 import 怎麼派
+from nova.載體.角色 import 固定提示角色
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.額度 import 查詢額度
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 from nova.迴圈.工作流 import 工作流結果 as 工作流結果
-from nova.迴圈.角色工廠 import TDD角色藍圖, 建角色表
+from nova.迴圈.角色工廠 import 建TDD角色藍圖, 建角色表
 
 #: `用` 可以給一家，也可以給一串（前一顆失敗就換下一顆）。
 #: 字串用逗號分隔也算一串，方便從命令列傳進來。
@@ -252,13 +255,20 @@ def 派工(  # noqa: PLR0913 —— 公開簽章由門面規格固定
 
 
 def _建TDD角色表(執行者: 語言模型, 審查者: 語言模型) -> Mapping[階段代碼, 角色]:
-    """用兩顆已建好的腦，組出 TDD 的角色表。"""
-    審查派法 = TDD角色藍圖[-1].派法
+    """用兩顆已建好的腦，組出 TDD 的角色表。
+
+    這裡是組裝點：派工表與固定提示角色都是**載體**的東西，由這裡當參數傳進迴圈。
+    """
+    藍圖們 = 建TDD角色藍圖(怎麼派)
+    審查派法 = 藍圖們[-1].派法
 
     def 建腦(角色派法: 派法) -> 語言模型:
         return 審查者 if 角色派法 == 審查派法 else 執行者
 
-    return cast(Mapping[階段代碼, 角色], 建角色表(TDD角色藍圖, 建腦=建腦))
+    return cast(
+        Mapping[階段代碼, 角色],
+        建角色表(藍圖們, 建腦=建腦, 組角色=固定提示角色),
+    )
 
 
 def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物件只是換個地方列
@@ -289,6 +299,8 @@ def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物�
         執行一步=記帳執行器(_邊跑邊回報(執行, 每步), 帳, 單次最多token=停止.單次最多token),
         停止=停止,
         起點=起點,
+        拍快照=拍工作區快照,
+        判定工作區=判定工作區,
     )
 
 
