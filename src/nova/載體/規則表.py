@@ -5,6 +5,7 @@
 那些地方的程式碼沒辦法測試，等於沒有保證。
 """
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -303,3 +304,20 @@ def 建規則表(根目錄: Path) -> list[規則]:
         )
     )
     return 規則們
+
+
+def 版本(規則表檔: Path | None = None) -> str:
+    """這一版規則表的內容指紋，落在成果帳的 `policy_version`。
+
+    **走內容雜湊，不走 git 的 commit**：閘是照**工作區那份**規則表跑的，
+    不是照 HEAD 那份跑的。改了還沒提交就跑一次的話，走 git 會給出上一版的
+    答案——那比沒有答案更糟，因為它看起來像個答案。
+
+    雜湊不是為了防篡改，只是為了比對，所以取前 16 個十六進位字元就夠
+    （跟 `載體/重構護欄.py` 同一招）。
+
+    路徑收成參數是為了測得動「內容變了答案就不同」；呼叫端不必知道
+    規則表住哪個檔，那是規則表自己的知識。
+    """
+    檔 = 規則表檔 if 規則表檔 is not None else Path(__file__)
+    return hashlib.sha256(檔.read_bytes()).hexdigest()[:16]

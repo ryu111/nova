@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.規則表 import 平行度, 建規則表
+from nova.載體.規則表 import 平行度, 建規則表, 版本
 from nova.載體.閘 import 型別, 測試, 規則, 閘點清單, 靜態
 
 
@@ -176,3 +176,24 @@ def test_文件即事實要在提交閘() -> None:
     assert "docs-facts" in 提交的, (
         f"文件即事實不在提交閘裡，改完文件要推上去才會知道紅。現在有：{sorted(提交的)}"
     )
+
+
+def test_版本跟著規則表的內容變(tmp_path: Path) -> None:
+    """`成果` 帳上的 `policy_version` 要答「這次跑的時候規則表是哪一版」。
+
+    **走內容雜湊，不走 git 的 commit**：閘是照**工作區那份**跑的，
+    不是照 HEAD 那份跑的。改了還沒提交就跑一次的話，走 git 會給出
+    上一版的答案——那比沒有答案更糟，因為它看起來像個答案。
+    """
+    甲 = tmp_path / "甲.py"
+    甲.write_text("規則 = 1\n", encoding="utf-8")
+    乙 = tmp_path / "乙.py"
+    乙.write_text("規則 = 2\n", encoding="utf-8")
+
+    assert 版本(甲) == 版本(甲), "同一份內容要給同一個答案，不然帳上比不了"
+    assert 版本(甲) != 版本(乙), "內容不同就得看得出來，不然這一欄答不了歸因"
+
+
+def test_沒給路徑就報自己這一版() -> None:
+    """呼叫端不必知道規則表住哪個檔——那是規則表自己的知識。"""
+    assert len(版本()) == 16

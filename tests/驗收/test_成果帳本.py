@@ -8,6 +8,7 @@
 上游那條邊來自執行核（`收割 → 歸檔`）。
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -115,3 +116,62 @@ def test_成果對得回事件帳本(tmp_path: Path, 做假CLI: 做假CLI型) ->
     事件帳 = _跑("帳本", 狀態=狀態, 在=專案).stdout
 
     assert 成果那筆 in 事件帳, f"成果 {成果那筆} 在事件帳本裡找不到：\n{事件帳}"
+
+
+def _只有一筆成果(狀態: Path) -> dict[str, object]:
+    """從落盤的成果檔讀回那一筆。
+
+    **讀檔不讀 stdout**：`nova 已處理` 印的是給人看的摘要，
+    它印不印某一欄，跟那一欄有沒有記下來，是兩件事。
+    """
+    檔們 = sorted(狀態.rglob("已處理/*.json"))
+    assert len(檔們) == 1, f"預期剛好一筆成果，找到 {檔們}"
+    載回來 = json.loads(檔們[0].read_text(encoding="utf-8"))
+    assert isinstance(載回來, dict)
+    return 載回來
+
+
+def test_帳上答得出當時規則表哪一版與該退回哪個commit(tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+    """使用者要問的那句話：**「這次爛掉是不是因為上禮拜改了規則表？要退回哪？」**
+
+    這一格守的是**接線**，不是契約——契約那兩欄由 `tests/單元/test_成果.py` 守著。
+    接線斷掉的樣子很安靜：欄位在、型別對、測試綠，但落盤那筆永遠是 `None`。
+    """
+    執行檔, _ = 做假CLI("claude")
+    狀態 = tmp_path / "state"
+    專案 = tmp_path / "某個專案"
+    專案.mkdir()
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], cwd=專案, check=True)
+    (專案 / "甲.txt").write_text("內容", encoding="utf-8")
+    subprocess.run([*git, "add", "."], cwd=專案, check=True)
+    subprocess.run([*git, "commit", "-qm", "起點"], cwd=專案, check=True)
+    起點 = subprocess.run(
+        [*git, "rev-parse", "HEAD"], cwd=專案, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    跑完 = _跑一輪撞護欄的工作流(執行檔, 狀態=狀態, 專案=專案)
+    assert 跑完.returncode == _護欄碼, 跑完.stderr[:400]
+
+    那筆 = _只有一筆成果(狀態)
+    assert 那筆.get("rollback_point") == 起點, f"起點沒記到，壞掉的時候就不知道退回哪：{那筆}"
+    版本 = 那筆["policy_version"]
+    assert isinstance(版本, str) and len(版本) == 16, f"規則表版本沒記到：{版本!r}"
+
+
+def test_工作目錄不是repo時那一欄不落盤(tmp_path: Path, 做假CLI: 做假CLI型) -> None:
+    """**「這裡沒有 commit 可退」不准長得像「有但沒記到」。**
+
+    nova 在別人的目錄裡也跑得起來。落成空字串的話，那一欄就從
+    「這個問題不成立」變成「答案是空的」——而後者會讓人以為記帳壞了。
+    """
+    執行檔, _ = 做假CLI("claude")
+    狀態 = tmp_path / "state"
+    專案 = tmp_path / "不是repo的專案"
+    專案.mkdir()
+
+    _跑一輪撞護欄的工作流(執行檔, 狀態=狀態, 專案=專案)
+
+    那筆 = _只有一筆成果(狀態)
+    assert "rollback_point" not in 那筆, f"不是 repo 卻記了起點：{那筆.get('rollback_point')!r}"
+    assert 那筆["policy_version"], "規則表版本跟工作目錄是不是 repo 無關，這一欄照樣要有"
