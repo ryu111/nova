@@ -106,21 +106,113 @@ def 佔住(
         handle.close()
 
 
+def _排隊目錄(落點: Path) -> Path:
+    """號碼牌放哪。跟鎖檔同一層，名字跟著鎖的名稱走。"""
+    return 落點.parent / f"{落點.stem}.排隊"
+
+
+@contextmanager
+def _圈住發號(落點: Path) -> Iterator[None]:
+    """把「抽號碼牌」與「看前面還有誰」圈成不可分割的一段。
+
+    這裡用**阻塞式** `flock` 沒關係：圈住的只有幾個 syscall，
+    不像閘那樣圈著一整條 pytest。而且發號的人被 `kill -9`，核心照樣放鎖。
+    """
+    發號檔 = 落點.parent / f"{落點.stem}.發號"
+    handle = 發號檔.open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        handle.close()
+
+
+def _抽號碼牌(落點: Path) -> tuple[int, TextIO]:
+    """拿一個號碼，並把號碼牌檔 `flock` 住。**牌的 fd 就是「我還在排隊」**。
+
+    號碼與建牌都在發號鎖裡面，所以號碼的大小順序就是**進場順序**；
+    輪詢的相位再怎麼錯開也改不了它。
+    """
+    排隊 = _排隊目錄(落點)
+    排隊.mkdir(parents=True, exist_ok=True)
+    序號檔 = 落點.parent / f"{落點.stem}.序號"
+    with _圈住發號(落點):
+        try:
+            上一號 = int(序號檔.read_text(encoding="utf-8").strip() or "0")
+        except (OSError, ValueError):
+            上一號 = 0
+        序號 = 上一號 + 1
+        序號檔.write_text(str(序號), encoding="utf-8")
+        牌 = (排隊 / f"{序號:020d}").open("a+")
+        fcntl.flock(牌.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return 序號, 牌
+
+
+def _牌的主人死了(牌檔: Path) -> bool:
+    """牌還在但沒有人 `flock` 著，代表主人被 `kill -9` 了。
+
+    沒有這一段，一個被殺掉的等待者會把整條隊伍卡死——
+    那正是當初不選「檔案存不存在」而選 `flock` 要避開的東西。
+    """
+    try:
+        handle = 牌檔.open("a+")
+    except OSError:
+        return False
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    finally:
+        handle.close()
+    return True
+
+
+def _輪到我了(落點: Path, 序號: int) -> bool:
+    """排在我前面的號碼牌全不在了，才輪到我去搶鎖。
+
+    掃描一樣在發號鎖裡面：不然會看到一張「已經建好、還沒 `flock`」的牌，
+    把它誤判成死人的牌而回收掉，那條就被插隊了。
+    """
+    with _圈住發號(落點):
+        for 牌檔 in sorted(_排隊目錄(落點).iterdir()):
+            try:
+                編號 = int(牌檔.name)
+            except ValueError:
+                continue
+            if 編號 >= 序號:
+                break
+            if _牌的主人死了(牌檔):
+                牌檔.unlink(missing_ok=True)
+            else:
+                return False
+    return True
+
+
 def _等到拿得到(handle: TextIO, *, 最多等幾秒: float, 落點: Path) -> None:
-    """輪詢到拿得到為止。等超過上限就 `佔不到`。
+    """排隊等到拿得到為止，**先到先得**。等超過上限就 `佔不到`。
 
     **走 `LOCK_NB` 加輪詢，不走阻塞式的 `flock`**：阻塞版沒有上限，
     前面那個程序卡住的話這裡會等到天荒地老，而且看不出來在等什麼。
+
+    但輪詢自己沒有順序：鎖一放開誰先醒誰先拿，跟等了多久無關。
+    所以先抽一張號碼牌，**輪到自己才去搶**——等最久的那條不會再一輪一輪輸掉。
     """
     起 = time.monotonic()
     fd = handle.fileno()
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+    序號, 牌 = _抽號碼牌(落點)
+    try:
+        while True:
+            if _輪到我了(落點, 序號):
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    pass
+                else:
+                    return
             if time.monotonic() - 起 >= 最多等幾秒:
                 訊息 = f"等了 {最多等幾秒} 秒還是佔不到 {落點}——閘沒有跑"
                 raise 佔不到(訊息) from None
             time.sleep(_每隔幾秒再試)
-        else:
-            return
+    finally:
+        # 拿到鎖（或放棄）就把牌交回去，下一號才進得來。
+        牌.close()
