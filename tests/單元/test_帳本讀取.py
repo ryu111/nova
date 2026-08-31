@@ -63,6 +63,29 @@ def 呼叫(編號: int, 家: str, 終局: str = "success", 入: int = 100, 出: 
     ]
 
 
+def 帶快取的呼叫(編號: int, 家: str, *, 入: int, 出: int, 快取: int) -> list[str]:
+    """只有 claude 回報快取欄位，所以它自成一個 helper——
+
+    塞進 `呼叫` 會讓那支的參數超過 `PLR0913` 的門檻，而超過門檻的解法是拆，
+    不是調高門檻。
+    """
+    return [
+        事件行(run="r", seq=編號 * 2 - 1, ts="t1", event="call_started", call=編號, family=家),
+        事件行(
+            run="r",
+            seq=編號 * 2,
+            ts="t2",
+            event="call_finished",
+            call=編號,
+            family=家,
+            outcome="success",
+            input_tokens=入,
+            output_tokens=出,
+            cache_read_tokens=快取,
+        ),
+    ]
+
+
 class Test基本統計:
     def test_空的帳本不會爆(self) -> None:
         果 = 收斂([])
@@ -282,3 +305,34 @@ class Test每一種收場的token都要算:
         """
         摘 = 收斂([*呼叫(1, "agy", 入=100, 出=10), *呼叫(2, "agy", "unknown", 入=0, 出=0)])
         assert 摘.總token == 110
+
+
+class Test快取讀取的token也要算:
+    """**claude 把大部分 input 算在快取欄位，`input_tokens` 只記非快取的那一點點。**
+
+    實測（2026-08-31，同一個題目跑一階）：
+
+    | 家 | nova 記的 input | 實際成本 |
+    |---|---:|---:|
+    | agy | 168,561 | 不回報 |
+    | claude | **12** | **$0.2152** |
+
+    claude 花了 21 美分，帳本記 12 個 token。空目錄跑一句話更明顯：
+    `input_tokens=2`、`cache_read=14,206`、`cache_create=13,851`——
+    固定成本 ~14,000 跟 agy 的 13,720 幾乎一樣，只是它算在別的欄位。
+
+    後果不是統計失真，是**派工決策建立在一個對 claude 系統性歸零的量上**：
+    「claude 比較便宜」這個結論從來沒有被真的量過。
+
+    解析器讀到了（`解析.py:180`）、契約有這個欄位（`模型回應.py:94`）、
+    接力鏈還特地處理它（`接力.py:144`）——然後在落盤那一步整個消失。
+    """
+
+    def test_快取讀取的token算進總計(self) -> None:
+        摘 = 收斂(帶快取的呼叫(1, "claude", 入=12, 出=2285, 快取=59000))
+        assert 摘.總token == 12 + 2285 + 59000
+
+    def test_沒回報快取的家不受影響(self) -> None:
+        """agy 與 codex 不回報快取欄位——不能因此變成 0 或炸掉。"""
+        摘 = 收斂([*呼叫(1, "agy", 入=168561, 出=12603)])
+        assert 摘.總token == 168561 + 12603

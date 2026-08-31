@@ -135,7 +135,7 @@ class _收集器:
         家 = str(事.get("family", ""))
         self.次數[家] += 1
         self.終局[家, str(事.get("outcome", ""))] += 1
-        for 欄 in ("input_tokens", "output_tokens"):
+        for 欄 in ("input_tokens", "output_tokens", "cache_read_tokens"):
             值 = 事.get(欄)
             if isinstance(值, int):
                 self.token[家, 欄] += 值
@@ -155,6 +155,7 @@ class _收集器:
                 未知=self.終局[家, "unknown"],
                 輸入token=self.token[家, "input_tokens"],
                 輸出token=self.token[家, "output_tokens"],
+                快取讀取token=self.token[家, "cache_read_tokens"],
                 成本美金=None if 家 in self.缺成本 else self.成本.get(家, 0.0),
             )
             for 家 in self.次數
@@ -167,7 +168,7 @@ class _收集器:
             階段們=tuple(self.階段),
             沒收尾的呼叫=tuple(self.開著),
             壞掉的行=self.壞行,
-            總token=sum(家.輸入token + 家.輸出token for 家 in 各家),
+            總token=sum(家.輸入token + 家.輸出token + 家.快取讀取token for 家 in 各家),
             總成本美金=_總成本(各家),
         )
 
