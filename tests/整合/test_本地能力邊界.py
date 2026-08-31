@@ -6,6 +6,7 @@
 import contextlib
 import io
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -74,8 +75,21 @@ def _報告(名稱: str, 探針: Callable[[], bool], 活著: Callable[[], bool])
     assert 0 <= 通過數 <= 測試次數
 
 
+#: 量哪一顆。不給就走端點清單的第一個——**那不一定是你以為的那顆**：
+#: 端點同時掛著 9B 與 27B 時，探針量到的是清單第一個，
+#: 而報告會被讀成「本地腦的能力」。要量特定型號就設這個環境變數。
+型號環境變數 = "NOVA_本地探針型號"
+
+
+def _要量的型號() -> str | None:
+    return os.environ.get(型號環境變數)
+
+
 def _問(網址: str, 提示: str) -> 回應:
-    return 本地腦(網址=網址).詢問(提示, 選項=呼叫選項(權限=權限.唯讀, 逾時秒=120))
+    return 本地腦(網址=網址).詢問(
+        提示,
+        選項=呼叫選項(模型=_要量的型號(), 權限=權限.唯讀, 逾時秒=600),
+    )
 
 
 @pytest.mark.真端點
