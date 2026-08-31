@@ -112,7 +112,42 @@ def _丟掉pycache(根目錄: Path) -> None:
             shutil.rmtree(目錄, ignore_errors=True)
 
 
-def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str]]:
+#: 一條規則的證據最多留幾個字元。閘紅會整段落進收件票，沒有上限的話
+#: 一份幾萬行的 pytest 輸出會把票灌爆。
+預設證據上限 = 20_000
+
+
+def _截斷註記(原長: int) -> str:
+    """截斷時附在證據尾巴的自白：原本多長、留下來的是哪一段。靜默截斷等於騙人。
+
+    只寫原長、不寫保留長度：保留長度得先知道註記多長才算得出來，而註記長度又
+    隨保留長度的位數變動——寫進去就變成自我參照，得反覆迭代才收斂，
+    而且收斂不了的時候會**悄悄超過硬上限**。原長是現成的，一次就算完。
+    """
+    return f"\n……（證據已截斷：原本 {原長} 字元，只留開頭那一段輸出）"
+
+
+def _截斷證據(輸出: str, 上限: int) -> str:
+    """超過上限就砍尾巴，**留開頭那一段輸出**，並在證據裡明講截了。
+
+    砍尾巴不是隨便挑的：pytest 的尾巴是 `short test summary info` 與
+    `N failed in ...`，那是整份輸出裡資訊量最低的一段——它只說了幾支紅，
+    沒說為什麼紅。開頭的 FAILURES 段才是下一輪的模型唯一看得到的現場。
+
+    上限小到連註記都塞不下時，留下來的就只有註記本身：註記可以是唯一剩下的
+    東西，但不能被砍成半句——連「截了」都說不清楚的證據比空的還糟。
+    """
+    if len(輸出) <= 上限:
+        return 輸出
+
+    註記 = _截斷註記(原長=len(輸出))
+    保留長度 = max(0, 上限 - len(註記))
+    return 輸出[:保留長度] + 註記
+
+
+def _外部指令(
+    根目錄: Path, *指令: str, 證據上限: int = 預設證據上限
+) -> Callable[[], tuple[bool, str]]:
     """把一條外部指令包成檢查函式。
 
     執行檔從 `sys.executable` 旁邊找——nova 跑在哪個 venv，就用哪個 venv 的
@@ -147,8 +182,8 @@ def _外部指令(根目錄: Path, *指令: str) -> Callable[[], tuple[bool, str
             check=False,
             env={**os.environ, "APP_ROLE": 角色標記},
         )
-        輸出 = (結果.stdout + 結果.stderr).strip()
-        return 結果.returncode == 0, 輸出
+        原始輸出 = (結果.stdout + 結果.stderr).strip()
+        return 結果.returncode == 0, _截斷證據(原始輸出, 上限=證據上限)
 
     return 檢查
 
