@@ -11,10 +11,15 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from nova.契約.工作流 import 任務, 判準, 判準終局
+from nova.載體.閘鎖 import 佔不到, 佔住
 
 #: TDD 內圈的判準就是測試本身。
 預設判準指令 = ("uv", "run", "pytest", "-q")
 _證據上限 = 4000
+
+#: **跟 `nova 閘` 同一把鎖。** 判準跟閘搶的是同一份 CPU，各拿各的話兩邊照樣
+#: 同時跑滿，卻長得像有鎖。名稱一致是「同一把」的唯一依據。
+_機器鎖名稱 = "閘"
 
 #: pytest 自己的退出碼裡，**「根本沒驗到」**的那兩個。
 #:
@@ -39,6 +44,40 @@ def _像pytest(指令: Sequence[str]) -> bool:
     return any("pytest" in 段 for 段 in 指令)
 
 
+def _佔住機器跑(
+    指令: Sequence[str], *, 工作目錄: Path, 逾時秒: float
+) -> subprocess.CompletedProcess[str]:
+    """在機器鎖底下跑子程序。
+
+    **鎖只圈住這一段。** 圈大一點（整個判準階段）就等於一次只能跑一條工作流，
+    而工作流大部分時間是在等模型，那幾分鐘不該排隊。
+    """
+    with 佔住(_機器鎖名稱):
+        return subprocess.run(  # noqa: S603 —— 指令由呼叫端明確給定
+            list(指令),
+            cwd=工作目錄,
+            capture_output=True,
+            text=True,
+            timeout=逾時秒,
+            check=False,
+        )
+
+
+def _判讀退出碼(
+    結果: subprocess.CompletedProcess[str], 指令: Sequence[str]
+) -> tuple[判準終局, str]:
+    """指令跑完了，看退出碼決定收場。"""
+    輸出 = (結果.stdout + 結果.stderr).strip()[-_證據上限:]
+    if 結果.returncode == 0:
+        return 判準終局.綠, 輸出
+    沒驗到 = _pytest沒驗到.get(結果.returncode) if _像pytest(指令) else None
+    if 沒驗到 is not None:
+        # **沒驗到不等於驗不過。** 跟 OSError 那格同一個道理：這是環境／設定，
+        # 重跑一百次還是同一個結果，而每次重跑中間都夾著一個模型階段。
+        return 判準終局.跑不起來, f"判準跑不起來（環境問題，不是測試沒過）：{沒驗到}\n{輸出}"
+    return 判準終局.紅, 輸出
+
+
 def 建判準(指令: Sequence[str] = 預設判準指令, *, 逾時秒: float = 600.0) -> 判準:
     """做一個判準：在任務的工作目錄跑這條指令，退出碼 0 就是綠。
 
@@ -48,14 +87,12 @@ def 建判準(指令: Sequence[str] = 預設判準指令, *, 逾時秒: float = 
 
     def 跑(任: 任務) -> tuple[判準終局, str]:
         try:
-            結果 = subprocess.run(  # noqa: S603 —— 指令由呼叫端明確給定
-                list(指令),
-                cwd=任.工作目錄,
-                capture_output=True,
-                text=True,
-                timeout=逾時秒,
-                check=False,
-            )
+            結果 = _佔住機器跑(指令, 工作目錄=任.工作目錄, 逾時秒=逾時秒)
+        except 佔不到 as 錯:
+            # **佔不到鎖不是紅。** 判準根本沒跑，回紅的話工作流會回去
+            # 「再實作一次」，叫一顆模型去改一份沒問題的程式碼。
+            # 跟 `_子命令_閘` 佔不到時回 3（結果未知）同一個判斷。
+            return 判準終局.跑不起來, f"判準沒跑（機器忙，不是測試沒過）：{錯}"
         except subprocess.TimeoutExpired:
             # **逾時刻意留在「紅」。** 它分不出是環境壞了還是測試真的卡住，
             # fail-closed 當紅是既有的決定；卡住偵測器會在第 3 次擋下來。
@@ -66,15 +103,7 @@ def 建判準(指令: Sequence[str] = 預設判準指令, *, 逾時秒: float = 
             # 當紅回報的話工作流會回去「再實作一次」，而實作要叫模型。
             # 實測 2026-08-30：launchd 的 PATH 沒有 uv，單次燒掉 997,031 token。
             return 判準終局.跑不起來, f"判準指令跑不起來（環境問題，不是測試沒過）：{錯}"
-        輸出 = (結果.stdout + 結果.stderr).strip()[-_證據上限:]
-        if 結果.returncode == 0:
-            return 判準終局.綠, 輸出
-        沒驗到 = _pytest沒驗到.get(結果.returncode) if _像pytest(指令) else None
-        if 沒驗到 is not None:
-            # **沒驗到不等於驗不過。** 跟 OSError 那格同一個道理：這是環境／設定，
-            # 重跑一百次還是同一個結果，而每次重跑中間都夾著一個模型階段。
-            return 判準終局.跑不起來, f"判準跑不起來（環境問題，不是測試沒過）：{沒驗到}\n{輸出}"
-        return 判準終局.紅, 輸出
+        return _判讀退出碼(結果, 指令)
 
     return 跑
 
