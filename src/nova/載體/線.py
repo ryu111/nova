@@ -5,7 +5,9 @@ import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nova.契約.帳本 import 事件種類
@@ -15,6 +17,7 @@ from nova.載體.已處理 import 列出成果, 已處理目錄
 from nova.載體.帳本 import 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 讀原始事件
 from nova.載體.狀態檔 import 狀態檔, 讀現況
+from nova.載體.重構護欄 import 不拍的目錄
 
 _PS欄位數 = 8
 _PS欄位分割數 = 7
@@ -32,9 +35,22 @@ _退出碼說明 = {
 }
 
 
+#: 比對用的基底一律是本地這條 ref；查詢不連網，所以它可能是舊的。
+_基底參照 = "origin/main"
+_基底說明_有 = f"以本地 {_基底參照} 為準（查詢不連網，這份 ref 可能不是最新的）"
+_基底說明_無 = f"查不到本地 {_基底參照} 這個 ref，領先／落後留空（不是已同步）"
+
+
 @dataclass(frozen=True, slots=True)
-class 線資料:
-    """一條工作線能從現有來源查到的資料。"""
+class 線現況:
+    """一條工作線（worktree 或主工作區）的唯讀快照。
+
+    這是一條線唯一的資料入口：程序、階段、成果、基底、mtime 都在這一份裡，
+    呼叫端不必再兜第二次查詢。
+
+    算不出來的欄位一律留空（`None`），不准拿 0 頂替——
+    「查不到基底」跟「差 0 個 commit」是兩件事。
+    """
 
     名字: str
     在跑嗎: bool | None
@@ -43,8 +59,34 @@ class 線資料:
     目前階段: str | None
     上一次: 成果 | None
     護欄原因: str | None
+    #: 未提交的檔案數。乾不乾淨從這一份衍生，不另外存一份會分歧的布林值。
     未提交檔案數: int | None
+    #: 落後基底幾個 commit。這是落後數唯一的存放處，`落後基底數` 由它衍生。
+    #: 詞序跟 `領先基底數` 不一致是既有呼叫端綁著的：排版那邊用 `基底落後數` 建構，
+    #: 並行查詢那邊跟 `領先基底數` 對稱地讀，兩邊都不在這一格的寫入範圍內。
     基底落後數: int | None
+    #: 這條線的工作區路徑；查不到就留空，不拿目前目錄頂替。
+    路徑: Path | None = None
+    是主工作區: bool = False
+    目前commit: str | None = None
+    基底參照: str | None = None
+    基底說明: str = _基底說明_無
+    領先基底數: int | None = None
+    最後改動時間: datetime | None = None
+
+    @property
+    def 落後基底數(self) -> int | None:
+        """`基底落後數` 的唯讀別名，讓呼叫端能跟 `領先基底數` 對稱地讀。"""
+        return self.基底落後數
+
+    @property
+    def 工作區乾淨嗎(self) -> bool | None:
+        """有沒有未提交的改動；數不出來（`未提交檔案數` 留空）時一併留空。"""
+        return None if self.未提交檔案數 is None else self.未提交檔案數 == 0
+
+
+#: 舊名。同一個型別，留著讓既有排版呼叫端不必跟著改。
+線資料 = 線現況
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,39 +106,58 @@ class _程序清查:
     有無法定位工作目錄的程序: bool
 
 
-def 查線(專案: Path) -> tuple[線資料, ...]:
-    """查詢專案底下所有 worktree；不改工作區、不改任何帳本。"""
+@dataclass(frozen=True, slots=True)
+class _基底比較:
+    """一條線跟本地基底 ref 比出來的結果。查不到基底時領先／落後一律留空。"""
+
+    參照: str | None
+    說明: str
+    領先: int | None
+    落後: int | None
+
+
+#: 比不出來時一律回這一份：領先／落後留空，說明講明是查不到，不是差 0 個。
+_查不到基底 = _基底比較(參照=None, 說明=_基底說明_無, 領先=None, 落後=None)
+
+
+def 查並行現況(專案: Path) -> tuple[線現況, ...]:
+    """查專案底下每一條線的現況。唯讀：不 fetch、不 checkout、不動任何工作區。"""
     根 = 專案.resolve()
     清查 = _找nova程序()
-    工作樹清單 = _工作樹們(根)
-    return tuple(_查一條(路徑, 分支, 清查) for 路徑, 分支 in 工作樹清單)
+    # `git worktree list` 第一筆固定是主工作區，`_工作樹們` 也保證至少回一筆
+    (主路徑, 主分支), *其餘工作樹 = _工作樹們(根)
+    return (
+        _查一條(主路徑, 主分支, 清查, 是主工作區=True),
+        *(_查一條(路徑, 分支, 清查, 是主工作區=False) for 路徑, 分支 in 其餘工作樹),
+    )
 
 
-def 排版(線們: tuple[線資料, ...]) -> str:
+def 排版(線們: tuple[線現況, ...]) -> str:
     """把查詢結果排成給人看的看板。"""
     if not 線們:
         # 防禦性分支：正常情況 _工作樹們 至少回傳專案根目錄
         return "線：查不到（沒有 worktree）\n"
-    區塊們 = [
-        "\n".join(
-            [
-                f"線：{線.名字}",
-                f"  在跑嗎：{_在跑的人話(線)}",
-                f"  跑多久了：{_跑多久的人話(線)}",
-                f"  現在在哪一階：{線.目前階段 or '查不到（事件帳本沒有可辨識的階段）'}",
-                f"  上一次怎麼收的：{_上一次的人話(線)}",
-                f"  工作區乾淨嗎：{_工作區的人話(線)}",
-                f"  base 落後幾個 commit：{_基底的人話(線)}",
-            ]
-        )
-        for 線 in 線們
-    ]
-    return "\n\n".join(區塊們) + "\n"
+    return "\n\n".join(_一條的區塊(線) for 線 in 線們) + "\n"
+
+
+def _一條的區塊(線: 線現況) -> str:
+    """一條線在看板上的那一段。"""
+    return "\n".join(
+        [
+            f"線：{線.名字}",
+            f"  在跑嗎：{_在跑的人話(線)}",
+            f"  跑多久了：{_跑多久的人話(線)}",
+            f"  現在在哪一階：{線.目前階段 or '查不到（事件帳本沒有可辨識的階段）'}",
+            f"  上一次怎麼收的：{_上一次的人話(線)}",
+            f"  工作區乾淨嗎：{_工作區的人話(線)}",
+            f"  base 落後幾個 commit：{_基底的人話(線)}",
+        ]
+    )
 
 
 def 執行線(參數: argparse.Namespace) -> int:
     """把命令列參數交給工作線查詢。"""
-    sys.stdout.write(排版(查線(Path(參數.根目錄))))
+    sys.stdout.write(排版(查並行現況(Path(參數.根目錄))))
     return 0
 
 
@@ -104,12 +165,15 @@ def _查一條(
     工作樹: Path,
     分支: str,
     清查: _程序清查 | None,
-) -> 線資料:
+    *,
+    是主工作區: bool,
+) -> 線現況:
     成果們 = 列出成果(已處理目錄(工作樹))
     上一次 = 成果們[0] if 成果們 else None
     程序 = _這條線的程序(工作樹, 清查)
     名字 = 工作樹.name + (f"／{分支}" if 分支 else "")
-    return 線資料(
+    基底 = _比對基底(工作樹)
+    return 線現況(
         名字=名字,
         在跑嗎=_是否在跑(工作樹, 清查),
         跑多久=None if 程序 is None else 程序.跑多久,
@@ -118,18 +182,80 @@ def _查一條(
         上一次=上一次,
         護欄原因=_護欄原因(工作樹, 上一次),
         未提交檔案數=_未提交檔案數(工作樹),
-        基底落後數=_基底落後(工作樹),
+        基底落後數=基底.落後,
+        路徑=工作樹.resolve(),
+        是主工作區=是主工作區,
+        目前commit=_目前commit(工作樹),
+        基底參照=基底.參照,
+        基底說明=基底.說明,
+        領先基底數=基底.領先,
+        最後改動時間=_最後改動時間(工作樹),
     )
 
 
+def _比對基底(工作樹: Path) -> _基底比較:
+    """跟本地基底 ref 比。沒有那條 ref、或數不出來，都當作比不出來。"""
+    領先, 落後 = _領先落後(工作樹)
+    if 領先 is None or 落後 is None:
+        return _查不到基底
+    return _基底比較(參照=_基底參照, 說明=_基底說明_有, 領先=領先, 落後=落後)
+
+
+def _目前commit(工作樹: Path) -> str | None:
+    """這條線停在哪個 commit；查不到就留空。
+
+    不用共用的 `git查詢.目前commit`：這支查詢連 git 跑不起來（`OSError`）都要留空收下，
+    整條線的其他欄位才不會被一條查不到的 ref 整份炸掉。
+    """
+    輸出 = _git輸出(工作樹, "rev-parse", "HEAD")
+    if 輸出 is None:
+        return None
+    return 輸出.strip() or None
+
+
+def _領先落後(工作樹: Path) -> tuple[int | None, int | None]:
+    """跟本地 `origin/main` 比。查不到那條 ref 就兩個都留空。
+
+    只下這一道：本地沒有 `origin/main` 時 `rev-list` 自己就會非零退出，
+    不必先用 `rev-parse` 探一次——那一道問不出多的事，只是每條線多一次子程序。
+    """
+    # `HEAD...基底` 的左邊是只有 HEAD 有的（領先），右邊是只有基底有的（落後）
+    輸出 = _git輸出(工作樹, "rev-list", "--count", "--left-right", f"HEAD...{_基底參照}")
+    if 輸出 is None:
+        return None, None
+    try:
+        領先, 落後 = 輸出.split()
+        return int(領先), int(落後)
+    except ValueError:
+        # `--count --left-right` 應該固定回兩個數字；回不出來就是算不出來，留空
+        return None, None
+
+
+def _最後改動時間(工作樹: Path) -> datetime | None:
+    """工作區檔案的最新 mtime；算不出來（走不到任何檔）就留空。"""
+    最新 = max(_工作區檔案的mtime們(工作樹), default=None)
+    return None if 最新 is None else datetime.fromtimestamp(最新, tz=UTC)
+
+
+def _工作區檔案的mtime們(工作樹: Path) -> Iterator[float]:
+    """走訪工作區檔案的 mtime；`不拍的目錄` 底下的工具產物不算人的改動。"""
+    for 目前, 子目錄們, 檔名們 in os.walk(工作樹):
+        子目錄們[:] = [名 for 名 in 子目錄們 if 名 not in 不拍的目錄]
+        for 檔名 in 檔名們:
+            try:
+                yield Path(目前, 檔名).stat().st_mtime
+            except OSError:
+                continue
+
+
 def _工作樹們(專案: Path) -> list[tuple[Path, str]]:
-    結果 = _git(專案, "worktree", "list", "--porcelain")
-    if 結果 is None or 結果.returncode != 0:
+    輸出 = _git輸出(專案, "worktree", "list", "--porcelain")
+    if 輸出 is None:
         return [(專案, "")]
     工作樹清單: list[tuple[Path, str]] = []
     路徑: Path | None = None
     分支 = ""
-    for 行 in 結果.stdout.splitlines():
+    for 行 in 輸出.splitlines():
         if 行.startswith("worktree "):
             if 路徑 is not None:
                 工作樹清單.append((路徑, 分支))
@@ -144,11 +270,15 @@ def _工作樹們(專案: Path) -> list[tuple[Path, str]]:
     return 工作樹清單 or [(專案, "")]
 
 
-def _git(根目錄: Path, *參數: str) -> subprocess.CompletedProcess[str] | None:
+def _git輸出(根目錄: Path, *參數: str) -> str | None:
+    """跑一道唯讀 git 並回傳 stdout；跑不起來或非零退出碼一律回 `None`（＝算不出來）。"""
     try:
-        return 跑git(根目錄, *參數)
+        結果 = 跑git(根目錄, *參數)
     except OSError:
         return None
+    if 結果.returncode != 0:
+        return None
+    return 結果.stdout
 
 
 def _找nova程序() -> _程序清查 | None:
@@ -317,41 +447,19 @@ def _護欄原因(工作樹: Path, 成果紀錄: 成果 | None) -> str | None:
 
 
 def _未提交檔案數(專案: Path) -> int | None:
-    結果 = _git(專案, "status", "--porcelain=v1")
-    if 結果 is None or 結果.returncode != 0:
+    輸出 = _git輸出(專案, "status", "--porcelain=v1")
+    if 輸出 is None:
         return None
-    return len([行 for 行 in 結果.stdout.splitlines() if 行])
+    return len([行 for 行 in 輸出.splitlines() if 行])
 
 
-def _基底落後(專案: Path) -> int | None:
-    基底 = _上游預設分支(專案)
-    if 基底 is None:
-        return None
-    結果 = _git(專案, "rev-list", "--count", f"HEAD..{基底}")
-    if 結果 is None or 結果.returncode != 0:
-        return None
-    try:
-        return int(結果.stdout.strip())
-    except ValueError:
-        return None
-
-
-def _上游預設分支(專案: Path) -> str | None:
-    結果 = _git(專案, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
-    if 結果 is not None and 結果.returncode == 0:
-        參照 = 結果.stdout.strip()
-        if 參照.startswith("refs/remotes/"):
-            return 參照.removeprefix("refs/remotes/")
-    return None
-
-
-def _在跑的人話(線: 線資料) -> str:
+def _在跑的人話(線: 線現況) -> str:
     if 線.在跑嗎 is None:
         return "查不到（無法讀取 ps）"
     return "是" if 線.在跑嗎 else "否"
 
 
-def _跑多久的人話(線: 線資料) -> str:
+def _跑多久的人話(線: 線現況) -> str:
     if 線.在跑嗎 is None:
         return "查不到（無法確認程序）"
     if 線.在跑嗎 is False:
@@ -359,7 +467,7 @@ def _跑多久的人話(線: 線資料) -> str:
     return f"{線.跑多久 or '查不到'}（啟動於 {線.啟動時間 or '查不到'}）"
 
 
-def _上一次的人話(線: 線資料) -> str:
+def _上一次的人話(線: 線現況) -> str:
     if 線.上一次 is None:
         return "查不到（沒有成果帳本）"
     碼 = 線.上一次.退出碼
@@ -370,14 +478,14 @@ def _上一次的人話(線: 線資料) -> str:
     return f"退出碼 {碼}：{說法}"
 
 
-def _工作區的人話(線: 線資料) -> str:
+def _工作區的人話(線: 線現況) -> str:
     if 線.未提交檔案數 is None:
         return "查不到（git status 無法讀取）"
     乾淨 = "是" if 線.未提交檔案數 == 0 else "否"
     return f"{乾淨}（{線.未提交檔案數} 個未提交檔案）"
 
 
-def _基底的人話(線: 線資料) -> str:
+def _基底的人話(線: 線現況) -> str:
     if 線.基底落後數 is None:
         return "查不到（沒有可確認的上游預設分支）"
     return str(線.基底落後數)
