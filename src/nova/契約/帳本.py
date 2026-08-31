@@ -104,6 +104,10 @@ class 事件:
     #: 少了這一欄，claude 的量在帳本裡系統性歸零，而「claude 比較便宜」
     #: 這個派工結論就建立在一個沒被量到的數字上。
     快取讀取token: int | None = None
+    #: 快取**建立**：付 1.25× 的那一格，跟讀取是兩筆錢。
+    #: 實錄 `claude_ok.json`：輸入 10、讀取 0、建立 16,668——
+    #: 少了這一欄，那次呼叫在帳本裡只剩 10，99.94% 的量憑空消失。
+    快取建立token: int | None = None
     #: 只有 claude 給得出來。**不准為了三家對稱而自己估算**——
     #: 猜出來的成本比沒有成本更危險。給不出來就不落盤。
     成本美金: float | None = None
@@ -154,6 +158,7 @@ class 事件:
     "輸入token": "input_tokens",
     "輸出token": "output_tokens",
     "快取讀取token": "cache_read_tokens",
+    "快取建立token": "cache_creation_tokens",
     "成本美金": "cost_usd",
     "耗時毫秒": "duration_ms",
     "判準綠": "gate_green",
@@ -193,6 +198,7 @@ class 一家的帳:
     輸出token: int
     #: 沒回報快取的家（agy、codex）是 0，不是缺值——加總時不必特判。
     快取讀取token: int = 0
+    快取建立token: int = 0
     成本美金: float | None = None
 
 

@@ -178,6 +178,7 @@ def _解析claude(標準輸出: str, 結束碼: int) -> 回應:
             輸入token=int(用了.get("input_tokens", 0)),
             輸出token=int(用了.get("output_tokens", 0)),
             快取讀取token=用了.get("cache_read_input_tokens"),
+            快取建立token=用了.get("cache_creation_input_tokens"),
             思考token=(用了.get("output_tokens_details") or {}).get("thinking_tokens"),
             成本美金=信封.get("total_cost_usd"),
         ),

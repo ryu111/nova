@@ -135,7 +135,7 @@ class _收集器:
         家 = str(事.get("family", ""))
         self.次數[家] += 1
         self.終局[家, str(事.get("outcome", ""))] += 1
-        for 欄 in ("input_tokens", "output_tokens", "cache_read_tokens"):
+        for 欄 in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"):
             值 = 事.get(欄)
             if isinstance(值, int):
                 self.token[家, 欄] += 值
@@ -156,6 +156,7 @@ class _收集器:
                 輸入token=self.token[家, "input_tokens"],
                 輸出token=self.token[家, "output_tokens"],
                 快取讀取token=self.token[家, "cache_read_tokens"],
+                快取建立token=self.token[家, "cache_creation_tokens"],
                 成本美金=None if 家 in self.缺成本 else self.成本.get(家, 0.0),
             )
             for 家 in self.次數
@@ -168,9 +169,19 @@ class _收集器:
             階段們=tuple(self.階段),
             沒收尾的呼叫=tuple(self.開著),
             壞掉的行=self.壞行,
-            總token=sum(家.輸入token + 家.輸出token + 家.快取讀取token for 家 in 各家),
+            總token=sum(_一家花掉多少(家) for 家 in 各家),
             總成本美金=_總成本(各家),
         )
+
+
+def _一家花掉多少(家: 一家的帳) -> int:
+    """四種 token 都要算——**每一種都是真的付出去的錢**。
+
+    快取建立按 1.25× 計價、快取讀取按 0.1×，兩者是分開的兩筆，
+    不是誰的子集（實錄 `claude_ok2.json` 兩欄同時有值：建立 8,094、讀取 8,570）。
+    漏掉任何一種，「哪一家比較貴」的結論都建立在系統性偏低的數字上。
+    """
+    return 家.輸入token + 家.輸出token + 家.快取讀取token + 家.快取建立token
 
 
 def _總成本(各家: tuple[一家的帳, ...]) -> float | None:
