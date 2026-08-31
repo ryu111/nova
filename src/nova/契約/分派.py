@@ -19,6 +19,7 @@ class 分派問題代碼(StrEnum):
     缺停止政策 = "missing-stop-policy"
     缺驗收條件 = "missing-acceptance"
     權限不足 = "permission-denied"
+    寫入範圍相交 = "overlapping-writes"
     空分派單 = "empty-plan"
 
 
@@ -45,6 +46,14 @@ class 分派項目:
     驗收出口: tuple[str, ...]
     需要網路: bool = False
     需要編輯: bool = False
+    #: 這一格會寫到哪些路徑。**由呼叫端宣告，不是模型講的。**
+    #:
+    #: 跟 `契約/扇出.py` 的 `分支工作.寫入範圍` 同一個語意：擋「假獨立」——
+    #: 兩格的輸入互不相干、前置也接得起來，但都寫同一個地方的話，
+    #: 先寫的會被後寫的蓋掉，而蓋掉的樣子跟兩格都成功一模一樣。
+    #:
+    #: **空的等於「沒有已知衝突」，不等於「不會衝突」。** 不給就不檢查。
+    寫入範圍: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
