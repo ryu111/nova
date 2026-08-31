@@ -4,12 +4,17 @@
 代碼撞名、閘點打錯、提交閘漏了某條 CI 有的規則——都不會有人當場發現。
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from nova.載體.規則表 import 平行度, 建規則表, 版本
 from nova.載體.閘 import 型別, 測試, 規則, 閘點清單, 靜態
+
+#: `挖pytest命令列` fixture 的形狀。跨檔 import conftest 會讓 mypy 把它
+#: 算成兩個模組（見 `tests/conftest.py` 開頭），所以型別各寫一份。
+_挖命令列型 = Callable[[規則], tuple[str, ...]]
 
 
 def _規則表() -> list[規則]:
@@ -92,30 +97,13 @@ def test_涵蓋宣告不能指向自己() -> None:
         assert 條.涵蓋於 != 條.代碼, f"{條.代碼} 宣告自己涵蓋自己，等於沒宣告"
 
 
-def test_兩個閘都排除真cli與真端點() -> None:
+def test_兩個閘都排除真cli與真端點(挖pytest命令列: _挖命令列型) -> None:
     """真 CLI 與真端點測試會碰外部資源——不准溜進任何一個閘。
 
     忘了排除的話 CI 會在沒有資源的機器上紅，而且是紅在跟改動無關的地方。
     """
     根目錄 = Path(__file__).resolve().parents[2]
-    命令列們: list[tuple[str, ...]] = []
-    for 條 in 建規則表(根目錄):
-        if not 條.代碼.startswith("pytest"):
-            continue
-        閉包 = getattr(條.檢查, "__closure__", None)
-        assert 閉包 is not None, f"{條.代碼} 不是包出來的外部指令，這支測試要改寫"
-        命令 = next(
-            (
-                格.cell_contents
-                for 格 in 閉包
-                if isinstance(格.cell_contents, tuple)
-                and 格.cell_contents
-                and 格.cell_contents[0] == "pytest"
-            ),
-            None,
-        )
-        assert isinstance(命令, tuple), f"{條.代碼} 找不到 pytest 命令列"
-        命令列們.append(tuple(str(項) for 項 in 命令))
+    命令列們 = [挖pytest命令列(條) for 條 in 建規則表(根目錄) if 條.代碼.startswith("pytest")]
     帶標記的 = [命令 for 命令 in 命令列們 if "-m" in 命令]
     assert 帶標記的, "找不到帶 -m 的 pytest 規則"
     for 命令 in 帶標記的:
