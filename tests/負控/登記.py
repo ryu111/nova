@@ -1,10 +1,18 @@
 """固定負控的可執行登記。
 
 這裡只放 typed operation 與它們的組合；執行流程在同目錄的 runner。
+
+`登記` 有兩個來源：這個檔裡的 `_這個檔裡的`，加上 `登記們/` 底下每個模組的
+`登記`。新增一把刀只要加一個 `登記們/<主題>.py`，不必回頭改這個檔——否則
+每條並行的線都卡在同一個檔尾的 append 上。收集是 fail-closed 的：模組沒有
+`登記` 或識別重複，都在收集當下就炸。
 """
 
 import hashlib
+import importlib.util
 import os
+import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -157,7 +165,7 @@ class 變異:
         return self.目標檔
 
 
-登記 = (
+_這個檔裡的 = (
     變異(
         識別="派工深度不得省略",
         目標檔=Path("src/nova/契約/派工.py"),
@@ -1236,48 +1244,6 @@ class 變異:
         該紅=("tests/整合/test_閘鎖.py::test_鎖檔路徑不含專案識別",),
         最多秒=10.0,
     ),
-    #: 以下四把守「驗收指令怎麼跑、驗收從哪裡讀」。
-    #: 第一把是安全邊界，第四把是這一格存在的理由。
-    變異(
-        識別="驗收指令走shell",
-        目標檔=Path("src/nova/載體/跑驗收.py"),
-        操作=替換一次(
-            "    argv = shlex.split(指令)", "    argv = 指令  # type: ignore[assignment]"
-        ),
-        該紅=("tests/整合/test_跑驗收.py::test_不走shell",),
-        最多秒=20.0,
-    ),
-    變異(
-        識別="驗收第一條紅了還繼續跑",
-        目標檔=Path("src/nova/載體/跑驗收.py"),
-        操作=替換一次(
-            "        if 這條.退出碼 != 0:\n"
-            "            return 驗收結果(綠=False, 每一條=tuple(每一條))",
-            "        if False:\n            return 驗收結果(綠=False, 每一條=tuple(每一條))",
-        ),
-        該紅=("tests/整合/test_跑驗收.py::test_第一條紅就停",),
-        最多秒=20.0,
-    ),
-    #: 全部都要綠才算綠——這一把守的是「只看最後一條」那種寫法。
-    變異(
-        識別="驗收只看最後一條",
-        目標檔=Path("src/nova/載體/跑驗收.py"),
-        操作=替換一次(
-            "    return 驗收結果(綠=True, 每一條=tuple(每一條))",
-            "    return 驗收結果(綠=True, 每一條=tuple(每一條[-1:]))",
-        ),
-        該紅=("tests/整合/test_跑驗收.py::test_全部都要綠才算綠",),
-        最多秒=20.0,
-    ),
-    #: **模型不准替自己種驗收指令。** 從整份內容讀的話，模型只要在自己的
-    #: 輸出裡寫一行穩過的驗收，下一輪的閘就等於關掉了——而且看起來完全正常。
-    變異(
-        識別="驗收從整份內容讀含模型寫的前情",
-        目標檔=Path("src/nova/載體/收件.py"),
-        操作=替換一次("        驗收=讀出驗收(題目),", "        驗收=讀出驗收(內容),"),
-        該紅=("tests/單元/test_驗收說了算.py::test_前情裡的驗收不算數",),
-        最多秒=5.0,
-    ),
     #: 以下四把守 worktree 真隔離。**假隔離比沒有隔離更糟**（它看起來像有）。
     變異(
         識別="開工作樹不帶detach",
@@ -1450,4 +1416,67 @@ class 變異:
         ),
         最多秒=30.0,
     ),
+)
+
+
+_登記們目錄 = Path(__file__).resolve().parent / "登記們"
+_登記們模組前綴 = "tests.負控.登記們"
+
+
+def _載入登記模組(檔: Path) -> tuple[變異, ...]:
+    """載入一個 `登記們/` 底下的模組，取出它的 `登記`。"""
+    模組名 = f"{_登記們模組前綴}.{檔.stem}"
+    規格 = importlib.util.spec_from_file_location(模組名, 檔)
+    if 規格 is None or 規格.loader is None:
+        訊息 = f"登記們/{檔.name} 載不進來"
+        raise ValueError(訊息)
+    模組 = importlib.util.module_from_spec(規格)
+    sys.modules[模組名] = 模組
+    規格.loader.exec_module(模組)
+    這批 = getattr(模組, "登記", None)
+    if 這批 is None:
+        訊息 = f"登記們/{檔.name} 沒有 登記；漏收不報錯就是假綠"
+        raise ValueError(訊息)
+    return tuple(這批)
+
+
+def _擋掉重複識別(每一筆帶來源: Iterable[tuple[變異, str]]) -> tuple[變異, ...]:
+    """照原順序收下每一筆，遇到重複的識別就當場炸。
+
+    執行器只認識別：兩把同名的刀它分不出來，所以重複要在收集當下擋，
+    不是跑到一半才發現。
+    """
+    收到: list[變異] = []
+    來源: dict[str, str] = {}
+    for 一筆, 這筆的來源 in 每一筆帶來源:
+        先前的來源 = 來源.get(一筆.識別)
+        if 先前的來源 is not None:
+            訊息 = (
+                f"識別重複：{一筆.識別} 同時登記在 {先前的來源} 與 {這筆的來源}；"
+                "重複的話執行器分不出來"
+            )
+            raise ValueError(訊息)
+        來源[一筆.識別] = 這筆的來源
+        收到.append(一筆)
+    return tuple(收到)
+
+
+def _收集(目錄: Path) -> tuple[變異, ...]:
+    """收集 `目錄` 底下每個模組的 `登記`：按檔名排序，再按檔內順序。
+
+    找不到目錄就回空的——`登記們/` 不存在時不准炸。
+    """
+    if not 目錄.is_dir():
+        return ()
+    return _擋掉重複識別(
+        (一筆, 檔.name)
+        for 檔 in sorted(目錄.glob("*.py"), key=lambda 檔: 檔.name)
+        for 一筆 in _載入登記模組(檔)
+    )
+
+
+#: 收集只能擺在檔尾：`登記們/` 底下的模組會反過來 `from tests.負控.登記 import 變異`，
+#: 那時這個模組還在初始化中，只有已經執行到的名字拿得到——`變異` 與 `替換一次` 都在上面。
+登記 = _擋掉重複識別(
+    [(一筆, "登記.py") for 一筆 in _這個檔裡的] + [(一筆, "登記們/") for 一筆 in _收集(_登記們目錄)]
 )
