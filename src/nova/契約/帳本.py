@@ -41,6 +41,12 @@ class 事件種類(StrEnum):
     #: 從來不紅的規則是刪除候選，常紅的是該補指引的地方。
     規則開始 = "rule_started"
     規則結束 = "rule_finished"
+    #: 模型在一次呼叫**裡面**叫了一個工具（本地腦的工具迴圈）。
+    #:
+    #: 少了這一種，「模型跑滿 8 回合沒收尾」只看得到總 token 與總時間，
+    #: 看不到它在讀什麼——而 `CLAUDE.md` 的診斷順序要求「有動作但沒證據就停」
+    #: 那一步能查到迴圈層。查不到就只能重跑一次在旁邊加 print。
+    工具呼叫 = "tool_call"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +82,17 @@ class 事件:
     閘點: str | None = None
     終局: str | None = None
     失敗代碼: str | None = None
+    #: 模型叫了哪個工具（`read_file`／`grep`／`write_file`）。
+    工具名稱: str | None = None
+    #: 參數的**摘要**不是全文——`write_file` 的 content 可能有幾萬字，
+    #: 整份落盤會讓帳本比原始碼還大。
+    工具參數摘要: str | None = None
+    #: 這是工具迴圈的第幾回合。**卡在第 2 回合跟跑滿 8 回合是兩種病**：
+    #: 前者通常是工具壞了，後者是模型不收尾。
+    工具回合: int | None = None
+    #: 工具做成了沒。單次失敗是正常的（模型會叫不存在的檔案），
+    #: **一直失敗**才是病徵。
+    工具成功: bool | None = None
     輸入token: int | None = None
     輸出token: int | None = None
     #: **claude 把大部分 input 算在這裡，`輸入token` 只記非快取的那一點點。**
@@ -130,6 +147,10 @@ class 事件:
     "閘點": "gate_point",
     "終局": "outcome",
     "失敗代碼": "failure_code",
+    "工具名稱": "tool_name",
+    "工具參數摘要": "tool_args",
+    "工具回合": "tool_round",
+    "工具成功": "tool_ok",
     "輸入token": "input_tokens",
     "輸出token": "output_tokens",
     "快取讀取token": "cache_read_tokens",

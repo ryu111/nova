@@ -16,6 +16,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Literal
 
+from nova.契約.帳本 import 記一筆
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局判定
 from nova.契約.角色 import 呼叫選項, 權限, 語言模型, 預設選項
 from nova.載體.模型.執行 import 執行逾時, 跑cli
@@ -374,7 +375,12 @@ class 命令列模型:
         return _補上認證提示(答, self.名稱, 選項)
 
 
-def 建立(家: 家族, *, 執行檔: Path | None = None) -> 語言模型:
+def 建立(
+    家: 家族,
+    *,
+    執行檔: Path | None = None,
+    記: 記一筆 | None = None,
+) -> 語言模型:
     """做一個轉接器。`執行檔` 不給就照 `找執行檔` 的順序找。
 
     `local` 走的是 HTTP 不是子程序，所以它不吃 `執行檔`——
@@ -384,7 +390,7 @@ def 建立(家: 家族, *, 執行檔: Path | None = None) -> 語言模型:
         if 執行檔 is not None:
             訊息 = f"{本地家族名} 走 HTTP 不吃 --執行檔，網址請用 {網址環境變數}"
             raise ValueError(訊息)
-        return 本地腦(網址=預設本地網址())
+        return 本地腦(網址=預設本地網址(), 記=記)
     return 建命令列(家, 執行檔=執行檔)
 
 
@@ -462,14 +468,20 @@ def _補上認證提示(答: 回應, 家: str, 選項: 呼叫選項) -> 回應:
     return replace(答, 文字=答.文字 + 提示) if 提示 else 答
 
 
-def 建立或缺席(家: 家族, *, 執行檔: Path | None, 可以缺席: bool) -> 語言模型:
+def 建立或缺席(
+    家: 家族,
+    *,
+    執行檔: Path | None,
+    可以缺席: bool,
+    記: 記一筆 | None = None,
+) -> 語言模型:
     """建一顆腦；`可以缺席` 時，沒裝的那家降級成 `缺席腦` 而不是丟例外。
 
     **只有在鏈上才可以缺席。** 只指定一家卻沒裝是明確的設定錯誤，
     早點炸比較好；一串裡少一家則正是接力要處理的事。
     """
     try:
-        return 建立(家, 執行檔=執行檔)
+        return 建立(家, 執行檔=執行檔, 記=記)
     except FileNotFoundError as 錯:
         if not 可以缺席:
             raise

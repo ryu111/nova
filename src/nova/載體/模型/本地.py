@@ -11,9 +11,11 @@
 
 ## 做不到的事一律明講
 
-本地模型沒有工具、沒有 session。默默忽略 `權限` 與 `續接` 的話，工作流會以為
-檔案改好了，然後在驗證階段才發現什麼都沒發生——而那時候看起來像是
-「模型做錯了」，不是「這顆腦根本做不到」。**診斷順序會整個被帶歪。**
+本地模型沒有 session。默默忽略 `續接` 的話，工作流會以為 session 還在，
+然後在驗證階段才發現什麼都沒發生——而那時候看起來像是「模型做錯了」，
+不是「這顆腦根本做不到」。**診斷順序會整個被帶歪。**
+
+工具由 nova 自行跑迴圈（OpenAI tools 規格），每筆工具呼叫會留證據進帳本。
 
 ## 成本是 0 不是 None
 
@@ -31,6 +33,7 @@ from os import environ
 from pathlib import Path
 from typing import Any
 
+from nova.契約.帳本 import 事件, 事件種類, 記一筆
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.契約.角色 import 呼叫選項, 預設選項
 from nova.載體.模型.本地工具 import 工具箱, 工具錯誤
@@ -75,6 +78,15 @@ class 本地腦:
     """一個 OpenAI 相容的 HTTP 端點。"""
 
     網址: str
+    #: 工具呼叫記帳的 callback。
+    #:
+    #: **為什麼是 callback 不是讓 `記帳腦` 去撈**：工具迴圈在 `本地腦` 內部跑，
+    #: 只有內部知道每回合呼叫了什麼工具與執行結果。`本地腦` 絕不准自行 import
+    #: `nova.載體.帳本`（否則載體分層會倒過來），只依賴 `nova.契約.帳本` 的 `記一筆`。
+    #:
+    #: 限制：`呼叫編號` 由外層 `記帳腦` 產生，內層拿不到，因此工具呼叫事件不帶
+    #: `呼叫編號`——這是為了維持分層乾淨的設計取捨。
+    記: 記一筆 | None = None
 
     @property
     def 名稱(self) -> str:
@@ -110,7 +122,7 @@ class 本地腦:
         箱 = 工具箱(Path(選項.工作目錄) if 選項.工作目錄 else Path.cwd(), 選項.權限)
         對話: list[dict[str, Any]] = [{"role": "user", "content": 提示}]
         入計 = 出計 = 0
-        for _ in range(最多工具回合):
+        for 回合 in range(1, 最多工具回合 + 1):
             資料 = self._送出對話(對話, 型號=型號, 逾時秒=選項.逾時秒, 工具們=箱.規格())
             用了 = 資料.get("usage") or {}
             入計 += int(用了.get("prompt_tokens", 0))
@@ -120,7 +132,7 @@ class 本地腦:
             if not 呼叫們:
                 return _讀成回應(資料, 入計=入計, 出計=出計)
             對話.append(訊息)
-            對話.extend(_做完工具(箱, 呼叫們))
+            對話.extend(_做完工具(箱, 呼叫們, 回合=回合, 記=self.記))
         return _建立失敗回應(
             f"工具呼叫超過 {最多工具回合} 回合還沒收尾，停止（沒有停止規則的迴圈是成本漏洞）",
             失敗代碼.用法錯誤,
@@ -159,7 +171,18 @@ class 本地腦:
         return 讀到
 
 
-def _做完工具(箱: 工具箱, 呼叫們: list[dict[str, Any]]) -> list[dict[str, Any]]:
+#: 參數摘要最多留 200 字。`write_file` 等工具的參數可能包含大量文字，
+#: 整份落盤會讓帳本膨脹。
+_工具參數摘要上限 = 200
+
+
+def _做完工具(
+    箱: 工具箱,
+    呼叫們: list[dict[str, Any]],
+    *,
+    回合: int,
+    記: 記一筆 | None,
+) -> list[dict[str, Any]]:
     """跑完這一批工具呼叫，把結果做成 `role: "tool"` 的訊息。
 
     **工具出錯不讓整輪垮掉**——模型會叫不存在的檔案、會給越界的路徑，那是正常的
@@ -168,15 +191,49 @@ def _做完工具(箱: 工具箱, 呼叫們: list[dict[str, Any]]) -> list[dict[
     結果們: list[dict[str, Any]] = []
     for 呼 in 呼叫們:
         函 = 呼.get("function") or {}
-        try:
-            參數 = json.loads(函.get("arguments") or "{}")
-            內容 = 箱.執行(str(函.get("name", "")), 參數)
-        except 工具錯誤 as 錯:
-            內容 = f"工具失敗：{錯}"
-        except json.JSONDecodeError as 錯:
-            內容 = f"工具參數不是合法 JSON（{錯}）"
+        名稱 = str(函.get("name", ""))
+        引數原始 = 函.get("arguments") or "{}"
+        內容, 成功 = _執行工具(箱, 名稱, 引數原始)
+        _記工具事件(記, 名稱=名稱, 引數原始=引數原始, 回合=回合, 成功=成功)
         結果們.append({"role": "tool", "tool_call_id": 呼.get("id", ""), "content": 內容})
     return 結果們
+
+
+def _記工具事件(
+    記: 記一筆 | None,
+    *,
+    名稱: str,
+    引數原始: str,
+    回合: int,
+    成功: bool,
+) -> None:
+    """工具呼叫留證據進帳本。"""
+    if 記 is None:
+        return
+    記(
+        事件(
+            種類=事件種類.工具呼叫,
+            供應商=家族名,
+            工具名稱=名稱,
+            工具參數摘要=引數原始[:_工具參數摘要上限],
+            工具回合=回合,
+            工具成功=成功,
+        )
+    )
+
+
+def _執行工具(箱: 工具箱, 名稱: str, 引數原始: str) -> tuple[str, bool]:
+    """執行單一工具呼叫，回傳（結果內容, 是否成功）。
+
+    工具執行失敗或參數解析失敗皆視為正常反饋，不丟出例外。
+    """
+    try:
+        參數 = json.loads(引數原始)
+        return 箱.執行(名稱, 參數), True
+    except 工具錯誤 as 錯:
+        return f"工具失敗：{錯}", False
+    except json.JSONDecodeError as 錯:
+        return f"工具參數不是合法 JSON（{錯}）", False
 
 
 def _做不到的地方(選項: 呼叫選項) -> str | None:
