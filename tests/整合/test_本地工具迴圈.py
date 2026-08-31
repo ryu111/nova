@@ -253,3 +253,40 @@ class Test回合快用完要催收尾:
             if 訊.get("role") == "user" and "回合" in str(訊.get("content", ""))
         ]
         assert not 催過的, f"寫過檔還在催：{催過的}"
+
+
+class Test最後幾回合只准寫:
+    """催了還不寫，就把找東西的工具收掉。
+
+    倒數提醒（`Test回合快用完要催收尾`）是**懇求**，模型可以不理；
+    把 `grep` 與 `read_file` 從 tools 陣列拿掉才是**保證**——
+    它連發出那個呼叫的形狀都沒有。
+
+    唯讀角色最後幾回合會拿到空的 tools 陣列，那是對的：
+    唯讀的產出本來就是文字報告，不是檔案。
+    """
+
+    def test_最後兩回合不給找東西的工具(self, 工作區: Path) -> None:
+        端 = 假端點([回工具("grep", {"pattern": "找不到的東西"})])
+        with 端 as 網址:
+            _問(網址, 工作區, 可以做什麼=權限.可編輯)
+        最後兩次 = 端.收到[-2:]
+        for 第幾, 請求 in enumerate(最後兩次, start=len(端.收到) - 1):
+            名字們 = {規["function"]["name"] for 規 in 請求.get("tools", [])}
+            assert "grep" not in 名字們, f"第 {第幾} 回合還給 grep：{名字們}"
+            assert "read_file" not in 名字們, f"第 {第幾} 回合還給 read_file：{名字們}"
+
+    def test_最後兩回合還留著寫入(self, 工作區: Path) -> None:
+        """**收掉的是找東西，不是做事情。**收光了它連收尾都做不到。"""
+        端 = 假端點([回工具("grep", {"pattern": "找不到的東西"})])
+        with 端 as 網址:
+            _問(網址, 工作區, 可以做什麼=權限.可編輯)
+        名字們 = {規["function"]["name"] for 規 in 端.收到[-1].get("tools", [])}
+        assert 名字們 == {"write_file"}, f"最後一回合的工具不對：{名字們}"
+
+    def test_前面幾回合照給(self, 工作區: Path) -> None:
+        端 = 假端點([回工具("grep", {"pattern": "找不到的東西"})])
+        with 端 as 網址:
+            _問(網址, 工作區, 可以做什麼=權限.可編輯)
+        名字們 = {規["function"]["name"] for 規 in 端.收到[0].get("tools", [])}
+        assert {"read_file", "grep", "write_file"} <= 名字們
