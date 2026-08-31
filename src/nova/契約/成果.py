@@ -19,6 +19,10 @@ from typing import Any
 
 from nova.契約.遮罩 import 已經遮過了, 已遮罩文字
 
+#: 驗收那一格落盤時的 ASCII 鍵。`_欄位對照` 與 `成果轉字典` 的分派都認這個字串，
+#: 各寫一次的話改了一邊就對不上，所以只留這一份。
+_驗收鍵 = "acceptance"
+
 #: （繁中屬性名, 落盤的 ASCII 鍵, 讀不到時的預設值）。
 #: 預設值的型別跟著欄位走，所以標成 `Any`——標死會逼出 `type: ignore`，
 #: 而那是用規避換來的綠。
@@ -35,7 +39,23 @@ _欄位對照: tuple[tuple[str, str, Any], ...] = (
     ("來源", "source", ""),
     ("規則表版本", "policy_version", None),
     ("起點commit", "rollback_point", None),
+    ("驗收", _驗收鍵, None),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class 驗收紀錄:
+    """一條驗收在帳上的那一格：**跑了什麼、回什麼碼**。
+
+    **證據不進來。** 驗收指令的輸出動輒上萬行，而成果帳是給人掃的；
+    證據已經印在 stderr 也進了事件帳本，抄一份到這裡只會把帳淹掉。
+
+    指令原文一定要記：一張宣告三條驗收的票，只記「紅了」的話
+    事後查不出是**哪一條**擋住的。
+    """
+
+    指令: str
+    退出碼: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,11 +93,37 @@ class 成果:
     #: 這次動手之前那個狀態。工作目錄不是 repo 時是 `None`，
     #: 不是空字串——「這裡沒有 commit 可退」跟「沒記到」是兩件事。
     起點commit: str | None = None
+    #: 這一輪跑了哪幾條驗收、綠不綠。**`None` 與空 tuple 是兩件事**：
+    #: 沒宣告驗收的票（人給的）根本不會跑驗收，那一格是「沒有這個概念」，
+    #: 不是「零條紅」。長得一樣的話，事後就分不出
+    #: 「模型每次都撞上限」與「模型每次都說做完了但驗收不過」，
+    #: 而那兩件事的修法完全相反。
+    驗收: tuple[驗收紀錄, ...] | None = None
+
+
+def _驗收攤平(幾條: tuple[驗收紀錄, ...]) -> list[dict[str, Any]]:
+    """驗收那一格是 dataclass，JSON 塞不進去，所以一條攤成一個 dict。"""
+    return [{"command": 一條.指令, "exit_code": 一條.退出碼} for 一條 in 幾條]
+
+
+def _驗收讀回(幾條: list[dict[str, Any]]) -> tuple[驗收紀錄, ...]:
+    """`_驗收攤平` 的反向。兩邊的 ASCII 鍵放在一起，改的時候看得到彼此。"""
+    return tuple(驗收紀錄(指令=一條["command"], 退出碼=一條["exit_code"]) for 一條 in 幾條)
 
 
 def 成果轉字典(一筆: 成果) -> dict[str, Any]:
-    """落盤用。鍵是 ASCII，讀的人可能不是 python。"""
-    return {外: getattr(一筆, 內) for 內, 外, _ in _欄位對照 if getattr(一筆, 內) is not None}
+    """落盤用。鍵是 ASCII，讀的人可能不是 python。
+
+    **`None` 的欄位整格不落盤**，寫成 `null` 或空值都不行——
+    讀回來的時候要分得出「沒有這個概念」與「有，但是空的」。
+    """
+    落盤: dict[str, Any] = {}
+    for 內, 外, _ in _欄位對照:
+        值 = getattr(一筆, 內)
+        if 值 is None:
+            continue
+        落盤[外] = _驗收攤平(值) if 外 == _驗收鍵 else 值
+    return 落盤
 
 
 def 字典轉成果(原始: dict[str, Any]) -> 成果:
@@ -93,4 +139,6 @@ def 字典轉成果(原始: dict[str, Any]) -> 成果:
     """
     欄 = {內: 原始.get(外, 預設) for 內, 外, 預設 in _欄位對照}
     欄["任務"] = 已經遮過了(欄["任務"], 因為="從已處理的 JSON 讀回來，寫進去的時候過了遮罩")
+    if 欄["驗收"] is not None:
+        欄["驗收"] = _驗收讀回(欄["驗收"])
     return 成果(**欄)
