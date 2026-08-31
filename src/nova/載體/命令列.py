@@ -100,6 +100,7 @@ from nova.載體.遮罩 import 遮罩
 from nova.載體.重構護欄 import 動到測試了嗎, 拍全樹快照, 拍快照, 跑出範圍了嗎
 from nova.載體.閘 import 跑閘
 from nova.載體.閘紅成票 import 落成閘紅票們
+from nova.載體.閘鎖 import 佔不到, 佔住
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 超支了嗎
 from nova.迴圈 import 角色提示
@@ -160,8 +161,17 @@ def _印結果(結果表: list[檢查結果]) -> int:
 def _子命令_閘(參數: argparse.Namespace) -> int:
     根目錄 = _專案脈絡(參數).根目錄
     try:
-        with _開帳(參數) as 帳:
+        # **佔住整台機器再跑。** 三個 nova 各自開一個閘的話，三份 pytest
+        # 同時吃滿 CPU，而負控執行器對每把刀的 `最多秒` 是 2.0——
+        # 跑不完就被殺，判成「這把刀沒被殺掉」。那是假紅，而假紅的下一步
+        # 通常是有人去把那支好好的測試「修好」。
+        with 佔住("閘"), _開帳(參數) as 帳:
             結果表 = 跑閘(參數.閘點, 建規則表(根目錄), 提前停止=not 參數.全部跑完, 帳=帳)
+    except 佔不到 as 錯:
+        # **不是閘紅，是閘沒跑。** 回 3（結果未知）才不會讓「機器很忙」
+        # 長得跟「程式壞了」一樣——而 3 的意思正是「不知道做了沒」。
+        print(str(錯), file=sys.stderr)
+        return 未知
     except ValueError as 錯:
         print(str(錯), file=sys.stderr)
         return 閘紅
