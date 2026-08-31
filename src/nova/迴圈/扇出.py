@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, replace
+from pathlib import Path
 from time import monotonic
 
 from nova.契約.扇出 import 分支工作, 分支結果, 扇出政策, 扇出模式, 扇出結果
@@ -123,6 +124,47 @@ def _驗證輸入[輸入, 依賴](
     if len(工作) * 政策.每分支最多token > 政策.階段最多token:
         訊息 = "扇出階段總預算無法容納全部分支"
         raise ValueError(訊息)
+    撞到 = _找出假獨立(工作)
+    if 撞到 is not None:
+        甲, 乙, 甲格, 乙格 = 撞到
+        訊息 = f"分支 {甲} 與 {乙} 的寫入範圍撞在一起（{甲格} 與 {乙格}）——沒有資料依賴不等於獨立"
+        raise ValueError(訊息)
+
+
+def _撞在一起嗎(甲格: str, 乙格: str) -> bool:
+    """兩格寫入範圍是不是同一塊地。
+
+    **比路徑節點，不比字元前綴**：`src/nova/契約` 與 `src/nova/契約-舊`
+    的字元前綴一樣中、路徑節點不中，它們是兩個不同的目錄。
+    比字元的話這一格會擋到不該擋的，第一個反應就是把它關掉。
+
+    一格是另一格的祖先也算撞：`src/nova/契約` 底下就包含
+    `src/nova/契約/節點.py`，兩個分支各拿一個仍然是同一塊地。
+    """
+    甲節點 = tuple(Path(甲格).parts)
+    乙節點 = tuple(Path(乙格).parts)
+    短 = min(len(甲節點), len(乙節點))
+    return 甲節點[:短] == 乙節點[:短]
+
+
+def _找出假獨立[輸入, 依賴](
+    工作: tuple[分支工作[輸入, 依賴], ...],
+) -> tuple[分支識別碼, 分支識別碼, str, str] | None:
+    """第一對寫入範圍撞在一起的分支。都不撞就回 None。
+
+    **只回第一對，不回全部**：這是開跑前的拒絕，訊息要能讓人當場知道
+    該拆哪兩個；列出全部反而要人自己找出關鍵那一對。
+
+    沒宣告寫入範圍的分支不參與比對（空 tuple 的雙層迴圈本來就不進去），
+    理由寫在 `契約/扇出.py` 的 `寫入範圍` 上。
+    """
+    for 甲位, 甲 in enumerate(工作):
+        for 乙 in 工作[甲位 + 1 :]:
+            for 甲格 in 甲.寫入範圍:
+                for 乙格 in 乙.寫入範圍:
+                    if _撞在一起嗎(甲格, 乙格):
+                        return (甲.分支, 乙.分支, 甲格, 乙格)
+    return None
 
 
 def _收回完成分支[輸入, 輸出, 依賴](
