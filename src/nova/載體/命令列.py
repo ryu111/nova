@@ -641,6 +641,11 @@ def _這個專案誰熔斷了(帳本目錄: Path, *, 啟用: bool = False) -> Ca
     return lambda 家: 該跳過嗎(執行們, 家, 現在) is not None
 
 
+def _拆腦來源(來源: str) -> tuple[str, ...]:
+    """把 `--用 codex,agy` 這種逗號字串拆成家名，順手去空白、丟掉空欄位。"""
+    return tuple(家.strip() for 家 in 來源.split(",") if 家.strip())
+
+
 def _濾掉熔斷的(來源: str, 熔斷了: Callable[[str], bool]) -> list[str]:
     """把連續失敗的家從接力鏈裡拿掉。**在建腦之前濾**——
 
@@ -651,7 +656,7 @@ def _濾掉熔斷的(來源: str, 熔斷了: Callable[[str], bool]) -> list[str]
     而真正的原因（每一家都連續失敗了）完全沒被講出來——
     寧可撞牆一次拿到真的錯誤訊息。
     """
-    家們 = [家.strip() for 家 in 來源.split(",") if 家.strip()]
+    家們 = list(_拆腦來源(來源))
     留 = [家 for 家 in 家們 if not 熔斷了(家)]
     return 留 or 家們[-1:]
 
@@ -723,10 +728,6 @@ def _階段的派法(階段: 階段代碼) -> 派法:
 
 def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
     """把命令列的腦來源與逾時套到 TDD 藍圖，保留派工表的模型設定。"""
-
-    def _整理腦來源(來源: str) -> tuple[str, ...]:
-        return tuple(家.strip() for 家 in 來源.split(",") if 家.strip())
-
     結果: list[角色藍圖] = []
     for 藍圖 in TDD角色藍圖資料:
         指名 = 參數.審查用 if 藍圖.識別碼 == 階段代碼.審查.value else 參數.用
@@ -734,7 +735,7 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
             結果.append(
                 dataclasses.replace(
                     藍圖,
-                    派法=dataclasses.replace(藍圖.派法, 腦們=_整理腦來源(指名)),
+                    派法=dataclasses.replace(藍圖.派法, 腦們=_拆腦來源(指名)),
                     模型=None,
                     思考深度=None,
                 )
@@ -806,7 +807,7 @@ def _邊跑邊印(內層: 執行器) -> 執行器:
 def _哪幾家(旗標: str | None, 階段: 階段代碼) -> set[str]:
     """這一階實際上會叫到哪幾家。旗標沒給就問派工表。"""
     來源 = 旗標 or ",".join(_階段的派法(階段).腦們)
-    return {家.strip() for 家 in 來源.split(",") if 家.strip()}
+    return set(_拆腦來源(來源))
 
 
 def _工作流前置檢查(參數: argparse.Namespace, 工作目錄: Path, 進度檔: Path | None) -> str | None:
