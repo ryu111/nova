@@ -12,8 +12,49 @@ import stat
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:  # pragma: no cover - 只給型別檢查看
+    from nova.載體.閘 import 規則
+
+    #: `挖pytest命令列` 這支 fixture 的形狀。
+    _挖命令列型 = Callable[[規則], tuple[str, ...]]
+
+# `nova` 只准在 TYPE_CHECKING 底下 import：conftest 一 import 就等於每個 pytest
+# 行程都載入了半個 `nova`，`tests/負控/` 那把刀量覆蓋率時會把那些 import 時執行的
+# 行算成「該紅的測試有走到」，WRONG_TEST 就變成 SURVIVED，負控整個失效。
+
+
+@pytest.fixture
+def 挖pytest命令列() -> "_挖命令列型":
+    """把 `_外部指令` 包出來的閉包裡那條 pytest 命令列挖出來。
+
+    做成 fixture 不做成可以 import 的函式：跨檔 import 會讓同一個檔被算成
+    `conftest` 與 `tests.conftest` 兩個模組（見本檔開頭）。
+
+    只寫這一份：`test_規則表.py` 與 `test_負控只跑一次.py` 都要讀命令列，
+    各寫一份的話 `_外部指令` 的內部形狀一改就得有人記得兩處都改。
+    """
+
+    def 挖(條: "規則") -> tuple[str, ...]:
+        閉包 = getattr(條.檢查, "__closure__", None)
+        assert 閉包 is not None, f"{條.代碼} 不是包出來的外部指令，這支 fixture 要改寫"
+        命令 = next(
+            (
+                格.cell_contents
+                for 格 in 閉包
+                if isinstance(格.cell_contents, tuple)
+                and 格.cell_contents
+                and 格.cell_contents[0] == "pytest"
+            ),
+            None,
+        )
+        assert isinstance(命令, tuple), f"{條.代碼} 找不到 pytest 命令列"
+        return tuple(str(項) for 項 in 命令)
+
+    return 挖
 
 
 @pytest.fixture(autouse=True)
