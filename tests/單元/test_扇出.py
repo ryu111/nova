@@ -1,7 +1,8 @@
 """扇出 runner 的屏障與分支終局契約。"""
 
+import ast
 from concurrent.futures import ThreadPoolExecutor as 真執行池
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import monotonic
@@ -9,7 +10,7 @@ from time import monotonic
 import pytest
 
 from nova.契約.工作流 import 任務
-from nova.契約.扇出 import 分支工作, 扇出政策, 扇出模式, 扇出結果
+from nova.契約.扇出 import 分支工作, 扇出政策, 扇出模式, 扇出結果, 開不出工作樹
 from nova.契約.模型回應 import 失敗代碼, 用量
 from nova.契約.節點 import (
     停止政策,
@@ -26,9 +27,11 @@ from nova.契約.節點 import (
     結果代碼,
     結構識別碼,
     證據來源,
+    證據項,
     邊包,
     邊識別碼,
 )
+from nova.迴圈 import 扇出 as 扇出模組
 from nova.迴圈.扇出 import _上限阻止再派一顆, 執行扇出
 
 
@@ -585,3 +588,141 @@ def test_沒宣告寫入範圍的分支照樣派得出去() -> None:
     )
 
     assert 結果.終局 is 結果代碼.成功
+
+
+def test_每顆分支在自己的工作樹裡跑(tmp_path: Path) -> None:
+    """帶了工作樹的分支，拿到的上下文要指向自己那棵樹，不是共用的工作目錄。
+
+    工作樹由**呼叫端**（載體）開好再交進來，runner 只負責把它接到那顆分支
+    看得到的地方；`迴圈/` 不知道 git 存在，所以這裡一個 git 都不碰。
+
+    為什麼斷言的是 `上下文.任務.工作目錄` 而不是 `工作項.工作樹`：
+    後者只證明契約多了一個欄位，分支照樣可以在共用目錄裡動手。
+    要「真的在自己的樹裡跑」，得是分支實際據以工作的那個路徑換掉了。
+    """
+    甲樹 = tmp_path / "甲樹"
+    乙樹 = tmp_path / "乙樹"
+    #: 用 `replace` 掛工作樹、不改 `_工作`：這樣沒宣告工作樹的既有測試
+    #: 一支都不會被這一格的紅牽連，紅的只有真的少了這個行為的那一支。
+    工作 = (
+        replace(_工作("甲"), 工作樹=甲樹),
+        replace(_工作("乙"), 工作樹=乙樹),
+    )
+    落在哪: dict[分支識別碼, Path] = {}
+    記錄鎖 = Lock()
+
+    def 執行一顆(工作項: 分支工作[str, None], 上下文: 節點上下文) -> 節點成功[str]:
+        with 記錄鎖:
+            落在哪[工作項.分支] = 上下文.任務.工作目錄
+        return 節點成功(產出=工作項.輸入, 證據=(), 用量=None)
+
+    結果 = 執行扇出(
+        工作,
+        執行一顆=執行一顆,
+        上下文=_上下文(),
+        政策=_政策(必要分支=frozenset(工作項.分支 for 工作項 in 工作)),
+    )
+
+    assert 結果.終局 is 結果代碼.成功
+    assert 落在哪 == {分支識別碼("甲"): 甲樹, 分支識別碼("乙"): 乙樹}
+
+
+def test_迴圈的扇出不准import_git也不准import載體() -> None:
+    """架構保證：`迴圈/` 不知道 git 存在，工作樹只能從泛型欄位流進來。
+
+    這一條沒有測試釘著的話，隔離會慢慢長成 runner 自己去 fork git，
+    三層落點當場失守，而且是在別的功能的 diff 裡順手長出來的。
+    """
+    來源 = Path(str(扇出模組.__file__)).read_text(encoding="utf-8")
+    匯入的模組: set[str] = set()
+    for 語法節點 in ast.walk(ast.parse(來源)):
+        if isinstance(語法節點, ast.Import):
+            匯入的模組.update(別名.name for 別名 in 語法節點.names)
+        elif isinstance(語法節點, ast.ImportFrom):
+            匯入的模組.add(語法節點.module or "")
+
+    越界 = {名 for 名 in 匯入的模組 if 名.split(".")[0] == "git" or "載體" in 名}
+    assert not 越界, f"迴圈/扇出.py 不准認識 git 或載體，卻 import 了 {sorted(越界)}"
+
+
+def test_開不出工作樹的分支不准跑而且分得出它沒跑(tmp_path: Path) -> None:
+    """開樹失敗的分支一次都不派，且屏障上「沒跑」與「跑了但失敗」分得開。
+
+    分得開的形狀：跑了的分支有 `分支結果`（縱使是確定失敗），
+    沒跑的分支只出現在缺口裡。塌成同一種失敗，重跑決策就沒得做。
+    """
+    工作 = (
+        replace(_工作("甲"), 工作樹=tmp_path / "甲樹"),
+        replace(_工作("乙"), 工作樹=開不出工作樹(原因="落點已經有人佔著")),
+    )
+    派過誰: list[分支識別碼] = []
+    記錄鎖 = Lock()
+
+    def 執行一顆(工作項: 分支工作[str, None], 上下文: 節點上下文) -> 節點結果[str]:
+        assert 上下文.任務.工作目錄 != _上下文().任務.工作目錄
+        with 記錄鎖:
+            派過誰.append(工作項.分支)
+        return _確定失敗(失敗代碼.用法錯誤)
+
+    結果 = 執行扇出(
+        工作,
+        執行一顆=執行一顆,
+        上下文=_上下文(),
+        政策=_政策(必要分支=frozenset(工作項.分支 for 工作項 in 工作)),
+    )
+
+    assert 派過誰 == [分支識別碼("甲")], "開不出工作樹的分支不准被派出去，更不准退回共用目錄"
+    assert {分支.分支: 分支.結果.結果 for 分支 in 結果.分支結果} == {
+        分支識別碼("甲"): 結果代碼.確定失敗
+    }, "沒跑的分支不該有分支結果——有的話就跟跑了但失敗的分不開了"
+    assert 結果.缺口 == (分支識別碼("甲"), 分支識別碼("乙"))
+    assert 結果.終局 is 結果代碼.護欄, "必要分支根本沒跑是未知，不是確定失敗"
+
+
+def test_屏障收得到每顆分支自己樹裡的證據含未追蹤新檔(tmp_path: Path) -> None:
+    """每顆分支在自己的樹裡寫新檔，兩邊互相看不到，證據各自到得了屏障。
+
+    證據由呼叫端（載體的 `收集證據`）收好放進節點結果，`迴圈/` 只負責通道；
+    真的跑 git diff 是整合層的事，這裡釘的是「收到的東西到得了屏障、
+    而且是各自那棵樹的」——含新檔在內。少了這一段，隔離等於把每顆分支的
+    產出丟掉。
+    """
+    甲樹 = tmp_path / "甲樹"
+    乙樹 = tmp_path / "乙樹"
+    for 樹 in (甲樹, 乙樹):
+        樹.mkdir()
+
+    def 假收集證據(落點: Path) -> 證據項:
+        """站在 `載體.工作樹.收集證據` 的位置：把樹裡的檔案列成一份證據。"""
+        檔名 = sorted(路徑.name for 路徑 in 落點.iterdir())
+        return 證據項(
+            識別碼=邊識別碼(f"證據-{落點.name}"),
+            類型=結構識別碼("工作樹改動"),
+            摘要=" ".join(檔名),
+        )
+
+    def 執行一顆(工作項: 分支工作[str, None], 上下文: 節點上下文) -> 節點成功[str]:
+        落點 = 上下文.任務.工作目錄
+        (落點 / f"{工作項.分支}的新檔.txt").write_text("新的\n", encoding="utf-8")
+        return 節點成功(產出=工作項.輸入, 證據=(假收集證據(落點),), 用量=None)
+
+    工作 = (
+        replace(_工作("甲"), 工作樹=甲樹),
+        replace(_工作("乙"), 工作樹=乙樹),
+    )
+    結果 = 執行扇出(
+        工作,
+        執行一顆=執行一顆,
+        上下文=_上下文(),
+        政策=_政策(必要分支=frozenset(工作項.分支 for 工作項 in 工作)),
+    )
+
+    assert 結果.終局 is 結果代碼.成功
+    收到的證據: dict[分支識別碼, str] = {}
+    for 分支 in 結果.分支結果:
+        assert isinstance(分支.結果, 節點成功)
+        收到的證據[分支.分支] = 分支.結果.證據[0].摘要
+    assert 收到的證據 == {
+        分支識別碼("甲"): "甲的新檔.txt",
+        分支識別碼("乙"): "乙的新檔.txt",
+    }, "屏障要收得到每顆分支自己樹裡的新檔；看得到對方的檔就是沒隔離"
