@@ -31,7 +31,7 @@ from nova.契約.角色 import 權限 as 權限
 from nova.契約.額度 import 家族額度 as 家族額度
 from nova.契約.額度 import 視窗 as 視窗
 from nova.契約.額度 import 額度快照 as 額度快照
-from nova.載體.判準 import 建判準, 建重構判準
+from nova.載體.判準 import 建判準, 建重構判準, 建預設判準
 from nova.載體.工作區 import 判定工作區, 拍工作區快照
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
@@ -290,7 +290,8 @@ def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物�
     審查者 = _建腦(審查的, 審查執行檔, 帳, 單次最多token=停止.單次最多token)
     執行 = 建TDD執行器(
         角色表=_建TDD角色表(執行者, 審查者),
-        跑判準=建判準() if 判準指令 is None else 建判準(判準指令),
+        # 沒指定就用預設判準（全測試 ＋ 提交閘），不是只有全測試。
+        跑判準=建預設判準() if 判準指令 is None else 建判準(判準指令),
         跑重構判準=建重構判準(),
     )
     目錄 = 工作目錄 or Path.cwd()

@@ -39,7 +39,7 @@ from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型
 from nova.契約.觸發 import 喚醒來源
 from nova.載體.git查詢 import 目前commit
-from nova.載體.判準 import 判準指令, 建判準, 建重構判準
+from nova.載體.判準 import 判準指令, 建判準, 建重構判準, 建預設判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.專案脈絡 import 專案執行脈絡, 建專案執行脈絡
@@ -1087,7 +1087,8 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                     記全文=not 參數.不記全文,
                     單次最多token=參數.單次最多token,
                 ),
-                跑判準=建判準(判準指令(參數.判準)),
+                # `--判準` 沒給就走預設判準（全測試 ＋ 提交閘）。
+                跑判準=(建判準(判準指令(參數.判準)) if 參數.判準 else 建預設判準()),
                 跑重構判準=建重構判準(),
             )
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
