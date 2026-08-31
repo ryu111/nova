@@ -91,6 +91,7 @@ from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
 from nova.載體.線 import 執行線
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
+from nova.載體.角色 import 組提示
 from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.遮罩 import 遮罩
@@ -418,7 +419,7 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
     if isinstance(這次, int):
         return 這次
     if 角色:
-        這次 = dataclasses.replace(這次, 提示=f"{角色}\n\n---\n\n{這次.提示}")
+        這次 = dataclasses.replace(這次, 提示=組提示(角色, 這次.提示))
     try:
         with _開帳(參數) as 帳:
             答 = _建腦(
