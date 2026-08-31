@@ -36,6 +36,8 @@ from nova.載體.命令列 import (
 )
 from nova.載體.帳本 import 不記帳本
 from nova.載體.派工表 import 怎麼派
+from nova.載體.角色 import 組提示
+from nova.迴圈 import 角色提示
 from nova.迴圈.狀態機 import TDD階段表
 
 做假CLI型 = Callable[..., tuple[Path, Path]]
@@ -627,3 +629,41 @@ class Test跨執行熔斷預設關閉:
         assert 碼 == 0
         assert not 紀錄_codex.exists(), "明確指定 --熔斷 時，連續失敗的 codex 應該被濾掉"
         assert 紀錄_agy.exists(), "接力鏈應該換下一顆 agy 執行"
+
+
+class Test角色併接只准有一份實作:
+    """`nova 重構` 走的併接，必須是 `載體.角色.組提示` 那一份。
+
+    命令列原本自己抄了一份分隔符字面量——**同一個知識兩份實作**，
+    而且沒有任何測試把兩者釘在一起：改了 `_分隔`，`nova 問` 那條路會跟著變，
+    `nova 重構` 這條不會，兩條路送給模型的東西從此不一樣，而且沒人會發現。
+
+    負控是雙向的，兩邊都跑過：把 `角色.py` 的 `_分隔` 改掉——
+    併接還是兩份時**紅**（命令列沒跟上），改成共用同一份之後**綠**。
+    紅那一邊證明測試守得住，綠那一邊證明命令列真的走了 `組提示`。
+    """
+
+    def test_重構送出去的提示等於組提示產出的(self, 做假CLI: 做假CLI型, tmp_path: Path) -> None:
+        """直接呼叫 `主程式`，不開子程序。
+
+        coverage 追不到子程序的行，變異閘會判成 `WRONG_TEST`——
+        `#141` 踩過一次，這票又踩一次。
+        """
+        執行檔, 紀錄 = 做假CLI("claude")
+        任務 = "把重複的併接抽掉"
+        主程式(
+            [
+                "重構",
+                "--用",
+                "claude",
+                "--執行檔",
+                str(執行檔),
+                "--不記帳",
+                "--工作目錄",
+                str(tmp_path),
+                任務,
+            ]
+        )
+        assert 紀錄.exists(), "假 CLI 沒被呼叫"
+        送出去的 = json.loads(紀錄.read_text(encoding="utf-8"))["argv"][-1]
+        assert 送出去的 == 組提示(角色提示.重構員, 任務)
