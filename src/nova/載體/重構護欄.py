@@ -45,6 +45,42 @@ def 拍測試快照(根目錄: Path) -> dict[str, str]:
 
 拍快照 = 拍測試快照  # 相容舊呼叫端（如命令列.py）
 
+#: 拍全樹時跳過的目錄。**不是為了乾淨，是為了跑得完**——
+#: `.venv` 與 `.git` 各有幾萬個檔，每次重構前後各拍一次要等到天荒地老。
+#: 這些目錄底下的東西也不該算「重構員動的」：它們是工具的產物。
+不拍的目錄 = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "node_modules",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".tox",
+        "dist",
+        "build",
+        ".eggs",
+    }
+)
+
+
+def 拍全樹快照(根目錄: Path) -> dict[str, str]:
+    """整棵樹的內容雜湊。**範圍護欄要用這個，不是 `拍測試快照`。**
+
+    `跑出範圍了嗎` 問的是「有沒有動到範圍外的檔」，而範圍通常指的是
+    `src/` 底下的某幾格——只拍 `tests/` 的話那個問題**永遠回答不了**：
+    快照裡根本沒有那些檔，差集是空的，護欄放行。
+
+    **那是最貴的那種假綠**：測試綠、閘綠、護欄在，但它守不到任何東西。
+    """
+    return {
+        str(檔.relative_to(根目錄)): hashlib.sha256(檔.read_bytes()).hexdigest()[:16]
+        for 檔 in sorted(根目錄.rglob("*"))
+        if 檔.is_file() and not (不拍的目錄 & set(檔.relative_to(根目錄).parts))
+    }
+
 
 def _動過的檔(前: Mapping[str, str], 後: Mapping[str, str]) -> set[str]:
     """兩張快照之間對不起來的檔。改內容、新增、刪除都算。

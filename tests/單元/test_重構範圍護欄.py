@@ -20,7 +20,9 @@
 純函式，快照由呼叫端拍，所以住單元層。
 """
 
-from nova.載體.重構護欄 import 跑出範圍了嗎
+from pathlib import Path
+
+from nova.載體.重構護欄 import 拍全樹快照, 跑出範圍了嗎
 
 
 class Test跑出範圍了嗎:
@@ -44,3 +46,33 @@ class Test跑出範圍了嗎:
         }
 
         assert 跑出範圍了嗎(前, 後, ("src/nova/載體",)) == ("src/nova/載體-舊/甲.py",)
+
+
+class Test範圍要看得到整棵樹:
+    """**範圍護欄不能只拍 `tests/`。**
+
+    `拍快照` 是 `拍測試快照` 的別名（只掃 `tests/` 底下），
+    那對「動到測試了嗎」剛剛好，對「跑出範圍了嗎」卻是**永遠抓不到**：
+    重構員把手伸到 `src/` 的別的模組，快照裡根本沒有那些檔，
+    差集是空的，護欄放行。
+
+    **這是最貴的那種假綠**：測試綠、閘綠、護欄在，但它守不到任何東西。
+    """
+
+    def test_拍得到src底下的檔(self, tmp_path: Path) -> None:
+        (tmp_path / "src").mkdir()
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "src" / "甲.py").write_text("x = 1", encoding="utf-8")
+        (tmp_path / "tests" / "test_甲.py").write_text("y = 2", encoding="utf-8")
+        快照 = 拍全樹快照(tmp_path)
+        assert "src/甲.py" in 快照, f"拍不到 src/ 底下的檔：{sorted(快照)}"
+        assert "tests/test_甲.py" in 快照
+
+    def test_不拍垃圾目錄(self, tmp_path: Path) -> None:
+        """`.git` 與 `.venv` 幾萬個檔，拍下去每次重構都要等。"""
+        for 髒 in (".git", ".venv", "__pycache__", "node_modules"):
+            (tmp_path / 髒).mkdir()
+            (tmp_path / 髒 / "髒東西").write_text("x", encoding="utf-8")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "甲.py").write_text("x = 1", encoding="utf-8")
+        assert set(拍全樹快照(tmp_path)) == {"src/甲.py"}
