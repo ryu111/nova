@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from nova.契約.角色 import 權限
+from nova.載體.重構護欄 import 不拍的目錄
 
 #: 一次工具呼叫最多回這麼多字元。本地模型的 context 比雲端小，
 #: 讀兩個大檔就爆——而爆掉的樣子是「模型突然開始胡言亂語」，
@@ -24,6 +25,10 @@ from nova.契約.角色 import 權限
 
 #: grep 最多回幾行。同上理由，而且 grep 打到大檔時行數會爆。
 搜尋上限 = 60
+
+#: `list_dir` 一次最多列幾筆。`.venv/` 底下幾萬個檔整份倒回去會把 context 灌爆，
+#: 而**灌爆比沒有這個工具更糟**：模型不會說自己爆了，它會開始胡言亂語。
+列目錄上限 = 200
 
 #: 一次 `write_file` 最多寫這麼多字元。
 #:
@@ -119,6 +124,12 @@ class 工具箱:
                     "在工作目錄裡搜尋字串，回符合的檔案與行。先用它定位，不要整包讀。",
                     {"pattern": "要找的字串"},
                 ),
+                _規格(
+                    "list_dir",
+                    "列一個目錄底下有什麼（只列一層）。目錄尾巴帶 /，檔案不帶。"
+                    "不知道檔名時先用它，grep 搜的是內容不是檔名。",
+                    {"path": "相對於工作目錄的路徑，工作目錄本身用 ."},
+                ),
             ]
         )
         if self._可以寫:
@@ -137,6 +148,8 @@ class 工具箱:
             return self._讀(str(參數.get("path", "")))
         if 名稱 == "grep":
             return self._搜(str(參數.get("pattern", "")))
+        if 名稱 == "list_dir":
+            return self._列目錄(str(參數.get("path", ".")))
         if 名稱 == "write_file":
             if not self._可以寫:
                 訊息 = "這一輪是唯讀，不能寫檔案。只回報你會怎麼改，不要嘗試寫入。"
@@ -174,6 +187,27 @@ class 工具箱:
             訊息 = f"{路徑字串} 不是一個檔案（可能不存在，或它是目錄）"
             raise 工具錯誤(訊息)
         return self._截(目標.read_text(encoding="utf-8", errors="replace"))
+
+    def _列目錄(self, 路徑字串: str) -> str:
+        """一個目錄底下有什麼。**圈禁走 `_圈在裡面`，跟 `read_file` 同一套。**
+
+        只列一層：列目錄是定位不是傾倒，要往下看就再叫一次，那一次是模型自己決定的。
+        """
+        目標 = self._圈在裡面(路徑字串)
+        if not 目標.is_dir():
+            訊息 = f"{路徑字串} 不是一個目錄（可能不存在，或它是檔案）"
+            raise 工具錯誤(訊息)
+        可見 = _值得看的(目標)
+        if not 可見:
+            return f"{路徑字串} 底下是空的"
+        列出的 = 可見[:列目錄上限]
+        # **目錄尾巴帶 `/`**：分不出來的話模型會拿目錄去 read_file，白燒一個回合。
+        本體 = "\n".join(f"{項.name}/" if 項.is_dir() else 項.name for 項 in 列出的)
+        沒列的 = len(可見) - len(列出的)
+        # 截了就要講明幾筆：靜默截斷的話模型會以為自己看完了整個目錄。
+        尾 = f"\n[還有 {沒列的} 筆沒列出來，這個目錄總共 {len(可見)} 筆]" if 沒列的 else ""
+        # 尾巴接在 `_截` 之後：接在裡面的話，那句提醒自己會先被字元上限吃掉。
+        return self._截(本體) + 尾
 
     def _寫(self, 路徑字串: str, 內容: str) -> str:
         if len(內容) > 單檔寫入上限:
@@ -223,6 +257,19 @@ class 工具箱:
             return f"找不到「{樣式}」"
         尾 = f"\n[只列前 {搜尋上限} 筆]" if len(命中) >= 搜尋上限 else ""
         return self._截("\n".join(命中) + 尾)
+
+
+def _值得看的(目錄: Path) -> list[Path]:
+    """一個目錄底下模型該看到的東西，依名字排好。
+
+    雜訊目錄（`.git`／`.venv`／`__pycache__`…）是工具的產物，不是模型要找的東西。
+    清單複用 `重構護欄.不拍的目錄`：抄第二份的話，兩份對不起來的那天沒有人會發現，
+    只會看到模型又燒了一個回合。
+    """
+    return sorted(
+        (項 for 項 in 目錄.iterdir() if 項.name not in 不拍的目錄),
+        key=lambda 項: 項.name,
+    )
 
 
 def _檔裡的命中(檔: Path, 根: Path, 樣式: str, *, 還能收: int) -> list[str]:
