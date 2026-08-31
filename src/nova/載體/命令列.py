@@ -91,6 +91,7 @@ from nova.載體.生圖 import 生圖, 生圖選項, 生圖那家
 from nova.載體.禁令 import 檢查指令
 from nova.載體.秘密 import 看不懂的祕密檔, 祕密檔, 載入到
 from nova.載體.線 import 執行線
+from nova.載體.缺口成票 import 空手時落一張票
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
 from nova.載體.規則表 import 版本 as 規則表版本
@@ -1530,6 +1531,11 @@ def _子命令_收件(參數: argparse.Namespace) -> int:
     print(f"收件匣：{目錄}")
     if not 等著的 and not 處理中:
         print("  （空的。丟一個檔進去就是派一次工，檔案內容就是題目）")
+        # **空手不等於沒事做。** 從規格對照挑一個缺口落成票，下一輪排程就撈得到。
+        # 挑不到（文件不在、文件裡沒有缺口）就維持安靜退出。
+        票 = 空手時落一張票(脈絡.根目錄)
+        if 票 is not None:
+            print(f"  ＋ 從規格對照挑了下一個點：{票.name}")
         return 放行
     for 路 in 等著的:
         print(f"  等著  {路.name}")
