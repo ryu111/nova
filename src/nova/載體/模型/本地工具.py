@@ -11,7 +11,7 @@
 **路徑一律圈在工作目錄裡。** 模型指揮的路徑是不可信輸入，而 repo 是 public。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,19 @@ from nova.契約.角色 import 權限
 
 #: grep 最多回幾行。同上理由，而且 grep 打到大檔時行數會爆。
 搜尋上限 = 60
+
+#: 一次 `write_file` 最多寫這麼多字元。
+#:
+#: **本地跑不燒 API 額度，所以風險不在 usage，在資源控管**：模型寫一個超大的
+#: content 就吃掉磁碟，而且不會有帳單來提醒你。
+單檔寫入上限 = 200_000
+
+#: 一個工具箱最多寫幾個檔案。工具箱只服務一次 `詢問`，所以這就是
+#: 「這一輪最多動幾個檔」。
+#:
+#: 沒有這條的話，模型可以在回合上限內把整個工作目錄覆蓋掉——
+#: **每一次寫入本身都合法，合起來是災難。**
+單輪寫檔上限 = 12
 
 
 class 工具錯誤(Exception):
@@ -58,6 +71,16 @@ class 工具箱:
 
     工作目錄: Path
     可以做什麼: 權限
+    #: 這些子樹底下**讀得到但寫不進去**。
+    #:
+    #: 「實作員不准改測試檔」原本只寫在角色提示裡——那是懇求。測試是驗收機制，
+    #: 讓實作階段的模型改得到它，等於自己給自己發及格證。工具箱不給那把刀，
+    #: 模型「不用知道、不用記得、也違反不了」。
+    #:
+    #: 讀要留著：實作員得看測試在斷言什麼才寫得出實作。**擋的是寫不是讀。**
+    不准寫: tuple[str, ...] = ()
+    #: 這一輪已經寫過的檔案。`frozen` 擋的是欄位重綁，不是容器內容。
+    _寫過的: list[str] = field(default_factory=list)
 
     @property
     def _可以寫(self) -> bool:
@@ -125,10 +148,33 @@ class 工具箱:
         return self._截(目標.read_text(encoding="utf-8", errors="replace"))
 
     def _寫(self, 路徑字串: str, 內容: str) -> str:
+        if len(內容) > 單檔寫入上限:
+            訊息 = (
+                f"內容太大（{len(內容)} 字，上限 {單檔寫入上限}）。分次寫，或只寫真的要改的部分。"
+            )
+            raise 工具錯誤(訊息)
+        if len(self._寫過的) >= 單輪寫檔上限:
+            訊息 = (
+                f"這一輪已經寫了 {len(self._寫過的)} 個檔案，到上限了。"
+                f"先回報你改了什麼，下一輪再繼續。"
+            )
+            raise 工具錯誤(訊息)
         目標 = self._圈在裡面(路徑字串)
+        self._擋下不准寫的(目標, 路徑字串)
         目標.parent.mkdir(parents=True, exist_ok=True)
         目標.write_text(內容, encoding="utf-8")
+        self._寫過的.append(路徑字串)
         return f"已寫入 {路徑字串}（{len(內容)} 字）"
+
+    def _擋下不准寫的(self, 目標: Path, 路徑字串: str) -> None:
+        """`tests` 擋住時 `tests-資料` 不該跟著被擋——**比路徑節點，不比字元**。"""
+        根 = self.工作目錄.resolve()
+        for 子樹 in self.不准寫:
+            if 目標.is_relative_to((根 / 子樹).resolve()):
+                訊息 = (
+                    f"{路徑字串} 在 {子樹}/ 底下，這一輪不准寫。讀得到，但要改的話是別的階段的事。"
+                )
+                raise 工具錯誤(訊息)
 
     def _搜(self, 樣式: str) -> str:
         if not 樣式:

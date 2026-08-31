@@ -110,3 +110,66 @@ class Test工具結果不准撐爆context:
         結果 = 工具箱(工作區, 權限.唯讀).執行("read_file", {"path": "大.txt"})
         assert len(結果) < 50_000
         assert "截斷" in 結果, "截斷了卻不講，模型會以為自己讀完了"
+
+
+class Test寫入要有資源上限:
+    """**本地跑不燒 API 額度，所以風險不在 usage，在準確度與資源控管。**
+
+    模型寫錯一個 path 就覆蓋掉一個真的檔案；寫一個超大的 content 就吃掉磁碟。
+    這兩件事都不會有帳單來提醒你。
+    """
+
+    def test_單次寫入的內容有大小上限(self, 工作區: Path) -> None:
+        with pytest.raises(工具錯誤, match="太大"):
+            工具箱(工作區, 權限.可編輯).執行(
+                "write_file", {"path": "巨大.txt", "content": "字" * 500_000}
+            )
+
+    def test_一輪最多寫幾個檔案(self, 工作區: Path) -> None:
+        """**一個工具箱只服務一次呼叫**，所以次數上限就是「這一輪最多動幾個檔」。
+
+        沒有這條的話，模型可以在回合上限內把整個工作目錄覆蓋掉——
+        每一次寫入本身都合法，合起來是災難。
+        """
+        箱 = 工具箱(工作區, 權限.可編輯)
+        for 號 in range(20):
+            try:
+                箱.執行("write_file", {"path": f"第{號}.txt", "content": "x"})
+            except 工具錯誤 as 錯:
+                assert "上限" in str(錯), 錯
+                assert 號 < 20, "跑完 20 個都沒擋"
+                return
+        pytest.fail("寫了 20 個檔案都沒有撞到上限")
+
+
+class Test不准寫的路徑:
+    """**「實作員不准改測試檔」原本只寫在角色提示裡——那是懇求。**
+
+    測試是驗收機制，讓實作階段的模型改得到它，等於自己給自己發及格證。
+    提示可以被忽略、漏了沒人發現；工具箱不給那把刀，模型
+    「不用知道、不用記得、也違反不了」。
+    """
+
+    def test_擋下不准寫的路徑(self, 工作區: Path) -> None:
+        (工作區 / "tests").mkdir()
+        箱 = 工具箱(工作區, 權限.可編輯, 不准寫=("tests",))
+        with pytest.raises(工具錯誤, match="不准"):
+            箱.執行("write_file", {"path": "tests/test_偷改.py", "content": "assert True"})
+
+    def test_擋的是子樹不只是那一層(self, 工作區: Path) -> None:
+        (工作區 / "tests" / "單元").mkdir(parents=True)
+        箱 = 工具箱(工作區, 權限.可編輯, 不准寫=("tests",))
+        with pytest.raises(工具錯誤, match="不准"):
+            箱.執行("write_file", {"path": "tests/單元/test_深的.py", "content": "x"})
+
+    def test_同前綴的兄弟目錄不受影響(self, 工作區: Path) -> None:
+        """`tests` 擋住，`tests-資料` 不該跟著被擋——比路徑節點，不比字元。"""
+        箱 = 工具箱(工作區, 權限.可編輯, 不准寫=("tests",))
+        assert "已寫入" in 箱.執行("write_file", {"path": "tests-資料/x.txt", "content": "x"})
+
+    def test_不准寫的路徑仍然讀得到(self, 工作區: Path) -> None:
+        """**讀是必要的**——實作員要看測試在斷言什麼才寫得出實作。擋的是寫不是讀。"""
+        (工作區 / "tests").mkdir()
+        (工作區 / "tests" / "test_甲.py").write_text("assert 甲() == 1", encoding="utf-8")
+        箱 = 工具箱(工作區, 權限.可編輯, 不准寫=("tests",))
+        assert "甲()" in 箱.執行("read_file", {"path": "tests/test_甲.py"})
