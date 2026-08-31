@@ -1089,14 +1089,13 @@ _這個檔裡的 = (
     變異(
         識別="成果帳漏掉規則表版本這一欄",
         目標檔=Path("src/nova/契約/成果.py"),
+        # **錨點跟著實作走。** `成果轉字典` 從 dict comprehension 改成 for 迴圈
+        # （為了讓驗收那一格走 `_驗收攤平`），舊錨點當場對不上——那是正常維護，
+        # 不是護欄壞了。砍在迴圈體裡也比砍整個 return 精準：
+        # 模組層級的 `_欄位對照` 是 import 時就跑完的，coverage 追不到（記過的坑）。
         操作=替換一次(
-            "    return {外: getattr(一筆, 內) for 內, 外, _ in _欄位對照 "
-            "if getattr(一筆, 內) is not None}",
-            "    return {\n"
-            "        外: getattr(一筆, 內)\n"
-            "        for 內, 外, _ in _欄位對照\n"
-            '        if getattr(一筆, 內) is not None and 外 != "policy_version"\n'
-            "    }",
+            "        if 值 is None:\n            continue",
+            '        if 值 is None or 外 == "policy_version":\n            continue',
         ),
         該紅=("tests/單元/test_成果.py::test_帳上答得出當時的規則表與該退回哪個commit",),
         最多秒=2.0,

@@ -7,9 +7,10 @@
 純函式，不碰硬碟，所以住單元層。
 """
 
+import dataclasses
 import json
 
-from nova.契約.成果 import 字典轉成果, 成果, 成果轉字典
+from nova.契約.成果 import 字典轉成果, 成果, 成果轉字典, 驗收紀錄
 from nova.契約.遮罩 import 已經遮過了
 
 _一筆 = 成果(
@@ -35,6 +36,9 @@ _欄位齊全 = 成果(
     總token=48213,
     總成本美金=1.25,
     來源="typed",
+    規則表版本="sha256:aaaa",
+    起點commit="0123456789abcdef",
+    驗收=(驗收紀錄(指令="pytest -q", 退出碼=0),),
 )
 
 
@@ -64,6 +68,9 @@ def test_落盤的欄位名是ASCII() -> None:
         "steps",
         "tokens",
         "cost_usd",
+        "policy_version",
+        "rollback_point",
+        "acceptance",
     }
 
 
@@ -146,8 +153,62 @@ def test_帳上答得出當時的規則表與該退回哪個commit() -> None:
     assert 字典轉成果(字典) == _有得歸因
 
 
-def test_舊帳沒有這兩欄也讀得回來() -> None:
-    """帳是 append-only 的歷史，這兩欄是之後加的，以前那些紀錄就少這一格。
+_驗收紅了 = 成果(
+    執行識別碼="20260831T104500Z-acc",
+    任務=已經遮過了("讓收尾真的去跑驗收", 因為="測試資料，裡面沒有祕密"),
+    收場="護欄",
+    退出碼=4,
+    起="2026-08-31T10:45:00Z",
+    迄="2026-08-31T10:58:00Z",
+    走了幾階=6,
+    總token=31337,
+    驗收=(
+        驗收紀錄(指令="pytest -q tests/", 退出碼=0),
+        驗收紀錄(指令="ruff check .", 退出碼=2),
+    ),
+)
+
+
+def test_帳上答得出這一輪跑了哪幾條驗收與哪一條擋住了() -> None:
+    """成果帳的 `outcome` 只寫得出「護欄」，而護欄有好幾種來源。
+
+    分不出「模型每次都撞上限」與「模型每次都說做完了但驗收不過」的話，
+    事後查「這件為什麼一直做不完」就查不出來——**而那兩件事的修法完全相反**。
+    所以指令原文要記：一張宣告三條驗收的票，只記「紅了」查不出是哪一條擋住的。
+
+    **證據不進成果帳。** 驗收指令的輸出動輒上萬行，成果帳是給人掃的；
+    證據已經印在 stderr 也進了事件帳本。這裡用整份字典相等釘死這一點——
+    多一格 `evidence` 這支就紅。
+    """
+    字典 = 成果轉字典(_驗收紅了)
+
+    assert 字典["acceptance"] == [
+        {"command": "pytest -q tests/", "exit_code": 0},
+        {"command": "ruff check .", "exit_code": 2},
+    ]
+    assert json.loads(json.dumps(字典, ensure_ascii=False)) == 字典
+    assert 字典轉成果(字典) == _驗收紅了
+
+
+def test_沒跑驗收與驗收全綠不准長得一樣() -> None:
+    """**這一支釘的是 `None` 與空 tuple 的差別。**
+
+    沒宣告驗收的票（人給的）根本不會跑驗收，那一格是「沒有這個概念」；
+    「跑了、零條紅」是另一回事。長得一樣的話，事後查「這件為什麼一直做不完」
+    就分不出「模型每次都撞上限」與「模型每次都說做完了但驗收不過」，
+    **而那兩件事的修法完全相反**。
+    """
+    沒宣告 = 成果轉字典(_一筆)
+    assert "acceptance" not in 沒宣告, "沒跑驗收的那一格不准落盤成空清單"
+    assert 字典轉成果(沒宣告).驗收 is None
+
+    全綠 = 成果轉字典(dataclasses.replace(_一筆, 驗收=(驗收紀錄(指令="pytest -q", 退出碼=0),)))
+    assert 全綠["acceptance"] == [{"command": "pytest -q", "exit_code": 0}]
+    assert 字典轉成果(全綠).驗收 == (驗收紀錄(指令="pytest -q", 退出碼=0),)
+
+
+def test_舊帳沒有後加的那幾欄也讀得回來() -> None:
+    """帳是 append-only 的歷史，這幾欄是之後加的，以前那些紀錄就少這一格。
 
     讀回來炸掉的話整本帳都看不了——而看得到「哪一次、什麼收場」
     已經比看不到強得多。**不准補零假裝有值**：沒這個概念與值是空字串
@@ -156,7 +217,9 @@ def test_舊帳沒有這兩欄也讀得回來() -> None:
     舊的 = 成果轉字典(_一筆)
     assert "policy_version" not in 舊的
     assert "rollback_point" not in 舊的
+    assert "acceptance" not in 舊的
     回來 = 字典轉成果(舊的)
     assert 回來 == _一筆
     assert 回來.規則表版本 is None
     assert 回來.起點commit is None
+    assert 回來.驗收 is None
