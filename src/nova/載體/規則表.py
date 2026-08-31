@@ -226,6 +226,15 @@ def 建規則表(根目錄: Path) -> list[規則]:
             涵蓋於="pytest-parallel",  # CI 跑全測試時會包含 tests/單元
         ),
         規則(
+            代碼="docs-facts",
+            名稱="文件宣稱存在的東西要真的在",
+            閘點=frozenset({"提交"}),
+            負責層="載體",
+            檢查=_外部指令(根目錄, "pytest", "tests/驗收/test_文件即事實.py", "-q"),
+            階段=測試,
+            涵蓋於="pytest-parallel",  # CI 跑全測試時會包含它
+        ),
+        規則(
             代碼="pytest-parallel",
             名稱="全測試（平行，不含 serial）",
             閘點=frozenset({"ci"}),

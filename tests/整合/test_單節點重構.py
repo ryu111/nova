@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+from nova.載體.命令列 import 主程式, 護欄碼
+
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]
 
@@ -199,3 +201,99 @@ class Test護欄:
         送出去的 = " ".join(json.loads(紀錄.read_text(encoding="utf-8"))["argv"])
         assert "不准改任何測試檔" in 送出去的, "重構員的第一條規矩沒送出去"
         assert "把甲整理乾淨" in 送出去的, "題目沒送出去，那它要重構什麼？"
+
+
+class Test範圍護欄也要接到命令列:
+    """`跑出範圍了嗎` 是純函式，**但純函式沒有呼叫端就等於沒有保證**。
+
+    `--範圍` 讓呼叫端指名這次只准動哪些路徑；動到範圍外就回護欄碼 4。
+    不給 `--範圍` 時維持原本的行為（只擋測試），既有呼叫端不會壞掉。
+
+    **走 in-process `主程式` 不開子程序**：coverage 追不到子程序的行，
+    變異閘會判 `WRONG_TEST`（同一個坑今天踩過兩次）。
+    """
+
+    @staticmethod
+    def _會伸出範圍的CLI(工地: Path, 真的假CLI: Path, tmp_path: Path) -> Path:
+        """先去動一個範圍外的檔，再把工作交給真正的假 CLI。"""
+        腳本 = tmp_path / "會伸出範圍的假CLI"
+        腳本.write_text(
+            "#!/bin/sh\n"
+            f'echo "# 手伸到範圍外了" >> "{工地 / "src" / "乙.py"}"\n'
+            f'exec "{真的假CLI}" "$@"\n',
+            encoding="utf-8",
+        )
+        腳本.chmod(0o755)
+        return 腳本
+
+    def _叫重構(self, *參數: str, 在: Path, 狀態: Path, monkeypatch: pytest.MonkeyPatch) -> int:
+        monkeypatch.setenv("XDG_STATE_HOME", str(狀態))
+        monkeypatch.chdir(在)
+        return 主程式(["重構", *參數])
+
+    def test_動到範圍外要回護欄碼(
+        self, 工地: Path, tmp_path: Path, 做假CLI: 做假CLI型, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (工地 / "src" / "乙.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+        假, _ = 做假CLI("claude")
+        壞的 = self._會伸出範圍的CLI(工地, 假, tmp_path)
+
+        碼 = self._叫重構(
+            "--用",
+            "claude",
+            "--執行檔",
+            str(壞的),
+            "--可編輯",
+            "--範圍",
+            "src/甲.py",
+            "把甲整理乾淨",
+            在=工地,
+            狀態=tmp_path / "state",
+            monkeypatch=monkeypatch,
+        )
+
+        assert 碼 == 護欄碼, "動到 src/乙.py 卻沒回護欄碼"
+
+    def test_只動範圍內就放行(
+        self, 工地: Path, tmp_path: Path, 做假CLI: 做假CLI型, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**不能擋到正常用法**——擋過頭的閘會被繞過，繞過一次就等於不存在。"""
+        假, _ = 做假CLI("claude")
+
+        碼 = self._叫重構(
+            "--用",
+            "claude",
+            "--執行檔",
+            str(假),
+            "--可編輯",
+            "--範圍",
+            "src",
+            "把甲整理乾淨",
+            在=工地,
+            狀態=tmp_path / "state",
+            monkeypatch=monkeypatch,
+        )
+
+        assert 碼 == 0
+
+    def test_不給範圍時維持原本的行為(
+        self, 工地: Path, tmp_path: Path, 做假CLI: 做假CLI型, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """既有呼叫端一個都不准壞掉。"""
+        (工地 / "src" / "乙.py").write_text("def g():\n    return 2\n", encoding="utf-8")
+        假, _ = 做假CLI("claude")
+        壞的 = self._會伸出範圍的CLI(工地, 假, tmp_path)
+
+        碼 = self._叫重構(
+            "--用",
+            "claude",
+            "--執行檔",
+            str(壞的),
+            "--可編輯",
+            "把甲整理乾淨",
+            在=工地,
+            狀態=tmp_path / "state",
+            monkeypatch=monkeypatch,
+        )
+
+        assert 碼 == 0, "沒給 --範圍 卻擋了，既有呼叫端會壞"

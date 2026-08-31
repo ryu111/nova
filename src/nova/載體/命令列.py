@@ -95,7 +95,7 @@ from nova.載體.角色 import 組提示
 from nova.載體.語言 import 找非繁體字
 from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.遮罩 import 遮罩
-from nova.載體.重構護欄 import 動到測試了嗎, 拍快照
+from nova.載體.重構護欄 import 動到測試了嗎, 拍全樹快照, 拍快照, 跑出範圍了嗎
 from nova.載體.閘 import 跑閘
 from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.階段記帳 import 記帳執行器
@@ -484,16 +484,29 @@ def _子命令_重構(參數: argparse.Namespace) -> int:
     | 結果未知不重跑 | 終局映射回 3，腳本照規矩不准重跑 |
     """
     根 = _專案脈絡(參數).根目錄
-    前 = 拍快照(根)
+    # **給了 `--範圍` 才拍全樹。** 範圍護欄看不到 `src/` 就等於沒有護欄；
+    # 但沒給範圍時拍全樹是白付錢——`動到測試了嗎` 只看 `tests/`。
+    拍 = 拍全樹快照 if 參數.範圍 else 拍快照
+    前 = 拍(根)
     碼 = _子命令_問(參數, 角色=角色提示.重構員)
-    動了 = 動到測試了嗎(前, 拍快照(根))
-    if not 動了:
-        return 碼
-    print("護欄：重構員動到測試檔了，這一步不算數。", file=sys.stderr)
-    for 檔 in 動了:
-        print(f"  {檔}", file=sys.stderr)
-    print("測試是驗收機制，動它等於自己給自己發及格證。要改測試請走測試員。", file=sys.stderr)
-    return 護欄碼
+    後 = 拍(根)
+    動了 = 動到測試了嗎(前, 後)
+    if 動了:
+        print("護欄：重構員動到測試檔了，這一步不算數。", file=sys.stderr)
+        for 檔 in 動了:
+            print(f"  {檔}", file=sys.stderr)
+        print("測試是驗收機制，動它等於自己給自己發及格證。要改測試請走測試員。", file=sys.stderr)
+        return 護欄碼
+    # **不給 `--範圍` 就不檢查**——既有呼叫端一個都不准壞掉。
+    出界 = 跑出範圍了嗎(前, 後, tuple(參數.範圍)) if 參數.範圍 else ()
+    if 出界:
+        這次的範圍 = ", ".join(參數.範圍)
+        print(f"護欄：重構員動到範圍外的檔了（這次只准動 {這次的範圍}）。", file=sys.stderr)
+        for 檔 in 出界:
+            print(f"  {檔}", file=sys.stderr)
+        print("範圍是呼叫端指名的，撐開它要由人決定，不是模型順手。", file=sys.stderr)
+        return 護欄碼
+    return 碼
 
 
 def _挑腦(參數: argparse.Namespace) -> tuple[str, str | None, str | None] | None:
