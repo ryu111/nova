@@ -43,6 +43,7 @@ from nova.載體.判準 import 判準指令, 建判準, 建重構判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.專案脈絡 import 專案執行脈絡, 建專案執行脈絡
+from nova.載體.工作區 import 判定工作區, 拍工作區快照
 from nova.載體.已處理 import 列出成果, 歸檔
 from nova.載體.帳本 import (
     不記帳本,
@@ -93,7 +94,7 @@ from nova.載體.線 import 執行線
 from nova.載體.自己動手 import 在管轄範圍嗎, 擋的話要說什麼, 記下繞過, 說得出理由了嗎
 from nova.載體.規則表 import 建規則表
 from nova.載體.規則表 import 版本 as 規則表版本
-from nova.載體.角色 import 組提示
+from nova.載體.角色 import 固定提示角色, 組提示
 from nova.載體.語言 import 找非繁體字
 from nova.載體.跑驗收 import 跑驗收, 驗收結果
 from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, 進度執行器
@@ -106,8 +107,7 @@ from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 超支了嗎
 from nova.迴圈 import 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
-from nova.迴圈.角色工廠 import TDD角色藍圖 as TDD角色藍圖資料
-from nova.迴圈.角色工廠 import 建角色表, 角色藍圖
+from nova.迴圈.角色工廠 import 建TDD角色藍圖, 建角色表, 角色藍圖
 
 放行, 閘紅, 阻擋 = 0, 1, 2
 #: 護欄生效：**按設計停了，不是壞了。** 外圈看到這個碼不准去「修」——
@@ -787,7 +787,7 @@ def _階段的派法(階段: 階段代碼) -> 派法:
 def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
     """把命令列的腦來源與逾時套到 TDD 藍圖，保留派工表的模型設定。"""
     結果: list[角色藍圖] = []
-    for 藍圖 in TDD角色藍圖資料:
+    for 藍圖 in 建TDD角色藍圖(怎麼派):
         指名 = 參數.審查用 if 藍圖.識別碼 == 階段代碼.審查.value else 參數.用
         if 指名:
             結果.append(
@@ -826,7 +826,7 @@ def _建TDD角色表(
             單次最多token=單次最多token,
         )
 
-    return cast(Mapping[階段代碼, 角色], 建角色表(藍圖們, 建腦=建腦))
+    return cast(Mapping[階段代碼, 角色], 建角色表(藍圖們, 建腦=建腦, 組角色=固定提示角色))
 
 
 @contextmanager
@@ -1107,6 +1107,8 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                     單次最多token=參數.單次最多token,
                 ),
                 起點=階段代碼(參數.起點),
+                拍快照=拍工作區快照,
+                判定工作區=判定工作區,
             )
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)

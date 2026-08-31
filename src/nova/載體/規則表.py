@@ -15,6 +15,7 @@ from functools import partial
 from pathlib import Path
 
 from nova.載體.serial佔比 import 檢查serial佔比
+from nova.載體.架構閘 import 檢查架構落點
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
 from nova.載體.程序 import 具名啟動
@@ -202,6 +203,14 @@ def 建規則表(根目錄: Path) -> list[規則]:
             閘點=提交與CI,
             負責層="載體",
             檢查=lambda: 檢查繁體中文(根目錄),
+            階段=靜態,
+        ),
+        規則(
+            代碼="layer-boundaries",
+            名稱="三層落點（契約 ← 迴圈 ← 載體，箭頭不准反過來）",
+            閘點=提交與CI,
+            負責層="載體",
+            檢查=lambda: 檢查架構落點(根目錄),
             階段=靜態,
         ),
         規則(

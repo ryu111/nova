@@ -146,3 +146,24 @@ def test_驗收那四把已經搬到登記們而且沒留兩份() -> None:
     assert len(登記模組.登記) == len(登記模組._這個檔裡的) + len(收集到的), (
         "全部應等於「本檔的 + 登記們/ 的」——對不上代表收集漏了或重了"
     )
+
+
+def test_package標記不算登記模組(tmp_path: Path) -> None:
+    """`__init__.py` 是 python 的 package 標記，不是登記模組。
+
+    **不排除的話收集會當場炸**：它沒有 `登記` 屬性，而「沒有 `登記` 就報錯」
+    是這個機制刻意要有的 fail-closed——那條規則沒錯，錯的是把標記也當模組。
+
+    實測 2026-08-31：別條線為了自己匯流建了 `登記們/__init__.py`，
+    收集當場報 `登記們/__init__.py 沒有 登記；漏收不報錯就是假綠`。
+    """
+    (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "甲.py").write_text(
+        "from tests.負控.登記 import 變異, 替換一次\n"
+        "from pathlib import Path\n"
+        "登記 = (變異(識別='甲', 目標檔=Path('x'), "
+        "操作=替換一次('a', 'b'), 該紅=('t',), 最多秒=1.0),)\n",
+        encoding="utf-8",
+    )
+    收到 = 登記模組._收集(tmp_path)
+    assert [一筆.識別 for 一筆 in 收到] == ["甲"]

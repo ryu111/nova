@@ -1460,6 +1460,14 @@ def _擋掉重複識別(每一筆帶來源: Iterable[tuple[變異, str]]) -> tup
     return tuple(收到)
 
 
+#: 這幾個檔名不是登記模組，是 python 的 package 標記。
+#: **不排除的話收集會當場炸**：`__init__.py` 沒有 `登記` 屬性，
+#: 而「沒有 `登記` 就報錯」正是這個機制刻意要有的 fail-closed
+#: ——那條規則本身沒錯，錯的是把 package 標記也當成登記模組。
+#: （實測 2026-08-31：別條線為了自己匯流建了 `__init__.py`，收集當場報錯。）
+_不是登記模組 = frozenset({"__init__.py"})
+
+
 def _收集(目錄: Path) -> tuple[變異, ...]:
     """收集 `目錄` 底下每個模組的 `登記`：按檔名排序，再按檔內順序。
 
@@ -1470,6 +1478,7 @@ def _收集(目錄: Path) -> tuple[變異, ...]:
     return _擋掉重複識別(
         (一筆, 檔.name)
         for 檔 in sorted(目錄.glob("*.py"), key=lambda 檔: 檔.name)
+        if 檔.name not in _不是登記模組
         for 一筆 in _載入登記模組(檔)
     )
 
