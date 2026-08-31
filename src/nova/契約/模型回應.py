@@ -92,6 +92,9 @@ class 用量:
     輸入token: int
     輸出token: int
     快取讀取token: int | None = None
+    #: **真的付費的 input，而且按 1.25× 計價。**不是快取讀取的子集——
+    #: 同一次呼叫兩欄都有值。只有 claude 給。
+    快取建立token: int | None = None
     思考token: int | None = None
     成本美金: float | None = None
 

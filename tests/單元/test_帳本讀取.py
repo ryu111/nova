@@ -336,3 +336,50 @@ class Test快取讀取的token也要算:
         """agy 與 codex 不回報快取欄位——不能因此變成 0 或炸掉。"""
         摘 = 收斂([*呼叫(1, "agy", 入=168561, 出=12603)])
         assert 摘.總token == 168561 + 12603
+
+
+#: 實錄 `claude_ok.json` 的那一次：輸入 10、讀取 0、建立 16,668。
+_claude一次 = {
+    "input_tokens": 10,
+    "output_tokens": 214,
+    "cache_read_tokens": 0,
+    "cache_creation_tokens": 16668,
+}
+
+
+class Test快取建立要進總帳:
+    """`cache_creation_tokens` 是**真的付費的 input**，而且按 1.25× 計費。
+
+    它不是 `cache_read_tokens` 的子集——同一次呼叫兩欄都有值（實錄
+    `claude_ok2.json`：建立 8,094、讀取 8,570）。漏掉它，所有「哪一家比較貴」
+    的結論都建立在系統性偏低的數字上。
+    """
+
+    @staticmethod
+    def _一次(編號: int, 家: str, *, 量: dict[str, int]) -> list[str]:
+        return [
+            事件行(run="r", seq=編號 * 2 - 1, ts="t1", event="call_started", call=編號, family=家),
+            事件行(
+                run="r",
+                seq=編號 * 2,
+                ts="t2",
+                event="call_finished",
+                call=編號,
+                family=家,
+                outcome="success",
+                **量,
+            ),
+        ]
+
+    def test_讀得回來(self) -> None:
+        果 = 收斂(self._一次(1, "claude", 量=_claude一次))
+        (家,) = 果.各家
+        assert 家.快取建立token == 16668
+
+    def test_進總token(self) -> None:
+        """10 ＋ 214 ＋ 0 ＋ 16668。漏掉建立的話只會是 224。"""
+        果 = 收斂(self._一次(1, "claude", 量=_claude一次))
+        assert 果.總token == 16892
+
+    def test_沒回報的家是0不是缺值(self) -> None:
+        assert 收斂(呼叫(1, "codex")).各家[0].快取建立token == 0

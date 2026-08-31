@@ -142,6 +142,7 @@ def _加總用量(花過: Sequence[用量]) -> 用量:
         輸入token=sum(用.輸入token for 用 in 花過),
         輸出token=sum(用.輸出token for 用 in 花過),
         快取讀取token=全有才加("快取讀取token"),
+        快取建立token=全有才加("快取建立token"),
         思考token=全有才加("思考token"),
         成本美金=None if any(本 is None for 本 in 成本們) else sum(成本們),  # type: ignore[arg-type]
     )
