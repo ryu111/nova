@@ -88,6 +88,11 @@ class 工具箱:
     _寫過的: list[str] = field(default_factory=list)
 
     @property
+    def 寫過檔了嗎(self) -> bool:
+        """催收尾的觸發條件——**已經在寫的就別吵它**。"""
+        return bool(self._寫過的)
+
+    @property
     def _可以寫(self) -> bool:
         return self.可以做什麼 is not 權限.唯讀
 

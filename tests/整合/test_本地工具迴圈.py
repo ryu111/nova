@@ -207,3 +207,49 @@ class Test工具出錯不准讓整輪垮掉:
         工具回覆 = [訊 for 訊 in 端.收到[1]["messages"] if 訊.get("role") == "tool"]
         assert "工作目錄" in 工具回覆[0]["content"]
         assert "root:" not in 工具回覆[0]["content"], "真的讀到了 /etc/passwd"
+
+
+class Test回合快用完要催收尾:
+    """帳本挖出來的病：讀完該讀的之後，模型不知道該收尾，開始用 grep 填時間。
+
+    兩個 run 共 28 次工具呼叫、**`write_file` 零次**，最後全部撞上 8 回合上限
+    （`docs/負控紀錄.md` 的「規則被上下文淹掉這個診斷是錯的」一節）。
+    grep 的對象到後面甚至是模型自己幻想出來的函式名。
+
+    **催收尾是迴圈的責任，不是提示的責任**——提示裡的是懇求，
+    包住執行者的程式碼裡才是保證。
+    """
+
+    def test_回合快用完時要把剩幾回合講出來(self, 工作區: Path) -> None:
+        """腳本只有一份＝模型永遠在要工具，一路撞到上限。"""
+        端 = 假端點([回工具("grep", {"pattern": "找不到的東西"})])
+        with 端 as 網址:
+            _問(網址, 工作區)
+        催過的 = [
+            訊
+            for 請求 in 端.收到
+            for 訊 in 請求["messages"]
+            if 訊.get("role") == "user" and "回合" in str(訊.get("content", ""))
+        ]
+        assert 催過的, "撞到上限都沒催過一次收尾"
+
+    def test_一開始不催(self, 工作區: Path) -> None:
+        """**前幾回合是正常探索**，催了只會佔 context 又打斷它。"""
+        端 = 假端點([回工具("read_file", {"path": "檔.txt"}), 回文字("好")])
+        with 端 as 網址:
+            _問(網址, 工作區)
+        第一次 = 端.收到[0]["messages"]
+        assert len(第一次) == 1, f"第一回合就多塞了東西：{第一次}"
+
+    def test_已經寫過檔就不催(self, 工作區: Path) -> None:
+        """它在做正事，催是噪音。催的觸發條件是**一個檔都還沒寫**。"""
+        端 = 假端點([回工具("write_file", {"path": "新的.txt", "content": "寫了"})])
+        with 端 as 網址:
+            _問(網址, 工作區, 可以做什麼=權限.可編輯)
+        催過的 = [
+            訊
+            for 請求 in 端.收到
+            for 訊 in 請求["messages"]
+            if 訊.get("role") == "user" and "回合" in str(訊.get("content", ""))
+        ]
+        assert not 催過的, f"寫過檔還在催：{催過的}"
