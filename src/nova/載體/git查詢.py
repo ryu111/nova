@@ -54,3 +54,16 @@ def ref裡的檔案(根目錄: Path, ref: str) -> list[str]:
     """
     結果 = 跑git(根目錄, "ls-tree", "-r", "--name-only", "-z", ref)
     return [路徑 for 路徑 in 結果.stdout.split("\0") if 路徑]
+
+
+def 目前commit(根目錄: Path) -> str | None:
+    """這個工作樹現在停在哪個 commit，落在成果帳的 `rollback_point`。
+
+    **不是 repo（或還沒有任何 commit）就回 `None`，不回空字串。**
+    nova 在別人的目錄裡也跑得起來，那時候「該退回哪個 commit」根本不成立
+    ——那跟「有 commit 但沒記到」是兩件事，混在一起的話帳就答不了。
+
+    回完整 sha 不回短的：短 sha 在 repo 長大之後會撞，而帳要留很久。
+    """
+    結果 = 跑git(根目錄, "rev-parse", "HEAD")
+    return 結果.stdout.strip() if 結果.returncode == 0 else None

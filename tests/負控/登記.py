@@ -1073,4 +1073,34 @@ class 變異:
         該紅=("tests/單元/test_閘紅成票.py::test_待處理已有同一條閘紅票不准重複落成",),
         最多秒=2.0,
     ),
+    #: 這兩刀砍在契約與純函式，不砍在 `_歸檔成果` 的接線——**接線那兩支走子程序，
+    #: coverage 追不到那幾行，runner 會判 `WRONG_TEST` 而不是 `KILLED`**。
+    #: 接線的負控是手做的，記在 `docs/負控紀錄.md`。
+    #: **刀砍在 `成果轉字典` 的 body，不砍 `_欄位對照` 那一列**：那是模組層級的資料，
+    #: import 時就跑完了，per-test 的 coverage context 抓不到，runner 會判 `WRONG_TEST`。
+    變異(
+        識別="成果帳漏掉規則表版本這一欄",
+        目標檔=Path("src/nova/契約/成果.py"),
+        操作=替換一次(
+            "    return {外: getattr(一筆, 內) for 內, 外, _ in _欄位對照 "
+            "if getattr(一筆, 內) is not None}",
+            "    return {\n"
+            "        外: getattr(一筆, 內)\n"
+            "        for 內, 外, _ in _欄位對照\n"
+            '        if getattr(一筆, 內) is not None and 外 != "policy_version"\n'
+            "    }",
+        ),
+        該紅=("tests/單元/test_成果.py::test_帳上答得出當時的規則表與該退回哪個commit",),
+        最多秒=2.0,
+    ),
+    變異(
+        識別="規則表版本不跟著內容變",
+        目標檔=Path("src/nova/載體/規則表.py"),
+        操作=替換一次(
+            "    return hashlib.sha256(檔.read_bytes()).hexdigest()[:16]",
+            '    return "0" * 16',
+        ),
+        該紅=("tests/單元/test_規則表.py::test_版本跟著規則表的內容變",),
+        最多秒=2.0,
+    ),
 )
