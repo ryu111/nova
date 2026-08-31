@@ -78,6 +78,15 @@ class 事件:
     失敗代碼: str | None = None
     輸入token: int | None = None
     輸出token: int | None = None
+    #: **claude 把大部分 input 算在這裡，`輸入token` 只記非快取的那一點點。**
+    #:
+    #: 實測 2026-08-31：claude 跑一階 `輸入token=12`、成本 US$0.2152。
+    #: 空目錄跑一句話 `輸入token=2`、快取讀取 14,206、快取建立 13,851——
+    #: 固定成本跟 agy 的 13,720 幾乎一樣，只是算在別的欄位。
+    #:
+    #: 少了這一欄，claude 的量在帳本裡系統性歸零，而「claude 比較便宜」
+    #: 這個派工結論就建立在一個沒被量到的數字上。
+    快取讀取token: int | None = None
     #: 只有 claude 給得出來。**不准為了三家對稱而自己估算**——
     #: 猜出來的成本比沒有成本更危險。給不出來就不落盤。
     成本美金: float | None = None
@@ -123,6 +132,7 @@ class 事件:
     "失敗代碼": "failure_code",
     "輸入token": "input_tokens",
     "輸出token": "output_tokens",
+    "快取讀取token": "cache_read_tokens",
     "成本美金": "cost_usd",
     "耗時毫秒": "duration_ms",
     "判準綠": "gate_green",
@@ -160,6 +170,8 @@ class 一家的帳:
     未知: int
     輸入token: int
     輸出token: int
+    #: 沒回報快取的家（agy、codex）是 0，不是缺值——加總時不必特判。
+    快取讀取token: int = 0
     成本美金: float | None = None
 
 

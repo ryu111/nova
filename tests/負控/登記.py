@@ -499,6 +499,18 @@ class 變異:
         最多秒=2.0,
     ),
     變異(
+        識別="總計不算快取讀取token",
+        目標檔=Path("src/nova/載體/帳本讀取.py"),
+        操作=替換一次(
+            "總token=sum(家.輸入token + 家.輸出token + 家.快取讀取token for 家 in 各家),",
+            "總token=sum(家.輸入token + 家.輸出token for 家 in 各家),",
+        ),
+        該紅=(
+            "tests/單元/test_帳本讀取.py::Test快取讀取的token也要算::test_快取讀取的token算進總計",
+        ),
+        最多秒=2.0,
+    ),
+    變異(
         識別="帳本只算success收場的token",
         目標檔=Path("src/nova/載體/帳本讀取.py"),
         操作=替換一次(
