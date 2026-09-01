@@ -1,5 +1,6 @@
 """ruff 豁免的登記表與純函式比對。"""
 
+import re
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -41,6 +42,18 @@ from typing import cast
         "per-file-ignores:tests/**:PLR1714",
         "per-file-ignores:tests/**:PLC0415",
         "per-file-ignores:tests/**:PLR0402",
+    }
+)
+
+#: 豁免集合大小的地板上限；加豁免時必須同時修改此常數。
+ruff豁免數量上限: int = 32
+
+#: 這是 pyproject.toml 現況的 pytest ini_options 鍵登記。
+期望pytest設定鍵 = frozenset(
+    {
+        "testpaths",
+        "addopts",
+        "markers",
     }
 )
 
@@ -164,3 +177,60 @@ def 檢查ruff豁免(根目錄: Path) -> tuple[bool, str]:
         return False, f"讀取 ruff 豁免失敗：{錯}"
 
     return 判定ruff豁免(實際)
+
+
+#: ruff 認可的整檔關閉寫法；空白可有可無，`ruff` 與 `flake8` 兩種前綴都算。
+_整檔noqa樣式 = re.compile(
+    r"^[ \t]*#\s*(?:ruff|flake8)\s*:\s*noqa(?:\s*:\s*(?P<規則>\S.*?))?\s*$",
+)
+
+
+def 找出整檔noqa(內容: str) -> tuple[tuple[int, str], ...]:
+    """找出整檔關閉檢查的註解，回傳「第幾行、關掉哪一條」。
+
+    沒指定規則就是關掉全部，記成 `全部`。行尾豁免（`x  # noqa: F401`）是正當寫法，
+    不在此列。
+    """
+    命中: list[tuple[int, str]] = []
+    for 行號, 行 in enumerate(內容.splitlines(), start=1):
+        比對 = _整檔noqa樣式.match(行)
+        if 比對 is not None:
+            命中.append((行號, 比對.group("規則") or "全部"))
+    return tuple(命中)
+
+
+def 解析pytest設定鍵(內容: str) -> frozenset[str]:
+    """從 pyproject.toml 內容解析出 pytest ini_options 鍵集合。"""
+    根 = cast(Mapping[str, object], tomllib.loads(內容))
+    tool = _表或空(根, "tool")
+    pytest = _表或空(tool, "pytest")
+    ini_options = _表或空(pytest, "ini_options")
+    return frozenset(ini_options.keys())
+
+
+def 判定pytest設定鍵(
+    實際: frozenset[str], 期望: frozenset[str] = 期望pytest設定鍵
+) -> tuple[bool, str]:
+    """判定 pytest 設定鍵集合是否與登記表一致。"""
+    多了 = tuple(sorted(實際 - 期望))
+    少了 = tuple(sorted(期望 - 實際))
+    if not 多了 and not 少了:
+        return True, "pytest 設定鍵符合登記表"
+    訊息 = (
+        "pytest 設定鍵與登記表不一致。\n"
+        f"多了：{'、'.join(多了) or '無'}\n"
+        f"少了：{'、'.join(少了) or '無'}\n"
+        "加 pytest 設定鍵不是修測試。要加，先改登記表並說明理由"
+    )
+    return False, 訊息
+
+
+def 檢查pytest設定(根目錄: Path) -> tuple[bool, str]:
+    """檢查專案的 pytest 設定鍵是否與 Python 登記表一致。"""
+    try:
+        內容 = (根目錄 / "pyproject.toml").read_text(encoding="utf-8")
+        實際 = 解析pytest設定鍵(內容)
+    except (OSError, tomllib.TOMLDecodeError, TypeError, ValueError) as 錯:
+        return False, f"讀取 pytest 設定失敗：{錯}"
+
+    return 判定pytest設定鍵(實際)

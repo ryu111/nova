@@ -107,3 +107,29 @@ def test_單元層不准fork子程序(專案根: Path) -> None:
         if 命中:
             髒的.append(f"{檔.relative_to(專案根)}：{'、'.join(命中)}")
     assert not 髒的, "這幾支會 fork 子程序，屬於整合層不是單元層：\n" + "\n".join(髒的)
+
+
+def test_不准整檔關閉ruff檢查(專案根: Path) -> None:
+    """整檔 `# ruff: noqa` 等於對整個檔案關閉檢查，沒有任何正當用途。
+
+    要豁免就寫在那一行的行尾（`# noqa: RULE`）。
+    掃描 src/ 與 tests/ 的所有 .py 檔，只要出現整檔 noqa 就擋下，訊息指名檔案與規則。
+    """
+    違規: list[str] = []
+    for 頂層 in ("src", "tests"):
+        for 檔 in sorted((專案根 / 頂層).rglob("*.py")):
+            for 行號, 行 in enumerate(檔.read_text(encoding="utf-8").splitlines(), 1):
+                修剪 = 行.strip()
+                if 修剪.startswith(("# ruff: noqa", "# flake8: noqa")):
+                    違規.append(f"{檔.relative_to(專案根)}:第 {行號} 行（{修剪}）")
+    assert not 違規, (
+        "發現整檔關閉 ruff 檢查（要豁免請寫在該行的行尾，不准整檔關閉）：\n" + "\n".join(違規)
+    )
+
+
+def test_pytest設定只准已登記的鍵(專案根: Path) -> None:
+    """pyproject.toml 裡的 pytest 設定鍵必須登記，未登記鍵要當場擋下。"""
+    from nova.載體.豁免登記 import 檢查pytest設定
+
+    通過, 訊息 = 檢查pytest設定(專案根)
+    assert 通過 is True, 訊息

@@ -1,7 +1,5 @@
 """負控 runner 的執行驗收與自身負控。"""
 
-# ruff: noqa: I001
-
 from pathlib import Path
 
 import pytest

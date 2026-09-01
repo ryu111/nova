@@ -127,3 +127,79 @@ extend-per-file-ignores = {"src/**" = ["T201"]}
             "extend-per-file-ignores:src/**:T201",
         }
     )
+
+
+def test_豁免清單只准變短不准變長() -> None:
+    """豁免集合的大小必須寫死地板上限，加豁免時必須同時修改上限常數以在 diff 留下紀錄。"""
+    from nova.載體.豁免登記 import ruff豁免數量上限
+
+    assert len(期望ruff豁免) <= ruff豁免數量上限
+    assert ruff豁免數量上限 == 32, f"現有豁免只有 32 條，地板上限不准偷加：{ruff豁免數量上限}"
+
+
+def test_pytest設定鍵未登記時指名多了哪個鍵() -> None:
+    """pytest ini_options 的鍵集合必須登記，多一個鍵要指名並擋下。"""
+    from nova.載體.豁免登記 import 判定pytest設定鍵, 期望pytest設定鍵
+
+    實際 = 期望pytest設定鍵 | frozenset(
+        {"disable_test_id_escaping_and_forfeit_all_rights_to_community_support"}
+    )
+    通過, 訊息 = 判定pytest設定鍵(實際)
+
+    assert 通過 is False
+    assert "多了：disable_test_id_escaping_and_forfeit_all_rights_to_community_support" in 訊息
+
+
+def test_pytest設定鍵符合登記表時是綠的() -> None:
+    """pytest ini_options 的鍵集合與登記表一致時判定為通過。"""
+    from nova.載體.豁免登記 import 判定pytest設定鍵, 期望pytest設定鍵
+
+    通過, 訊息 = 判定pytest設定鍵(期望pytest設定鍵)
+
+    assert 通過 is True
+    assert 訊息 == "pytest 設定鍵符合登記表"
+
+
+def test_解析pytest設定鍵() -> None:
+    """從 pyproject.toml 內容解析出 pytest ini_options 鍵集合。"""
+    from nova.載體.豁免登記 import 解析pytest設定鍵
+
+    設定 = """
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+"""
+    assert 解析pytest設定鍵(設定) == frozenset({"testpaths", "addopts"})
+
+
+#: 實測 ruff 0.x（`ruff check --isolated --select F401`）：這幾種寫法**都**真的
+#: 讓整個檔案免檢查，但 `tests/驗收/test_專案骨架.py::test_不准整檔關閉ruff檢查`
+#: 只認 `# ruff: noqa` 與 `# flake8: noqa` 這兩個開頭，其餘全部漏掉。
+#: 漏掉就等於留了一條「把門檻調低來換綠」的暗門。
+_ruff真的認可的整檔關閉寫法 = (
+    "#ruff:noqa",
+    "#  ruff : noqa",
+    "# flake8:noqa",
+    "\t#ruff: noqa",
+)
+
+
+def test_整檔noqa的空白變體也要被抓到並指名規則() -> None:
+    """整檔關閉的偵測要跟 ruff 認可的寫法一樣寬，行尾豁免則不准誤報。
+
+    `# ruff: noqa` 是對整個檔案關掉檢查，沒有正當用途；但少一個空格寫成
+    `#ruff:noqa` 一樣有效，只擋前者等於沒擋。偵測要回傳「第幾行、關掉哪一條」，
+    沒指定規則就是關掉全部。
+    """
+    from nova.載體.豁免登記 import 找出整檔noqa
+
+    for 寫法 in _ruff真的認可的整檔關閉寫法:
+        assert 找出整檔noqa(f"{寫法}\nimport os\n") == ((1, "全部"),), (
+            f"ruff 真的會認 {寫法!r}，偵測卻放它過去"
+        )
+
+    assert 找出整檔noqa('"""說明。"""\n\n# ruff: noqa: SLF001\n') == ((3, "SLF001"),), (
+        "整檔關閉不一定在第一行，且要指名關掉的是哪一條規則"
+    )
+
+    assert 找出整檔noqa("import os  # noqa: F401\n") == (), "行尾豁免是正當寫法，不准被當成整檔關閉"
