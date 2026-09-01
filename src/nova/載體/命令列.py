@@ -49,6 +49,7 @@ from nova.契約.退出碼 import (
 from nova.載體.git查詢 import 目前commit
 from nova.載體.判準 import 判準指令, 可作指定pytest目標, 建判準, 建重構判準, 建預設判準
 from nova.載體.剖析器 import 建剖析器, 處理型
+from nova.載體.命令 import 收
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.專案脈絡 import 專案執行脈絡, 建專案執行脈絡
 from nova.載體.工作區 import 判定工作區, 拍工作區快照
@@ -1555,77 +1556,6 @@ def _子命令_收件(參數: argparse.Namespace) -> int:
     return 放行
 
 
-def _跑收尾指令(根目錄: Path, *指令: str, 逾時秒: float | None = None) -> tuple[int, str]:
-    """在專案裡跑一個收尾指令，回傳 nova 退出碼與輸出。"""
-    try:
-        結果 = subprocess.run(  # noqa: S603 —— 收尾指令由這個節點固定組出
-            list(指令),
-            cwd=根目錄,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=逾時秒,
-        )
-    except subprocess.TimeoutExpired:
-        return 未知, f"指令等不到結果（{' '.join(指令)}）"
-    except OSError as 錯:
-        return 閘紅, f"指令跑不起來（{' '.join(指令)}）：{錯}"
-    輸出 = (結果.stdout + 結果.stderr).strip()
-    if 結果.returncode:
-        return 閘紅, 輸出 or f"指令退出碼 {結果.returncode}：{' '.join(指令)}"
-    return 放行, 輸出
-
-
-def _跑並印收尾指令(根目錄: Path, *指令: str, 逾時秒: float | None = None) -> int:
-    """跑一個收尾指令並印出它的輸出。"""
-    碼, 輸出 = _跑收尾指令(根目錄, *指令, 逾時秒=逾時秒)
-    if 輸出:
-        print(輸出)
-    return 碼
-
-
-def _收尾閘(參數: argparse.Namespace, 根目錄: Path) -> int:
-    """只跑提交閘；閘紅時不碰 git 與 gh。"""
-    try:
-        with _開帳(參數) as 帳:
-            結果表 = 跑閘("提交", 建規則表(根目錄), 提前停止=True, 帳=帳)
-    except (OSError, ValueError) as 錯:
-        print(str(錯), file=sys.stderr)
-        return 閘紅
-    return _印結果(結果表)
-
-
-def _子命令_收(參數: argparse.Namespace) -> int:
-    """確定性收尾：閘 → commit → push → PR → required CI → merge。"""
-    根 = _專案脈絡(參數).根目錄
-    if (碼 := _收尾閘(參數, 根)) != 放行:
-        return 碼
-
-    訊息 = 參數.訊息 or " ".join(參數.提交訊息) or "nova：收尾"
-    for 指令 in (
-        ("git", "add", "-A"),
-        ("git", "commit", "-m", 訊息),
-        ("git", "push", "--set-upstream", "origin", "HEAD"),
-        ("gh", "pr", "create", "--title", 訊息, "--body", 訊息),
-    ):
-        if (碼 := _跑並印收尾指令(根, *指令)) != 放行:
-            return 碼
-
-    if (
-        碼 := _跑並印收尾指令(根, "gh", "pr", "checks", "--required", "--watch", 逾時秒=參數.等CI秒)
-    ) != 放行:
-        return 碼
-
-    return _跑並印收尾指令(
-        根,
-        "gh",
-        "pr",
-        "merge",
-        "--squash",
-        "--delete-branch",
-    )
-
-
 def _子命令_帳本(參數: argparse.Namespace) -> int:
     """看帳本：不給識別碼就列出最近幾次，給了就看那一次。
 
@@ -1804,7 +1734,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "狀態": _子命令_狀態,
     "線": 執行線,
     "收件": _子命令_收件,
-    "收": _子命令_收,
+    "收": 收.子命令_收,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
     "生圖": _子命令_生圖,
