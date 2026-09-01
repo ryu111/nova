@@ -10,6 +10,7 @@ from pathlib import Path
 from nova.契約.工作流 import 任務, 判準終局, 步驟結果, 階段代碼, 階段定義
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.契約.角色 import 呼叫選項, 語言模型, 預設選項
+from nova.載體.判準 import 可作指定pytest目標
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 固定提示角色
 from nova.迴圈.工作流 import 建TDD執行器
@@ -60,6 +61,7 @@ def _送給實作員的(軌跡: tuple[步驟結果, ...]) -> str:
     執行一步 = 建TDD執行器(
         角色表={階段代碼(識別碼): 角 for 識別碼, 角 in 依識別碼.items()},
         跑判準=lambda _: (判準終局.綠, "假判準"),
+        篩選指定測試=可作指定pytest目標,
     )
     定義: 階段定義 = 查階段(階段代碼.實作)
     執行一步(定義, 一件事, 軌跡)

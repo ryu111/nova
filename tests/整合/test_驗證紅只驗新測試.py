@@ -33,7 +33,7 @@ from nova.契約.工作流 import (
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
 from nova.契約.退出碼 import 未知
-from nova.載體.判準 import 建判準
+from nova.載體.判準 import 可作指定pytest目標, 建判準
 from nova.載體.命令列 import _工作流退出碼
 from nova.載體.工作區 import 拍工作區快照
 from nova.載體.重構護欄 import 動到測試了嗎
@@ -118,6 +118,7 @@ def _跑(工作區: Path, 新測試內容: str) -> 工作流結果:
         },
         跑判準=建判準(_真pytest),
         建指定測試判準=_只驗這幾支,
+        篩選指定測試=可作指定pytest目標,
     )
     return 跑工作流(
         任務(描述="讓 X 變成 Y", 工作目錄=工作區),
@@ -160,6 +161,7 @@ def _跑多檔(工作區: Path, 檔案們: Mapping[str, str]) -> 工作流結果
         },
         跑判準=建判準(_真pytest),
         建指定測試判準=_只驗這幾支,
+        篩選指定測試=可作指定pytest目標,
     )
     return 跑工作流(
         任務(描述="讓 X 變成 Y", 工作目錄=工作區),
