@@ -24,6 +24,7 @@
 ——而那次其實算得出來。
 """
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -142,17 +143,8 @@ class 本地腦:
         try:
             型號 = 選項.模型 or self._第一個型號(選項.逾時秒)
             return self._跑工具迴圈(提示, 型號=型號, 選項=選項)
-        except TimeoutError:
-            # **請求可能已經出門了。** 確定失敗會讓上層放心重跑，而那會重做副作用。
-            return _建立失敗回應(
-                f"{self.網址} 超過 {選項.逾時秒} 秒沒回應", 失敗代碼.逾時, 未知=True
-            )
-        except urllib.error.HTTPError as 錯:
-            return _建立失敗回應(f"{self.網址} 回 HTTP {錯.code}", 失敗代碼.上游, 結束碼=錯.code)
-        except (urllib.error.URLError, OSError) as 錯:
-            return _處理連線錯誤(self.網址, 選項.逾時秒, 錯)
-        except (ValueError, KeyError, IndexError) as 錯:
-            return _建立失敗回應(f"{self.網址} 的回應看不懂（{錯}）", 失敗代碼.上游)
+        except _問得到的錯 as 錯:
+            return _把例外收成回應(self.網址, 選項.逾時秒, 錯)
 
     def _跑工具迴圈(self, 提示: str, *, 型號: str, 選項: 呼叫選項) -> 回應:
         """送 tools → 收 tool_calls → 執行 → 塞回 messages → 再問，直到它收尾。
@@ -314,12 +306,58 @@ def _做不到的地方(選項: 呼叫選項) -> str | None:
     return None
 
 
-def _處理連線錯誤(網址: str, 逾時秒: float, 錯誤: urllib.error.URLError | OSError) -> 回應:
-    """把連線失敗分成「未安裝」與「結果未知」。"""
-    是逾時 = isinstance(錯誤, urllib.error.URLError) and isinstance(錯誤.reason, TimeoutError)
+#: `詢問` 問得到的所有錯。**列成一個名字**是為了讓「漏接一種就整條線崩掉」
+#: 這件事變得看得見——實測漏過 `http.client.IncompleteRead`（它是 `HTTPException`
+#: 不是 `OSError`），下場是工作流程序當場死掉：沒有退出碼語意、沒有帳本、沒有現場。
+_問得到的錯 = (
+    TimeoutError,
+    urllib.error.URLError,
+    OSError,
+    http.client.HTTPException,
+    ValueError,
+    KeyError,
+    IndexError,
+)
+
+
+def _出門了嗎(錯誤: BaseException) -> bool:
+    """請求有沒有真的送出去？**這是三值終局唯一的分界線。**
+
+    沒出門＝沒有副作用＝可以安全地換一顆腦重做（確定失敗）。
+    出門了＝工具迴圈可能已經改過檔案＝不准重做（結果未知）。
+
+    分界怎麼判：**`URLError` 是「連線建立不起來」**（拒絕、DNS 查不到、
+    socket 開不了），urllib 在還沒送出任何 byte 之前就包成它。
+    而**連上之後才斷**的那幾種根本不長成 `URLError`——
+    `ConnectionResetError` 是裸的 `OSError`、`IncompleteRead` 與
+    `RemoteDisconnected` 是 `http.client.HTTPException`。
+
+    所以不去嗅 `reason` 的字串（那個欄位有時是例外、有時是字串，靠不住），
+    只看**是不是 `URLError` 這一族**。逾時在上游已經先分掉了。
+    """
+    if isinstance(錯誤, ConnectionRefusedError | FileNotFoundError):
+        return False
+    return not isinstance(錯誤, urllib.error.URLError)
+
+
+def _把例外收成回應(網址: str, 逾時秒: float, 錯誤: BaseException) -> 回應:
+    """例外 → 結構化回應。**收成哪一種終局由「出門了沒」決定，不由例外的名字決定。**"""
+    if isinstance(錯誤, urllib.error.HTTPError):
+        return _建立失敗回應(f"{網址} 回 HTTP {錯誤.code}", 失敗代碼.上游, 結束碼=錯誤.code)
+    是逾時 = isinstance(錯誤, TimeoutError) or (
+        isinstance(錯誤, urllib.error.URLError) and isinstance(錯誤.reason, TimeoutError)
+    )
     if 是逾時:
         return _建立失敗回應(f"{網址} 超過 {逾時秒} 秒沒回應", 失敗代碼.逾時, 未知=True)
-    return _建立失敗回應(f"連不上 {網址}（{錯誤}）", 失敗代碼.未安裝)
+    if isinstance(錯誤, ValueError | KeyError | IndexError):
+        return _建立失敗回應(f"{網址} 的回應看不懂（{錯誤}）", 失敗代碼.上游)
+    if not _出門了嗎(錯誤):
+        return _建立失敗回應(f"連不上 {網址}（{錯誤}）", 失敗代碼.未安裝)
+    return _建立失敗回應(
+        f"{網址} 的連線中途斷掉（{type(錯誤).__name__}：{錯誤}）",
+        失敗代碼.上游,
+        未知=True,
+    )
 
 
 def _建立失敗回應(
