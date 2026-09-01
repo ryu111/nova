@@ -3,12 +3,19 @@
 from collections.abc import Mapping
 from typing import cast
 
+from nova.契約.工作流 import 階段代碼
 from nova.契約.模型回應 import 回應
 from nova.契約.派工 import 工作種類, 派法
 from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型, 預設選項
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 固定提示角色
-from nova.迴圈.角色工廠 import 建系統架構師角色藍圖, 建角色, 建角色表, 角色藍圖
+from nova.迴圈.角色工廠 import (
+    建系統架構師角色藍圖,
+    建角色,
+    建角色表,
+    角色藍圖,
+    這階算哪種工作,
+)
 from nova.迴圈.角色提示 import 實作員, 審查員, 測試員, 重構員
 
 
@@ -32,6 +39,18 @@ def _建假腦(派法: 派法) -> 語言模型:
 
 def _取角色(角色表: Mapping[str, 角色], 識別碼: str) -> 固定提示角色:
     return cast(固定提示角色, 角色表[識別碼])
+
+
+def test_實作與重構是建構而測試仍是例行() -> None:
+    """建構階段要讓本地先接手，測試階段維持原本的例行派法。"""
+    派法們 = {
+        階段: 怎麼派(這階算哪種工作(階段))
+        for 階段 in (階段代碼.測試, 階段代碼.實作, 階段代碼.重構)
+    }
+
+    assert 派法們[階段代碼.實作].腦們[0] == "local"
+    assert 派法們[階段代碼.重構].腦們[0] == "local"
+    assert 派法們[階段代碼.測試].腦們[0] != "local"
 
 
 def test_研究角色不改變_TDD_角色表() -> None:

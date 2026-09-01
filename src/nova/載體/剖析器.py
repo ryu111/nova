@@ -104,7 +104,7 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
         "--工作",
         default=None,
         choices=[種.value for 種 in 工作種類],
-        help="照派工表自動挑腦：routine 給 agy（分擔額度）、reasoning 給 sol",
+        help="照派工表自動挑腦：routine 給 agy、build 給 local、reasoning 給 sol",
     )
     剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
     剖析.add_argument(

@@ -50,6 +50,9 @@ src = ["src", "tests"]
 # docs/ 放的是外部規格原文，一個字都不准被格式化工具改寫
 extend-exclude = ["docs"]
 
+[tool.ruff.format]
+exclude = ["tests/單元/test_角色工廠.py"]
+
 [tool.ruff.lint]
 # KISS／SRP／YAGNI 能機械化的部分：複雜度、參數數量、分支數、死程式碼、未用參數。
 select = [
@@ -85,7 +88,7 @@ convention = "google"
 "tests/**" = [
     "S101", "D100", "D101", "D102", "D103", "D104",
     "FBT001", "FBT002", "FBT003", "PLR2004", "ANN401", "SLF001", "S603", "S607",
-    "PLR1714",
+    "PLR1714", "PLC0415", "PLR0402",
 ]
 
 [tool.mypy]
