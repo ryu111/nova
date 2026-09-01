@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 
 from nova.契約.退出碼 import 放行
+from nova.載體 import 缺口成票
+from nova.載體.健康度 import 健康度指標
 from nova.載體.命令列 import 主程式
 from nova.載體.收件 import (
     丟一件,
@@ -83,6 +85,21 @@ def _抄真的規格對照(專案: Path) -> None:
 
 def _跑收件(專案: Path) -> int:
     return 主程式(["--根目錄", str(專案), "收件"])
+
+
+@pytest.fixture(autouse=True)
+def _健康度當成全綠(monkeypatch: pytest.MonkeyPatch) -> None:
+    """這一份驗的是**挑點**，不是背壓。
+
+    背壓（健康度紅就不生推進票）由 `tests/整合/test_健康度紅不生推進票.py` 守。
+    這裡不把它餵成綠的話，每一支都會被背壓擋掉——而紅的原因會變成
+    「gh 在測試環境查不到」，跟這份要驗的東西無關。
+    """
+    monkeypatch.setattr(
+        缺口成票,
+        "查健康度指標",
+        lambda _: 健康度指標(main綠嗎=True, 卡住的線數=0, 沒收尾的件數=0, 壞掉的PR數=0),
+    )
 
 
 class Test空手時從規格對照挑下一個點:
