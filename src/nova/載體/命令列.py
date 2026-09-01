@@ -37,7 +37,7 @@ from nova.契約.成果 import 成果, 驗收紀錄
 from nova.契約.模型回應 import 回應, 終局
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.派工 import 工作種類, 派法
-from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型
+from nova.契約.角色 import 呼叫選項, 權限, 角色, 語言模型, 預設選項
 from nova.契約.觸發 import 喚醒來源
 from nova.契約.退出碼 import (
     _終局的退出碼,
@@ -118,7 +118,7 @@ from nova.載體.閘 import 跑閘
 from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.閘鎖 import 佔不到, 佔住
 from nova.載體.階段記帳 import 記帳執行器
-from nova.載體.預算 import 上限, 花了多少, 超支了嗎
+from nova.載體.預算 import 上限, 花了多少, 花費, 超支了嗎
 from nova.迴圈 import 角色工廠, 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 from nova.迴圈.角色工廠 import (
@@ -388,6 +388,30 @@ def _問的提示(參數: argparse.Namespace) -> str | int:
     return 提示
 
 
+def _這次的單次上限(參數: argparse.Namespace) -> int:
+    """這次 `問` 的單次呼叫上限。
+
+    只有這裡知道怎麼從 Namespace 讀它：命名 action 組出來的參數沒有這個旗標，
+    缺席時就退回契約的 `預設單次最多token`，**不在這裡另寫一個數字**。
+    """
+    上限: int = getattr(參數, "單次上限token", 預設單次最多token)
+    return 上限
+
+
+def _問的預算關卡(參數: argparse.Namespace) -> int | None:
+    """打出去之前兩個 scope 的預算檢查。**回 int ＝ 別打了，那個數字就是退出碼。**
+
+    單次上限在這裡只驗旗標本身合不合法（不合法是用法錯誤 2）——
+    這一次到底花了多少，要等呼叫回來才知道，那段在 `_單次上限腦`／`_用量說不清的判定`。
+    視窗累計則整段交給 `_預算先擋一下`（超支是護欄 4）。
+    """
+    單次上限 = _這次的單次上限(參數)
+    if 單次上限 <= 0:
+        print(f"--單次上限token 必須大於 0（給的是 {單次上限}）", file=sys.stderr)
+        return 阻擋
+    return _預算先擋一下(參數)
+
+
 def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     """打出去之前要檢查與準備的全部。**回 int ＝ 別打了，那個數字就是退出碼。**
 
@@ -403,7 +427,7 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
     沒憑證 = _秘密先交出去(_專案脈絡(參數).根目錄)
     if 沒憑證 is not None:
         return 沒憑證
-    擋 = _預算先擋一下(參數)
+    擋 = _問的預算關卡(參數)
     if 擋 is not None:
         return 擋
     可以做什麼 = _挑權限(參數)
@@ -479,6 +503,141 @@ def _丟到背景(參數: argparse.Namespace) -> int:
     return 放行
 
 
+#: `上限判定.範圍` 就這兩個值。**外圈靠這個字分辨退出碼 4 是誰擋的**，
+#: 所以它是介面的一部分，不是隨手寫的字面值。
+_視窗範圍 = "視窗累計"
+_單次範圍 = "單次呼叫"
+
+
+def _上限判定證據(*, 範圍: str, 實際token: int | None, 上限token: int | None) -> dict[str, object]:
+    """`--json` 裡那筆 `上限判定` 的形狀。
+
+    **兩個 scope 共用這一份鍵名**：各自寫一次的話，改鍵名那天只會改到其中一邊，
+    而外圈讀的正好是另一邊。
+    """
+    return {"範圍": 範圍, "實際token": 實際token, "上限token": 上限token}
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _單次上限判定:
+    """單次上限收掉這次呼叫時要交代的兩件事：退出碼給殼層，證據給 `--json`。
+
+    證據非有不可：**退出碼 4 說不出是視窗累計還是單次呼叫擋的**，
+    外圈要靠這筆「上限判定」決定換題目重派還是這個視窗今天收工，
+    不該逼腳本去 grep stderr 的中文措辭。
+    """
+
+    退出碼: int
+    證據: dict[str, object]
+
+
+def _單次範圍的判定(*, 退出碼: int, 實際token: int | None, 單次上限: int) -> _單次上限判定:
+    return _單次上限判定(
+        退出碼=退出碼,
+        證據=_上限判定證據(範圍=_單次範圍, 實際token=實際token, 上限token=單次上限),
+    )
+
+
+class _單次超標(Exception):
+    """**一次**呼叫就撞到單次上限。
+
+    當成例外往上丟是為了讓接力鏈當場收手：換下一家只是把同一份超大的提示
+    再燒一次，而那正是這個上限要擋的事。
+    """
+
+    def __init__(self, 答: 回應, 單次上限: int) -> None:
+        super().__init__(f"單次呼叫花費 {答.用量.總token} token，超過單次上限 {單次上限}")
+        self.答 = 答
+        self.單次上限 = 單次上限
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _單次上限腦:
+    """量**這一次呼叫**花了多少的那一層，包在接力鏈的每一顆裡面。
+
+    包在鏈外面就變成拿整條鏈的總和去比單次上限：兩顆各自 200 萬（都沒超過
+    300 萬）會被報成「單次呼叫超過 300 萬」——那句話是假的。
+    """
+
+    內層: 語言模型
+    單次上限: int
+
+    @property
+    def 名稱(self) -> str:
+        """身分照抄內層——包一層不換名字，否則接力鏈印出來的「試過誰」會走樣。"""
+        return self.內層.名稱
+
+    def 詢問(self, 提示: str, *, 選項: 呼叫選項 = 預設選項) -> 回應:
+        答 = self.內層.詢問(提示, 選項=選項)
+        if 答.用量.總token > self.單次上限:
+            raise _單次超標(答, self.單次上限)
+        return 答
+
+
+def _用量說不清的判定(答: 回應, 單次上限: int) -> _單次上限判定 | None:
+    """呼叫回來之後看用量講不講得清楚。**回 None ＝ 用量講得清，沒被單次上限收掉。**
+
+    超標由 `_單次上限腦` 在每一次呼叫當場丟例外（護欄碼 4）；
+    這裡只剩「成功卻拿不到用量」那一種：未知碼 3。
+    """
+    # 成功卻一個 token 都沒記到＝實錄根本沒吐用量。**未知不能當 0 放行。**
+    說不清 = 答.用量.總token == 0 and 答.終局 is 終局.成功
+    if not 說不清:
+        return None
+    print("無法取得用量資訊，無法判定單次 token 是否超標", file=sys.stderr)
+    return _單次範圍的判定(退出碼=未知, 實際token=None, 單次上限=單次上限)
+
+
+def _報這次的答(
+    參數: argparse.Namespace,
+    這次: _要問的東西,
+    答: 回應,
+    上限判定: _單次上限判定 | None,
+) -> None:
+    """把答案交出去：`--json` 給腳本讀，否則印文字；摘要一律走 stderr。"""
+    if 參數.json:
+        # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
+        證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
+        if 上限判定 is not None:
+            證據["上限判定"] = 上限判定.證據
+        print(json.dumps(證據, ensure_ascii=False, indent=2))
+    else:
+        print(答.文字)
+    print(_摘要(這次.用, 答), file=sys.stderr)
+
+
+def _這次的呼叫選項(參數: argparse.Namespace, 這次: _要問的東西) -> 呼叫選項:
+    """把命令列旗標翻成一次呼叫的選項。續接時一律連著保留對話一起開。"""
+    return 呼叫選項(
+        模型=這次.模,
+        思考深度=這次.思考深度,
+        工作目錄=_專案脈絡(參數).根目錄,
+        逾時秒=參數.逾時,
+        權限=這次.可以做什麼,
+        隔離設定=not 參數.不隔離設定,
+        續接=參數.續接,
+        保留對話=參數.保留對話 or bool(參數.續接),
+    )
+
+
+def _問出去(參數: argparse.Namespace, 這次: _要問的東西, *, 單次上限: int) -> 回應:
+    """開帳、組腦、真的打出去。
+
+    **例外原樣往上丟**：單次超標要怎麼收（印什麼、回哪個碼）是呼叫端的事，
+    這裡只負責讓帳在離開時關好。
+    """
+    with _開帳(參數) as 帳:
+        return _建腦(
+            這次.用,
+            Path(參數.執行檔) if 參數.執行檔 else None,
+            帳,
+            熔斷了=_這個專案誰熔斷了(_帳本目錄(參數), 啟用=參數.熔斷),
+            記全文=not 參數.不記全文,
+            單次最多token=單次上限,
+            單次超標就停=True,
+        ).詢問(這次.提示, 選項=_這次的呼叫選項(參數, 這次))
+
+
 def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
     """把一件事委派給別家 LLM CLI。
 
@@ -497,39 +656,25 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
         return 這次
     if 角色:
         這次 = dataclasses.replace(這次, 提示=組提示(角色, 這次.提示))
+    單次上限 = _這次的單次上限(參數)
     try:
-        with _開帳(參數) as 帳:
-            答 = _建腦(
-                這次.用,
-                Path(參數.執行檔) if 參數.執行檔 else None,
-                帳,
-                熔斷了=_這個專案誰熔斷了(_帳本目錄(參數), 啟用=參數.熔斷),
-                記全文=not 參數.不記全文,
-            ).詢問(
-                這次.提示,
-                選項=呼叫選項(
-                    模型=這次.模,
-                    思考深度=這次.思考深度,
-                    工作目錄=_專案脈絡(參數).根目錄,
-                    逾時秒=參數.逾時,
-                    權限=這次.可以做什麼,
-                    隔離設定=not 參數.不隔離設定,
-                    續接=參數.續接,
-                    保留對話=參數.保留對話 or bool(參數.續接),
-                ),
-            )
+        答 = _問出去(參數, 這次, 單次上限=單次上限)
+    except _單次超標 as 擋:
+        print(str(擋), file=sys.stderr)
+        超標判定 = _單次範圍的判定(
+            退出碼=護欄碼, 實際token=擋.答.用量.總token, 單次上限=擋.單次上限
+        )
+        _報這次的答(參數, 這次, 擋.答, 超標判定)
+        return 超標判定.退出碼
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
     if 這次.屍 is not None:
         答 = 撿回殘骸(答, 這次.屍)
-    if 參數.json:
-        # 原始輸出是行程內的逃生艙，不往 CLI 吐——它可能有上千行事件。
-        證據 = {鍵: 值 for 鍵, 值 in dataclasses.asdict(答).items() if 鍵 != "原始輸出"}
-        print(json.dumps(證據, ensure_ascii=False, indent=2))
-    else:
-        print(答.文字)
-    print(_摘要(這次.用, 答), file=sys.stderr)
+    上限判定 = _用量說不清的判定(答, 單次上限)
+    _報這次的答(參數, 這次, 答, 上限判定)
+    if 上限判定 is not None:
+        return 上限判定.退出碼
     return _終局的退出碼[答.終局]
 
 
@@ -648,6 +793,24 @@ def _秘密先交出去(專案: Path) -> int | None:
     return None
 
 
+def _印視窗超支證據(訊息: str, *, 花: 花費, 限: 上限) -> None:
+    """視窗超支給腳本讀的那一面。
+
+    退出碼 4 說不出是視窗累計還是單次呼叫擋的，逼外圈去 grep 中文措辭
+    等於把訊息措辭變成介面。
+    """
+    print(
+        json.dumps(
+            {
+                "上限判定": _上限判定證據(範圍=_視窗範圍, 實際token=花.token, 上限token=限.token),
+                "理由": 訊息,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 def _預算先擋一下(參數: argparse.Namespace, 這次: _醒來 | None = None) -> int | None:
     """超支就印原因並回退出碼，沒超回 None。**在打出去之前叫**——
 
@@ -676,6 +839,8 @@ def _預算先擋一下(參數: argparse.Namespace, 這次: _醒來 | None = Non
         return None
     訊息 = f"預算鎖：{擋}"
     print(訊息, file=sys.stderr)
+    if getattr(參數, "json", False):
+        _印視窗超支證據(訊息, 花=花, 限=限)
     if 這次 is not None:
         # **護欄生效不是壞了，但它要看得見。** 只留一行 stderr 在 launchd 的
         # log 裡的話，「排程從昨晚就一直被擋著」會是一個沒有人發現的狀態。
@@ -759,6 +924,7 @@ def _建腦(  # noqa: PLR0913 —— 記帳的旋鈕就是這麼多，包成資�
     熔斷了: Callable[[str], bool] = lambda _: False,
     記全文: bool = True,
     單次最多token: int = 預設單次最多token,
+    單次超標就停: bool = False,
 ) -> 語言模型:
     """`--用 codex,agy` 就是接力：前一顆失敗換下一顆。
 
@@ -787,6 +953,10 @@ def _建腦(  # noqa: PLR0913 —— 記帳的旋鈕就是這麼多，包成資�
         for 家 in 家們
     )
     腦們 = 記帳每一顆(原始, 帳, 記全文=記全文, 單次最多token=單次最多token)
+    if 單次超標就停:
+        # **包在記帳外面、接力裡面**：帳照樣記完（超標那次也要留痕跡），
+        # 但鏈上第一顆撞到上限就當場停，不會再燒下一家。
+        腦們 = tuple(_單次上限腦(內層=腦, 單次上限=單次最多token) for 腦 in 腦們)
     return 腦們[0] if len(腦們) == 1 else 接力腦(名稱="→".join(家們), 腦們=腦們)
 
 
