@@ -31,7 +31,7 @@ from nova.契約.角色 import 權限 as 權限
 from nova.契約.額度 import 家族額度 as 家族額度
 from nova.契約.額度 import 視窗 as 視窗
 from nova.契約.額度 import 額度快照 as 額度快照
-from nova.載體.判準 import 建判準, 建重構判準, 建預設判準, 預設判準指令
+from nova.載體.判準 import 可作指定pytest目標, 建判準, 建重構判準, 建預設判準, 預設判準指令
 from nova.載體.工作區 import 判定工作區, 拍工作區快照
 from nova.載體.帳本 import 不記帳本, 帳本, 開帳本
 from nova.載體.模型.接力 import 接力腦
@@ -297,6 +297,7 @@ def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物�
         跑重構判準=建重構判準(),
         # `驗證紅` 只驗這一輪動過的那幾支測試——整套 suite 的非零退出可能是別人的紅。
         建指定測試判準=lambda 檔們: 建判準((*這次的判準指令, *檔們)),
+        篩選指定測試=可作指定pytest目標,
     )
     目錄 = 工作目錄 or Path.cwd()
     return 跑工作流(
