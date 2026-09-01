@@ -24,7 +24,7 @@ import pytest
 
 from nova.契約.工作流 import 任務, 停止條件, 判準終局, 階段代碼
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
-from nova.載體.判準 import 建判準
+from nova.載體.判準 import 可作指定pytest目標, 建判準
 from nova.載體.閘鎖 import 佔不到, 佔住, 等待上限環境變數
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 
@@ -164,6 +164,7 @@ def _跑一條只走模型階段的工作流(工作目錄: Path) -> tuple[工作
         },
         # 乙也備了真的判準：**建的時候不該佔鎖**，佔了這條路就走不到模型階段。
         跑判準=建判準((sys.executable, "-c", "raise SystemExit(0)")),
+        篩選指定測試=可作指定pytest目標,
     )
     結果 = 跑工作流(
         _建測試任務(工作目錄),

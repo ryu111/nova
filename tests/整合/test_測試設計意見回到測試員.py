@@ -18,6 +18,7 @@ from nova.契約.工作流 import (
     階段代碼,
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
+from nova.載體.判準 import 可作指定pytest目標
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 
 一件事 = 任務(描述="修訂具有嚴謹邊界條件的功能", 工作目錄=Path("/不存在但沒人會碰"))
@@ -76,6 +77,7 @@ def _執行器(
             階段代碼.審查: 人["審查"],
         },
         跑判準=跑判準,
+        篩選指定測試=可作指定pytest目標,
     )
     return 執行, 人
 
