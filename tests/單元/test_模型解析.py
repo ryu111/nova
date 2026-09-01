@@ -143,10 +143,11 @@ class Test成功但沒話說:
     診斷被整個吞掉。當成功會讓上游以為事情辦完了。
     """
 
-    def test_claude空回應降成未知(self) -> None:
+    def test_claude空回應降成空輸出(self) -> None:
+        """代碼是 `空輸出` 不是 `未知`：`unknown` 什麼都可能是，數不出來也接不上重試。"""
         答 = 解析claude(_claude空回應, 0)
         assert 答.終局 is 終局.結果未知
-        assert 答.失敗代碼 is 失敗代碼.未知
+        assert 答.失敗代碼 is 失敗代碼.空輸出
 
     def test_agy空回應降成未知(self) -> None:
         assert 解析agy(_agy空回應, 0).終局 is 終局.結果未知
@@ -272,7 +273,7 @@ class Test權限被擋要分得出來:
         誤判成權限會讓接力停止換腦，而那可能正是換腦能救的一次。
         """
         信封 = json.dumps({"status": "SUCCESS", "response": ""})
-        assert 解析agy(信封, 0, "").失敗代碼 is 失敗代碼.未知
+        assert 解析agy(信封, 0, "").失敗代碼 is 失敗代碼.空輸出
 
 
 class Test額度用完要分得出來:
