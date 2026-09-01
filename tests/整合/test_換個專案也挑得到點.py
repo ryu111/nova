@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from nova.載體.健康度 import 健康度指標
 from nova.載體.收件 import 待處理, 收件目錄, 缺哪幾欄, 要驗收嗎, 誰造的, 讀出驗收
 from nova.載體.缺口成票 import 空手時落一張票
 
@@ -90,7 +91,13 @@ def 記帳小抄(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_不是nova的專案也挑得到自己的下一個點(記帳小抄: Path) -> None:
     """換個工作目錄，挑點這個機制要照樣成立，而且挑的是**那個專案自己的**缺口。"""
-    票 = 空手時落一張票(記帳小抄)
+    # 健康度餵成全綠：這一支驗的是**挑點在別的專案也成立**，不是背壓。
+    # 背壓由 `tests/整合/test_健康度紅不生推進票.py` 守。
+    結果 = 空手時落一張票(
+        記帳小抄,
+        查指標=lambda _: 健康度指標(main綠嗎=True, 卡住的線數=0, 沒收尾的件數=0, 壞掉的PR數=0),
+    )
+    票 = 結果.票
 
     assert 票 is not None, (
         "換一個專案就挑不到任何東西——挑點還綁在 nova 專屬的檔名上。"
