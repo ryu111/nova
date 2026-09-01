@@ -117,6 +117,9 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
     剖析.add_argument(
         "--預算token",
         type=int,
+        # metavar 直接寫「視窗」：help 一行裡就分得出它跟 `--單次上限token`
+        # 不是同一個 scope，不必讀完整段說明才發現打錯旗標。
+        metavar="視窗token",
         default=None,
         help="這段時間內全專案最多花幾個 token，超過就停（預設不鎖）",
     )
@@ -131,6 +134,13 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
         type=float,
         default=24.0,
         help="預算的時間窗口（預設 24 小時）",
+    )
+    剖析.add_argument(
+        "--單次上限token",
+        type=int,
+        default=預設單次最多token,
+        help="這次單次呼叫最多花幾個 token，超過就在呼叫後以護欄停下"
+        f"（預設 {預設單次最多token:,}）",
     )
     剖析.add_argument(
         "--不記全文",
@@ -294,7 +304,7 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
         "--最多token",
         type=int,
         default=預設最多token,
-        help="停止條件：累計花到這麼多 token 就不再發下一次呼叫",
+        help="停止條件：本輪工作流累計花到這麼多 token 就不再發下一次呼叫",
     )
     剖析.add_argument(
         "--單次最多token",
