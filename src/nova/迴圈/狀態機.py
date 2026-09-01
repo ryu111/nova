@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping
 from types import MappingProxyType
 
+from nova.契約.審查問題 import 問題種類, 讀審查問題列
 from nova.契約.工作流 import (
     出口標籤,
     判準逾時證據標記,
@@ -253,12 +254,17 @@ def 下一步(定義: 階段定義, 結果: 步驟結果) -> "階段代碼 | 結
 
     一般結果照表查；重構後的行為測試紅是既有護欄，不能誤當成可由重構員
     繼續修的 lint／格式紅。
+    審查要求修改時，若包含測試設計問題則退回測試員，否則退回實作員。
     """
     if _重構行為紅(定義, 結果):
         return 結束(
             結束代碼.護欄,
             "重構把行為改掉了（測試紅了）——不准往前除錯，請自己退回上一個綠燈",
         )
+    if 定義.代碼 is 階段代碼.審查 and 結果.審查結論 is 審查判定.要求修改:
+        問題列 = 讀審查問題列(結果.證據)
+        if any(問.種類 is 問題種類.測試設計 for 問 in 問題列):
+            return 階段代碼.測試
     return 定義.出口[判出口(定義, 結果)]
 
 
