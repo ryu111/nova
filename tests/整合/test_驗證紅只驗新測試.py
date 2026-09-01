@@ -32,8 +32,9 @@ from nova.契約.工作流 import (
     預設停止,
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
+from nova.契約.退出碼 import 未知
 from nova.載體.判準 import 建判準
-from nova.載體.命令列 import _工作流退出碼, 未知
+from nova.載體.命令列 import _工作流退出碼
 from nova.載體.工作區 import 拍工作區快照
 from nova.載體.重構護欄 import 動到測試了嗎
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流

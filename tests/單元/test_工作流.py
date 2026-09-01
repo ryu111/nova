@@ -24,7 +24,8 @@ from nova.契約.工作流 import (
     預設最多token,
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
-from nova.載體.命令列 import _工作流退出碼, 未知
+from nova.契約.退出碼 import 未知
+from nova.載體.命令列 import _工作流退出碼
 from nova.迴圈.工作流 import 建TDD執行器, 跑工作流
 from nova.迴圈.狀態機 import TDD階段表, 查階段
 
