@@ -8,7 +8,7 @@ import dataclasses
 import pytest
 
 from nova.契約.模型回應 import _終局表, 回應, 失敗代碼, 用量, 終局, 終局判定
-from nova.載體.命令列 import _終局的退出碼, 未知, 閘紅
+from nova.契約.退出碼 import _終局的退出碼, 未知, 閘紅
 
 
 def _空回應(**覆寫: object) -> 回應:
