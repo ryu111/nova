@@ -31,7 +31,8 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.命令列 import 主程式, 護欄碼
+from nova.契約.退出碼 import 護欄碼
+from nova.載體.命令列 import 主程式
 
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]

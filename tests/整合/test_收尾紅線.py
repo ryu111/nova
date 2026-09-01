@@ -14,8 +14,9 @@ from typing import cast
 import pytest
 
 from nova.契約.檢查結果 import 檢查結果
+from nova.契約.退出碼 import 放行, 未知, 閘紅
 from nova.載體 import 命令列
-from nova.載體.命令列 import 主程式, 放行, 未知, 閘紅
+from nova.載體.命令列 import 主程式
 
 
 def _造假git與gh(專案: Path, 測具: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

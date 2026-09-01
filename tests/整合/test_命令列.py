@@ -16,6 +16,7 @@ import pytest
 from nova.契約.工作流 import 步驟結果, 種類, 結束, 結束代碼, 階段代碼
 from nova.契約.模型回應 import 終局
 from nova.契約.派工 import 工作種類
+from nova.契約.退出碼 import 放行, 未知, 護欄碼, 閘紅, 阻擋
 from nova.載體.剖析器 import 建剖析器
 from nova.載體.命令列 import (
     _哪幾家,
@@ -27,12 +28,7 @@ from nova.載體.命令列 import (
     _階段的工作種類,
     _階段的派法,
     主程式,
-    放行,
-    未知,
     處理們,
-    護欄碼,
-    閘紅,
-    阻擋,
 )
 from nova.載體.帳本 import 不記帳本
 from nova.載體.派工表 import 怎麼派

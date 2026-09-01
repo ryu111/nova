@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.命令列 import 主程式, 放行, 護欄碼
+from nova.契約.退出碼 import 放行, 護欄碼
+from nova.載體.命令列 import 主程式
 
 做假CLI型 = Callable[..., tuple[Path, Path]]
 

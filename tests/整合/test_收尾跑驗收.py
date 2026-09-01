@@ -28,7 +28,8 @@ from pathlib import Path
 
 import pytest
 
-from nova.載體.命令列 import _取走待歸檔的驗收, _驗收說了算, 主程式, 護欄碼
+from nova.契約.退出碼 import 護欄碼
+from nova.載體.命令列 import _取走待歸檔的驗收, _驗收說了算, 主程式
 from nova.載體.已處理 import 列出成果, 已處理目錄
 from nova.載體.收件 import 丟一件, 你敲, 待處理, 收下一件, 收件目錄, 時鐘
 
