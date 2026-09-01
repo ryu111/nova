@@ -21,6 +21,7 @@ from typing import cast
         "ignore:D403",
         "ignore:ISC001",
         "extend-exclude:docs",
+        "format:exclude:tests/單元/test_角色工廠.py",
         "per-file-ignores:src/nova/載體/命令列.py:T201",
         "per-file-ignores:tests/**:S101",
         "per-file-ignores:tests/**:D100",
@@ -38,6 +39,8 @@ from typing import cast
         "per-file-ignores:tests/**:S607",
         # 併成 `X not in (甲, 乙)` 會讓斷言訊息看不出是哪一邊壞掉，那正是測試的價值。
         "per-file-ignores:tests/**:PLR1714",
+        "per-file-ignores:tests/**:PLC0415",
+        "per-file-ignores:tests/**:PLR0402",
     }
 )
 

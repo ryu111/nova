@@ -9,13 +9,12 @@ from pathlib import Path
 
 from nova.契約.工作流 import 任務, 判準終局, 步驟結果, 階段代碼, 階段定義
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
-from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 呼叫選項, 語言模型, 預設選項
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 固定提示角色
 from nova.迴圈.工作流 import 建TDD執行器
 from nova.迴圈.狀態機 import 查階段
-from nova.迴圈.角色工廠 import 建TDD角色藍圖, 建角色表
+from nova.迴圈.角色工廠 import 建TDD角色藍圖, 建角色表, 這階算哪種工作
 
 一件事 = 任務(描述="讓 X 變成 Y", 工作目錄=Path("/不存在但沒人會碰"))
 
@@ -94,6 +93,6 @@ class Test退回實作接線:
         assert _紅 in 提示
 
     def test_工作種類沒被這條接線改掉(self) -> None:
-        """順手確認實作員仍是例行工作——接線不該動到派工。"""
+        """確認接線沒有改掉唯一的階段→工作種類對照。"""
         實作藍圖 = next(藍 for 藍 in 建TDD角色藍圖(怎麼派) if 藍.識別碼 == 階段代碼.實作.value)
-        assert 實作藍圖.派法 == 怎麼派(工作種類.例行)
+        assert 實作藍圖.派法 == 怎麼派(這階算哪種工作(階段代碼.實作))

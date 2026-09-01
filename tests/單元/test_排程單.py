@@ -81,6 +81,7 @@ def test_跑的是從收件匣那條路() -> None:
 
     assert "工作流" in 參數
     assert "--從收件匣" in 參數
+    assert "--用" not in 參數, "排程不准用 --用 蓋掉依階段查派工表的路徑"
 
 
 def test_帶著APP_ROLE() -> None:
