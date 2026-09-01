@@ -91,7 +91,15 @@ def test_有產出的樹留現場而且出聲指向nova線(tmp_path: Path) -> No
             起點commit=起點commit,
         )
 
-    assert len(出的聲) == 2, f"兩棵有產出的樹都該出聲，實際 {len(出的聲)} 次"
+    # **只數指向 `nova 線` 的那些。** `pytest.warns(...) as` 收的是區塊裡**全部**的
+    # warning，不是只有 match 到的——CI 上 git 多吐兩則（「contains modified or
+    # untracked files」那條）就變成 4，而那跟這支要驗的東西無關。
+    # 實測 2026-09-01：本機 2、CI 4，同一份程式碼。
+    指向線的 = [一則 for 一則 in 出的聲 if "nova 線" in str(一則.message)]
+    assert len(指向線的) == 2, (
+        f"兩棵有產出的樹都該出聲指向 `nova 線`，實際 {len(指向線的)} 次"
+        f"（區塊裡全部的 warning 共 {len(出的聲)} 則）"
+    )
     留下的 = [樹根 / "甲", 樹根 / "乙"]
     for 一棵 in 留下的:
         assert 一棵.is_dir(), f"有產出的樹被收掉了，現場沒了：{一棵}"
