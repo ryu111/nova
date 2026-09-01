@@ -20,6 +20,7 @@ pytest。所以 repo 本來就有一支紅（flaky／遺留）的時候，`驗�
 
 import dataclasses
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from nova.契約.工作流 import (
@@ -31,7 +32,9 @@ from nova.契約.工作流 import (
     預設停止,
 )
 from nova.契約.模型回應 import 回應, 失敗代碼, 用量, 終局
+from nova.契約.退出碼 import 未知
 from nova.載體.判準 import 建判準
+from nova.載體.命令列 import _工作流退出碼
 from nova.載體.工作區 import 拍工作區快照
 from nova.載體.重構護欄 import 動到測試了嗎
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
@@ -127,6 +130,46 @@ def _跑(工作區: Path, 新測試內容: str) -> 工作流結果:
     )
 
 
+class _多檔假測試員:
+    """走到測試那一階就把多個檔案寫進工作區。"""
+
+    def __init__(self, 檔案們: Mapping[str, str]) -> None:
+        self.檔案們 = 檔案們
+
+    @property
+    def 名稱(self) -> str:
+        return "多檔假測試員"
+
+    def 做(self, 提示: str, *, 工作目錄: Path | None = None) -> 回應:
+        del 提示
+        assert 工作目錄 is not None, "測試員要有工作目錄才寫得出測試"
+        for 相對路徑, 內容 in self.檔案們.items():
+            目標 = 工作目錄 / 相對路徑
+            目標.parent.mkdir(parents=True, exist_ok=True)
+            目標.write_text(內容, encoding="utf-8")
+        return _回應("寫好了")
+
+
+def _跑多檔(工作區: Path, 檔案們: Mapping[str, str]) -> 工作流結果:
+    執行 = 建TDD執行器(
+        角色表={
+            階段代碼.測試: _多檔假測試員(檔案們),
+            階段代碼.實作: _假角色(),
+            階段代碼.重構: _假角色(),
+            階段代碼.審查: _假角色("看過了\nREVIEW: PASS"),
+        },
+        跑判準=建判準(_真pytest),
+        建指定測試判準=_只驗這幾支,
+    )
+    return 跑工作流(
+        任務(描述="讓 X 變成 Y", 工作目錄=工作區),
+        執行一步=執行,
+        停止=dataclasses.replace(預設停止, 最多步數=4),
+        拍快照=拍工作區快照,
+        動到測試了嗎=動到測試了嗎,
+    )
+
+
 def _驗證紅那一步(果: 工作流結果) -> 步驟結果:
     紅們 = [步 for 步 in 果.軌跡 if 步.階段 is 階段代碼.驗證紅]
     assert 紅們, f"連驗證紅都沒走到：{[步.階段 for 步 in 果.軌跡]}"
@@ -178,3 +221,50 @@ def test_收場不是靜默地什麼都沒發生(tmp_path: Path) -> None:
 
     assert isinstance(果.結束, 結束)
     assert 果.結束.原因, "收場要說得出原因"
+
+
+class Test負控登記等非測試檔不當指定測試判準:
+    """**負控登記檔不是測試檔。**
+
+    `tests/負控/登記們/*.py` 裡面只有登記資料（tuple），沒有 test_* 函式。
+    `驗證紅` 拿它當指定測試判準會導致 pytest exit 5（no tests collected）跑不起來。
+    判準要排除負控登記、conftest 等非測試檔；濾完若為空則誠實退回全套判準。
+    """
+
+    def test_測試階段只動了負控登記檔時退回全套判準(self, tmp_path: Path) -> None:
+        """測試員只寫了負控登記檔，驗證紅應排除它並退回全套判準（基線有紅則放行走到實作）。"""
+        負控登記檔 = "tests/負控/登記們/全面重構_r01.py"
+        負控內容 = "登記 = ()\n"
+        果 = _跑多檔(_工作區(tmp_path), {負控登記檔: 負控內容})
+
+        走過的 = [步.階段 for 步 in 果.軌跡]
+        assert 階段代碼.實作 in 走過的, f"只動負控登記檔退回全套應放行走到實作：{走過的}"
+        assert 負控登記檔 not in _驗證紅那一步(果).證據, _驗證紅那一步(果).證據
+
+    def test_同時動了紅測試與負控登記檔時只驗紅測試(self, tmp_path: Path) -> None:
+        """同時動了測試與登記檔，驗證紅只指定測試檔，排除負控登記檔。"""
+        負控登記檔 = "tests/負控/登記們/全面重構_r01.py"
+        果 = _跑多檔(
+            _工作區(tmp_path),
+            {新測試: 紅的新測試, 負控登記檔: "登記 = ()\n"},
+        )
+
+        走過的 = [步.階段 for 步 in 果.軌跡]
+        assert 階段代碼.實作 in 走過的, f"新測試紅了應往下走到實作：{走過的}"
+        證據 = _驗證紅那一步(果).證據
+        assert 新測試 in 證據, 證據
+        assert 負控登記檔 not in 證據, f"負控登記檔不該出現在指定測試清單中：{證據}"
+
+
+class Test判準跑不起來收場為結果未知:
+    def test_判準沒收集到測試時收場為結果未知不是確定失敗(self, tmp_path: Path) -> None:
+        """pytest exit 5（沒收集到測試）屬於跑不起來。
+
+        依四值語意是結果未知（3），不是確定失敗（1）。
+        """
+        (tmp_path / "tests").mkdir()
+        # 測試員寫了一個完全沒有測試函式的檔案
+        果 = _跑多檔(tmp_path, {"tests/空的.py": "# 沒有任何測試函式\n"})
+
+        assert any(步.終局 is 終局.結果未知 for 步 in 果.軌跡), f"步驟終局應有結果未知：{果.軌跡}"
+        assert _工作流退出碼(果.結束, 果.軌跡) == 未知

@@ -63,6 +63,26 @@ _pytest沒驗到 = {
     4: "pytest 用法錯誤，旗標打錯或路徑不存在（exit 4）",
 }
 
+排除目錄前綴: tuple[str, ...] = ("tests/負控/登記們/",)
+排除相對路徑: tuple[str, ...] = (
+    "tests/負控/登記.py",
+    "tests/負控/執行器.py",
+)
+排除檔名: tuple[str, ...] = (
+    "conftest.py",
+    "__init__.py",
+)
+
+
+def 可作指定pytest目標(路徑: str) -> bool:
+    """排除負控登記資料、執行器、conftest 等無法作為指定 pytest 目標的非測試檔。"""
+    if any(路徑.startswith(前綴) or f"/{前綴}" in 路徑 for 前綴 in 排除目錄前綴):
+        return False  #: 負控登記們
+    if any(路徑 == 排除 or 路徑.endswith(f"/{排除}") for 排除 in 排除相對路徑):
+        return False
+    檔名 = 路徑.rsplit("/", 1)[-1]
+    return 檔名 not in 排除檔名
+
 
 def _像pytest(指令: Sequence[str]) -> bool:
     """**退出碼語意是各程式自己的知識，不是通用常識。**
