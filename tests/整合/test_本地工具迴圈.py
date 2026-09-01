@@ -15,7 +15,7 @@ import pytest
 
 from nova.契約.模型回應 import 終局
 from nova.契約.角色 import 呼叫選項, 權限
-from nova.載體.模型.本地 import 本地腦
+from nova.載體.模型.本地 import 最多工具回合, 本地腦
 
 
 class 假端點:
@@ -154,7 +154,9 @@ class Test迴圈一定要有上限:
         with 端 as 網址:
             答 = _問(網址, 工作區)
         assert 答.終局 is not 終局.成功, "無限發工具卻收在成功＝上限沒生效"
-        assert len(端.收到) <= 12, f"發了 {len(端.收到)} 次還沒停"
+        # **從常數推導，不要寫死數字。** 寫死 12 的話，上限從 8 調到 16
+        # 這支就會紅——而紅的是「值變了」，不是「上限沒生效」。
+        assert len(端.收到) <= 最多工具回合, f"發了 {len(端.收到)} 次還沒停"
 
     def test_撞上限要講得出原因(self, 工作區: Path) -> None:
         """收在一個看不出原因的失敗，等於要人去翻 log 才知道發生什麼事。"""
