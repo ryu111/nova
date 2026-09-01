@@ -1,8 +1,5 @@
 """執行登記過的精確負控。"""
 
-# 這個 runner 需要把失敗分類塞進例外訊息，保留完整診斷比 lint 的例外訊息風格重要。
-# ruff: noqa: EM101, EM102, TRY003
-
 import ast
 import hashlib
 import os
@@ -13,6 +10,7 @@ import tempfile
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+from typing import NoReturn
 
 import coverage
 
@@ -23,11 +21,18 @@ class 負控錯誤(RuntimeError):
     """負控本身無法判定時的錯誤。"""
 
 
+def _錯(訊息: str, *, 來源: Exception | None = None) -> NoReturn:
+    例外 = 負控錯誤(訊息)
+    if 來源 is not None:
+        raise 例外 from 來源
+    raise 例外
+
+
 @cache
 def _目前覆蓋率() -> coverage.Coverage:
     覆蓋率 = coverage.Coverage.current()
     if 覆蓋率 is None:
-        raise RuntimeError("coverage runner 沒有啟動")
+        _錯("coverage runner 沒有啟動")
     return 覆蓋率
 
 
@@ -49,10 +54,6 @@ def pytest_runtest_teardown() -> None:
 
 def _雜湊(檔案: Path) -> str:
     return hashlib.sha256(檔案.read_bytes()).hexdigest()
-
-
-def _錯(訊息: str) -> 負控錯誤:
-    return 負控錯誤(訊息)
 
 
 def _忽略快取(_: str, 名字: list[str]) -> set[str]:
@@ -99,15 +100,15 @@ def _pytest(根目錄: Path, *參數: str, timeout: float) -> subprocess.Complet
             env=_環境(根目錄),
         )
     except subprocess.TimeoutExpired as 錯:
-        raise _錯(f"RUN_ERROR：pytest 逾時：{參數[0]}") from 錯
+        _錯(f"RUN_ERROR：pytest 逾時：{參數[0]}", 來源=錯)
     except OSError as 錯:
-        raise _錯(f"RUN_ERROR：pytest 無法啟動：{錯}") from 錯
+        _錯(f"RUN_ERROR：pytest 無法啟動：{錯}", 來源=錯)
 
 
 def _要求收集(根目錄: Path, nodeid: str, 最多秒: float) -> None:
     結果 = _pytest(根目錄, "--collect-only", nodeid, timeout=最多秒)
     if 結果.returncode != 0:
-        raise _錯(f"RUN_ERROR：找不到或無法收集 {nodeid}\n{結果.stdout}{結果.stderr}")
+        _錯(f"RUN_ERROR：找不到或無法收集 {nodeid}\n{結果.stdout}{結果.stderr}")
 
 
 def _跑基線(根目錄: Path, 一筆: 變異) -> None:
@@ -119,7 +120,7 @@ def _跑基線(根目錄: Path, 一筆: 變異) -> None:
 
 def _判定基線(退出碼: int, nodeid: str, 輸出: str = "") -> None:
     if 退出碼 != 0:
-        raise _錯(f"BASELINE_RED：{nodeid}\n{輸出}")
+        _錯(f"BASELINE_RED：{nodeid}\n{輸出}")
 
 
 def _資料行(資料: coverage.CoverageData, 檔名: str, 上下文: str | None) -> set[int]:
@@ -137,7 +138,7 @@ def _覆蓋的行(資料檔: Path, 目標: Path, 上下文: str | None = None) -
         try:
             資料.read()
         except coverage.CoverageException as 錯:
-            raise _錯(f"RUN_ERROR：讀取 coverage 失敗：{錯}") from 錯
+            _錯(f"RUN_ERROR：讀取 coverage 失敗：{錯}", 來源=錯)
         for 實際檔名 in 資料.measured_files():
             if Path(實際檔名).resolve() == 目標.resolve():
                 命中.update(_資料行(資料, 實際檔名, 上下文))
@@ -148,7 +149,7 @@ def _可執行行(文字: str) -> set[int]:
     try:
         樹 = ast.parse(文字)
     except SyntaxError as 錯:
-        raise _錯(f"RUN_ERROR：目標不是可剖析的 Python：{錯}") from 錯
+        _錯(f"RUN_ERROR：目標不是可剖析的 Python：{錯}", 來源=錯)
     文件字串行: set[int] = set()
     for 節點 in ast.walk(樹):
         if not isinstance(節點, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -175,12 +176,12 @@ def _推導破壞行(目標: Path, 一筆: 變異) -> frozenset[int]:
     try:
         錨點 = 一筆.操作.錨點
     except (AttributeError, TypeError) as 錯:
-        raise _錯(f"RUN_ERROR：操作無法推導破壞行：{type(一筆.操作).__name__}") from 錯
+        _錯(f"RUN_ERROR：操作無法推導破壞行：{type(一筆.操作).__name__}", 來源=錯)
     if not isinstance(錨點, str) or not 錨點:
-        raise _錯(f"RUN_ERROR：操作沒有可推導的文字錨點：{一筆.識別}")
+        _錯(f"RUN_ERROR：操作沒有可推導的文字錨點：{一筆.識別}")
     文字 = 目標.read_text(encoding="utf-8")
     if 文字.count(錨點) != 1:
-        raise _錯(f"RUN_ERROR：錨點應恰好一次，實際 {文字.count(錨點)}：{錨點!r}")
+        _錯(f"RUN_ERROR：錨點應恰好一次，實際 {文字.count(錨點)}：{錨點!r}")
     起點 = 文字.index(錨點)
     終點 = 起點 + len(錨點) - 1
     首行 = 文字.count("\n", 0, 起點) + 1
@@ -197,7 +198,7 @@ def _推導破壞行(目標: Path, 一筆: 變異) -> frozenset[int]:
         # 那要當場紅——否則刀看起來 KILLED，其實沒破壞到被測的東西。
         if _是模組層常數替換(文字, 一筆):
             return frozenset()
-        raise _錯(f"RUN_ERROR：操作沒有可推導的 executable 行：{一筆.識別}")
+        _錯(f"RUN_ERROR：操作沒有可推導的 executable 行：{一筆.識別}")
     return 要求
 
 
@@ -277,9 +278,9 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
                     env=_環境(根目錄, COVERAGE_FILE=str(資料檔)),
                 )
             except (OSError, subprocess.TimeoutExpired) as 錯:
-                raise _錯(f"RUN_ERROR：coverage 無法完成：{nodeid}") from 錯
+                _錯(f"RUN_ERROR：coverage 無法完成：{nodeid}", 來源=錯)
             if 結果.returncode != 0:
-                raise _錯(f"RUN_ERROR：coverage 測試失敗：{nodeid}\n{結果.stdout}{結果.stderr}")
+                _錯(f"RUN_ERROR：coverage 測試失敗：{nodeid}\n{結果.stdout}{結果.stderr}")
             _判定覆蓋(一筆, _覆蓋的行(資料檔, 目標, nodeid), 必須覆蓋)
 
 
@@ -290,17 +291,17 @@ def _判定覆蓋(
 ) -> None:
     要求 = 一筆.必須覆蓋 if 必須覆蓋 is None else 必須覆蓋
     if 要求 is None:
-        raise _錯(f"RUN_ERROR：沒有覆蓋要求：{一筆.識別}")
+        _錯(f"RUN_ERROR：沒有覆蓋要求：{一筆.識別}")
     if not 要求 <= 命中:
         缺少 = 要求 - 命中
-        raise _錯(f"WRONG_TEST：{一筆.識別} 的 {一筆.該紅} 沒覆蓋 {sorted(缺少)}")
+        _錯(f"WRONG_TEST：{一筆.識別} 的 {一筆.該紅} 沒覆蓋 {sorted(缺少)}")
 
 
 def _確認錨點(一筆: 變異, 目標: Path) -> None:
     錨點 = 一筆.操作.錨點
     次數 = 目標.read_text(encoding="utf-8").count(錨點)
     if 次數 != 1:
-        raise _錯(f"RUN_ERROR：錨點應恰好一次，實際 {次數}：{錨點!r}")
+        _錯(f"RUN_ERROR：錨點應恰好一次，實際 {次數}：{錨點!r}")
 
 
 def _判定結果(
@@ -313,14 +314,14 @@ def _判定結果(
     if 逾時:
         if 預期掛住:
             return "KILLED"
-        raise _錯("RUN_ERROR：非預期逾時")
+        _錯("RUN_ERROR：非預期逾時")
     if not 已收集:
-        raise _錯("RUN_ERROR：沒有正常收集到 nodeid")
+        _錯("RUN_ERROR：沒有正常收集到 nodeid")
     if 退出碼 == 1:
         return "KILLED"
     if 退出碼 == 0:
-        raise _錯("SURVIVED：變異後測試仍然通過")
-    raise _錯(f"RUN_ERROR：pytest exit {退出碼}")
+        _錯("SURVIVED：變異後測試仍然通過")
+    _錯(f"RUN_ERROR：pytest exit {退出碼}")
 
 
 def _跑變異測試(根目錄: Path, 一筆: 變異) -> None:
@@ -346,9 +347,9 @@ def _跑變異測試(根目錄: Path, 一筆: 變異) -> None:
         except subprocess.TimeoutExpired as 錯:
             _判定結果(None, 已收集=True, 逾時=True, 預期掛住=一筆.預期掛住)
             if not 一筆.預期掛住:
-                raise _錯(f"RUN_ERROR：非預期逾時：{nodeid}") from 錯
+                _錯(f"RUN_ERROR：非預期逾時：{nodeid}", 來源=錯)
         except OSError as 錯:
-            raise _錯(f"RUN_ERROR：pytest 無法啟動：{nodeid}") from 錯
+            _錯(f"RUN_ERROR：pytest 無法啟動：{nodeid}", 來源=錯)
 
 
 def _執行變異副本(根目錄: Path, 一筆: 變異) -> None:
@@ -359,19 +360,19 @@ def _執行變異副本(根目錄: Path, 一筆: 變異) -> None:
 def 執行變異(一筆: 變異, *, 根目錄: Path) -> None:
     """依序執行基線、覆蓋率前置與隔離變異。"""
     if 一筆.平台 not in ("任何平台", sys.platform):
-        raise _錯(f"RUN_ERROR：不支援的平台：{一筆.平台}")
+        _錯(f"RUN_ERROR：不支援的平台：{一筆.平台}")
     if not 一筆.該紅:
-        raise _錯(f"RUN_ERROR：{一筆.識別} 沒有該紅測試")
+        _錯(f"RUN_ERROR：{一筆.識別} 沒有該紅測試")
     原始目標 = 根目錄 / 一筆.目標檔
     if not 原始目標.is_file():
-        raise _錯(f"RUN_ERROR：目標不存在：{一筆.目標檔}")
+        _錯(f"RUN_ERROR：目標不存在：{一筆.目標檔}")
     基線 = _雜湊(原始目標)
     with tempfile.TemporaryDirectory(prefix="nova-負控-", dir="/tmp") as 暫存:
         暫存根 = Path(暫存)
         基線副本 = 暫存根 / "基線"
         _複製專案(根目錄, 基線副本)
         if _雜湊(基線副本 / 一筆.目標檔) != 基線:
-            raise _錯(f"RUN_ERROR：基線 SHA256 不一致：{一筆.識別}")
+            _錯(f"RUN_ERROR：基線 SHA256 不一致：{一筆.識別}")
         _跑基線(基線副本, 一筆)
         _覆蓋率前置(基線副本, 一筆)
 
@@ -379,11 +380,11 @@ def 執行變異(一筆: 變異, *, 根目錄: Path) -> None:
         _複製專案(根目錄, 變異副本)
         目標 = 變異副本 / 一筆.目標檔
         if _雜湊(目標) != 基線:
-            raise _錯(f"RUN_ERROR：變異副本基線 SHA256 不一致：{一筆.識別}")
+            _錯(f"RUN_ERROR：變異副本基線 SHA256 不一致：{一筆.識別}")
         _確認錨點(一筆, 目標)
         _, 變異後 = 一筆.操作.套用(目標)
         if 變異後 == 基線:
-            raise _錯(f"RUN_ERROR：變異後 SHA256 沒變：{一筆.識別}")
+            _錯(f"RUN_ERROR：變異後 SHA256 沒變：{一筆.識別}")
         _執行變異副本(變異副本, 一筆)
 
 

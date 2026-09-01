@@ -6,12 +6,74 @@
 
 import argparse
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 from nova.契約.工作流 import 階段代碼, 預設單次最多token, 預設最多token, 預設最多步數
 from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 預設逾時秒
 from nova.契約.觸發 import 喚醒來源
 from nova.載體.模型.轉接 import 思考深度們
+
+#: 正典公開動作全集，直接對齊階段代碼，不可獨立維護第二份清單。
+公開階段動作全集: frozenset[str] = frozenset(代碼.value for 代碼 in 階段代碼)
+
+
+@dataclass(frozen=True, slots=True)
+class 階段動作規格:
+    """單一階段動作的窄介面規格，供 CLI-05 及分派使用。"""
+
+    階段: 階段代碼
+    題目: str | None = None
+    提示檔: Path | None = None
+    工作目錄: Path | None = None
+    帳本目錄: Path | None = None
+    不記帳: bool = False
+
+
+def 解析階段動作(argv: list[str]) -> 階段動作規格:
+    """解析階段動作命令列參數為窄介面規格。"""
+    if not argv:
+        訊息 = "缺少階段動作"
+        raise ValueError(訊息)
+    動作 = argv[0]
+    if 動作 not in 公開階段動作全集:
+        訊息 = f"未知的階段動作：{動作}"
+        raise ValueError(訊息)
+
+    階段 = 階段代碼(動作)
+
+    剖析 = argparse.ArgumentParser(prog=f"nova {動作}")
+    剖析.add_argument("題目", nargs="*", default=[])
+    剖析.add_argument("--提示檔", default=None)
+    剖析.add_argument("--工作目錄", default=None)
+    剖析.add_argument("--帳本目錄", default=None)
+    剖析.add_argument("--不記帳", action="store_true")
+
+    args = 剖析.parse_args(argv[1:])
+
+    題目 = " ".join(args.題目) if args.題目 else None
+    提示檔 = Path(args.提示檔) if args.提示檔 else None
+    工作目錄 = Path(args.工作目錄) if args.工作目錄 else None
+    帳本目錄 = Path(args.帳本目錄) if args.帳本目錄 else None
+    不記帳 = bool(args.不記帳)
+
+    if 階段 in (階段代碼.驗證紅, 階段代碼.驗證綠, 階段代碼.驗證重構):
+        題目 = None
+        提示檔 = None
+    elif not 題目 and 提示檔 is None:
+        訊息 = f"{階段.value} 必須提供題目或 --提示檔"
+        raise ValueError(訊息)
+
+    return 階段動作規格(
+        階段=階段,
+        題目=題目,
+        提示檔=提示檔,
+        工作目錄=工作目錄,
+        帳本目錄=帳本目錄,
+        不記帳=不記帳,
+    )
+
 
 #: 一個子命令的處理函式。`argparse.Namespace` → 退出碼。
 處理型 = Callable[[argparse.Namespace], int]
@@ -25,7 +87,7 @@ def 建剖析器(處理們: Mapping[str, 處理型]) -> argparse.ArgumentParser:
     會讓子命令的名字有**兩份**登記，漏掉一邊要到使用者真的打那個子命令
     才炸成 `KeyError`。傳進來就只有一份，而且少一格會在**這裡**就炸。
 
-    子命令按用途分三組加進去：**拆開不是為了好看，是 ruff `PLR0915` 會紅**
+    子命令按用途分組加進去：**拆開不是為了好看，是 ruff `PLR0915` 會紅**
     （一個函式 50 個語句），而那條規則說的是對的——一長串平鋪的
     `add_argument` 沒有人讀得完。
     """
@@ -35,6 +97,7 @@ def 建剖析器(處理們: Mapping[str, 處理型]) -> argparse.ArgumentParser:
     _加檢查類(子, 處理們)
     _加委派類(子, 處理們)
     _加觀測類(子, 處理們)
+    _加階段類(子, 處理們)
     return 剖析器
 
 
@@ -417,3 +480,26 @@ def _加觀測類(
         metavar="秒",
         help="節流：快取比這麼多秒新就什麼都不做。不給就一律重新去問",
     )
+
+
+def _加階段類(
+    子: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    處理們: Mapping[str, 處理型],
+) -> None:
+    """階段代碼動作：test、verify-red、impl、verify-green、refactor、verify-refactor、review。"""
+    for 代碼 in 階段代碼:
+        名 = 代碼.value
+        if 名 in 處理們:
+            階段剖析 = 子.add_parser(名, help=f"執行 {名} 階段")
+            階段剖析.set_defaults(執行=處理們[名])
+            階段剖析.add_argument("題目", nargs="*", help="要處理的題目或指示")
+            階段剖析.add_argument(
+                "--提示檔",
+                default=None,
+                help="從檔案讀題目。長的、多行的、有反引號的一律走這條",
+            )
+            階段剖析.add_argument("--工作目錄", default=None, help="子程序的 cwd")
+            階段剖析.add_argument(
+                "--帳本目錄", default=None, help="帳本寫到哪。預設 ~/.local/state/nova/帳本"
+            )
+            階段剖析.add_argument("--不記帳", action="store_true", help="不要留執行紀錄")

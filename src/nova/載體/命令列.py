@@ -11,6 +11,7 @@ import contextlib
 import dataclasses
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping
@@ -1172,6 +1173,40 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
     return _子命令_工作流(參數)
 
 
+def _接續請改用工作流(參數: argparse.Namespace) -> str:
+    """寫給人看的正解：**照抄就能跑**的那一行 `nova 工作流`。
+
+    只說「不支援」等於把人丟回去自己查旗標，所以這裡把提示來源、那棵樹、
+    原本的起點都填好；`shlex.quote` 是為了路徑有空白時照抄還是對的。
+    """
+    那棵樹 = shlex.quote(參數.工作目錄 or ".")
+    那張票 = shlex.quote(參數.票檔)
+    return (
+        "派工會建立全新工作樹，拿不到前幾階的未提交產出；"
+        "接續請用（照抄就能跑）：\n"
+        f"  `nova 工作流 --提示檔 {那張票} --工作目錄 {那棵樹} --起點 {參數.起點}`"
+    )
+
+
+def _派工該擋的理由(參數: argparse.Namespace) -> str | None:
+    """派工開跑前的兩道門，擋得下就回一句話，過得了就回 `None`。
+
+    一、**只准從命令列敲**：背景那條線靠 `sys.argv` 認得出自己不是派工。
+
+    二、**`--起點` 跟 `派工` 天生不相容**：派工必定切一棵全新工作樹，所以前幾階
+    留在原樹上的未提交產出（例如 `verify-red` 那支紅測試）一定不在新樹上。
+    讓它靜靜跑下去＝實作員拿著不存在的紅測試做事，比不接續更糟——
+    所以這裡當場擋下。`nova 工作流` 不開新樹，接續是它的事。
+    """
+    是人從命令列敲的 = "派工" in sys.argv[1:]
+    if not 是人從命令列敲的:
+        return "派工 只能從命令列用（背景那條靠的是 sys.argv）"
+    要接前幾階的產出 = 參數.起點 != 階段代碼.測試.value
+    if 要接前幾階的產出:
+        return _接續請改用工作流(參數)
+    return None
+
+
 def _子命令_派工(參數: argparse.Namespace) -> int:
     """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
 
@@ -1196,8 +1231,8 @@ def _子命令_派工(參數: argparse.Namespace) -> int:
     「這張已經派給誰了」的宣告，線那一份是它自己的待辦。
     收尾（把主 `處理中/` 那份收掉）是收成那張票的事，不在這一格。
     """
-    if "派工" not in sys.argv[1:]:
-        print("派工 只能從命令列用（背景那條靠的是 sys.argv）", file=sys.stderr)
+    if 擋 := _派工該擋的理由(參數):
+        print(擋, file=sys.stderr)
         return 阻擋
     脈絡 = _專案脈絡(參數)
     try:
