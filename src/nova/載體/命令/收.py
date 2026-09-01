@@ -82,11 +82,36 @@ def 子命令_收(參數: argparse.Namespace) -> int:
     ) != 放行:
         return 碼
 
+    _, 頭分支 = _跑收尾指令(根, "git", "branch", "--show-current")
+    頭分支 = 頭分支.strip()
+
+    if (碼 := _合併這個PR(根)) != 放行:
+        return 碼
+
+    return _查證本地分支已刪(根, 頭分支)
+
+
+def _合併這個PR(根目錄: Path) -> int:
+    """既有政策：squash 合併並刪遠端分支，絕不帶 `--admin`。"""
     return _跑並印收尾指令(
-        根,
+        根目錄,
         "gh",
         "pr",
         "merge",
         "--squash",
         "--delete-branch",
     )
+
+
+def _查證本地分支已刪(根目錄: Path, 頭分支: str) -> int:
+    """`gh pr merge` 回 0 只代表 GitHub 那端；本地分支還在就是沒收乾淨。"""
+    if not 頭分支:
+        return 放行
+    _, 殘留 = _跑收尾指令(根目錄, "git", "branch", "--list", 頭分支)
+    if not 殘留.strip():
+        return 放行
+    sys.stderr.write(
+        f"GitHub 已合併這個 PR，但本地分支 {頭分支} 沒刪乾淨（多半還被某棵 worktree 佔著）。\n"
+        f"不要再跑一次 merge；先清掉佔用它的 worktree，再刪本地分支 {頭分支}。\n"
+    )
+    return 閘紅
