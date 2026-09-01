@@ -116,7 +116,8 @@ def 解析ruff豁免(內容: str) -> frozenset[str]:
     lint設定 = _表或空(ruff設定, "lint")
     規則豁免 = _展平規則(ruff設定, _規則豁免鍵) | _展平規則(lint設定, _規則豁免鍵)
     檔案豁免 = _展平檔案規則(ruff設定, _檔案豁免鍵) | _展平檔案規則(lint設定, _檔案豁免鍵)
-    # Ruff 的 lint 表只有 exclude，沒有 extend-exclude；完整盤點見 docs/負控紀錄.md。
+    # Ruff 的 lint 表只有 exclude，沒有 extend-exclude；完整盤點見
+    # docs/負控紀錄/0001-既有紀錄.md。
     lint排除 = _展平路徑鍵(lint設定, 表名="lint", 鍵們=("exclude",))
     格式設定 = _表或空(ruff設定, "format")
     格式排除 = _展平路徑鍵(格式設定, 表名="format", 鍵們=_排除清單鍵)
