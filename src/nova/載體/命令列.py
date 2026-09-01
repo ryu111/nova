@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import IO, Any, cast
 
 from nova import 家族額度, 額度
 from nova.契約.工作流 import (
@@ -53,6 +53,7 @@ from nova.載體.命令 import 收
 from nova.載體.單例 import 只准一個, 拿不到鎖
 from nova.載體.專案脈絡 import 專案執行脈絡, 建專案執行脈絡
 from nova.載體.工作區 import 判定工作區, 拍工作區快照
+from nova.載體.工作樹 import 開一個工作樹
 from nova.載體.已處理 import 列出成果, 歸檔
 from nova.載體.帳本 import (
     不記帳本,
@@ -71,8 +72,10 @@ from nova.載體.收件 import (
     完成一件,
     待處理,
     接著排,
+    搶下這一件,
     收下一件,
     收件單,
+    收件目錄,
     最多輪次,
 )
 from nova.載體.模型.接力 import 接力腦
@@ -417,6 +420,31 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
 _背景資料夾 = "背景"
 
 
+def _備好背景輸出目錄(專案根: Path) -> Path:
+    """背景輸出落在哪，順手把它建出來。**兩個背景入口共用這一份路徑算法。**"""
+    目錄 = 狀態根目錄() / "專案" / 專案識別(專案根) / _背景資料夾
+    目錄.mkdir(parents=True, exist_ok=True)
+    return 目錄
+
+
+def _發射背景程序(參: list[str], *, 輸出: IO[str], 在哪跑: Path, 環境: Mapping[str, str]) -> None:
+    """把 `nova <參>` 發射成一個獨立的背景程序，它的輸出全接到 `輸出`。
+
+    **`--背景` 與 `派工` 共用這一份。** 兩邊各寫一次 `Popen` 的話，
+    `start_new_session` 這種「父程序結束不會把它一起帶走」的細節遲早只剩一邊有，
+    而不一樣的那天沒有人會發現。
+    """
+    subprocess.Popen(  # noqa: S603 —— 就是這支自己，參數原封不動
+        [sys.executable, "-m", "nova", *參],
+        stdout=輸出,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # 父程序結束不會把它一起帶走
+        cwd=在哪跑,
+        env=環境,
+    )
+
+
 def _丟到背景(參數: argparse.Namespace) -> int:
     """把同一條指令重新發射成一個獨立的背景程序，立刻回。
 
@@ -432,21 +460,17 @@ def _丟到背景(參數: argparse.Namespace) -> int:
     if len(參) == len(sys.argv[1:]):
         print("--背景 只能從命令列用（重新發射靠的是 sys.argv）", file=sys.stderr)
         return 阻擋
-    落點目錄 = 狀態根目錄() / "專案" / 專案識別(_專案脈絡(參數).根目錄) / _背景資料夾
-    落點目錄.mkdir(parents=True, exist_ok=True)
+    落點目錄 = _備好背景輸出目錄(_專案脈絡(參數).根目錄)
     # **一件事只准有一個號碼。** 這裡編一個、帳本另外編一個的話，
     # 使用者拿到的識別碼在 `nova 帳本` 上查不到——而那看起來像「帳沒記」。
     識別 = 新執行識別碼()
     落點 = 落點目錄 / f"{識別}.md"
     with 落點.open("x", encoding="utf-8") as 手:
-        subprocess.Popen(  # noqa: S603 —— 就是這支自己，參數原封不動
-            [sys.executable, "-m", "nova", *參],
-            stdout=手,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,  # 父程序結束不會把它一起帶走
-            cwd=Path.cwd(),
-            env={**os.environ, 指定識別碼的環境變數: 識別},
+        _發射背景程序(
+            參,
+            輸出=手,
+            在哪跑=Path.cwd(),
+            環境={**os.environ, 指定識別碼的環境變數: 識別},
         )
     print(f"丟到背景了。識別碼：{識別}")
     print(f"輸出寫在：{落點}")
@@ -976,6 +1000,82 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
     參數.從收件匣 = True
     參數.喚醒來源 = 喚醒來源.人手動敲.value
     return _子命令_工作流(參數)
+
+
+def _子命令_派工(參數: argparse.Namespace) -> int:
+    """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
+
+    今天派線走 `nova 工作流 --提示檔 <票>`，而那條路不碰收件匣，於是**已經在跑的
+    票還躺在收件匣根目錄上**——`nova 收件` 說它「等著」，排程醒來就再派一次。
+    這一格補的就是那個缺口：派出去的第一件事是 `搶下這一件` 的 rename，
+    那是 at-most-once 的所有權宣告，不是裝飾。
+
+    四個問題各自的答案：
+
+    - **單例鎖**：不動它。`載體/單例.py` 的鎖按專案路徑分（`_工作流鎖`），
+      而每條線跑在自己的工作樹裡＝自己的路徑，所以並行派工天生各拿各的鎖。
+      要放寬的是「一個目錄一次只跑一個」——那條沒有放寬，也不該放寬。
+    - **票**：`丟一件` 落進主收件匣，當場 `搶下這一件` 搬進 `處理中/`。
+      **不准留在根目錄**，也不准用刪掉當修法：`處理中/` 的意思是「有人正在做」。
+    - **工作樹**：開在專案旁邊 `nova-wt-<線名>`，起點是主工作區現在的 commit。
+      殘骸不另立一套帳，`nova 線` 已經會列工作樹與未提交檔案數。
+    - **回什麼**：線名（就是票號），工作樹路徑，背景輸出檔。
+
+    **不另開執行路徑**：背景那條就是 `nova 工作流 --從收件匣`，只是工作目錄
+    換成工作樹。那條線自己的收件匣裡放的是同一張票——主收件匣那一份是
+    「這張已經派給誰了」的宣告，線那一份是它自己的待辦。
+    收尾（把主 `處理中/` 那份收掉）是收成那張票的事，不在這一格。
+    """
+    if "派工" not in sys.argv[1:]:
+        print("派工 只能從命令列用（背景那條靠的是 sys.argv）", file=sys.stderr)
+        return 阻擋
+    脈絡 = _專案脈絡(參數)
+    try:
+        內容 = Path(參數.票檔).read_text(encoding="utf-8")
+    except OSError as 錯:
+        print(f"讀不到票：{錯}", file=sys.stderr)
+        return 阻擋
+    try:
+        落點 = 丟一件(內容, 來源=你敲, 目錄=脈絡.收件)
+    except (ValueError, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    單 = 搶下這一件(落點, 脈絡.收件)
+    if 單 is None:
+        print(f"票落進收件匣了，卻搶不下來（有別人先拿走？）：{落點}", file=sys.stderr)
+        return 阻擋
+    try:
+        樹 = 開一個工作樹(
+            脈絡.根目錄,
+            落點=脈絡.根目錄.parent / f"nova-wt-{單.名稱}",
+            起點commit=目前commit(脈絡.根目錄) or "HEAD",
+        )
+        丟一件(單.任務, 來源=你敲, 目錄=收件目錄(樹))
+    except (ValueError, OSError) as 錯:
+        # 票留在 `處理中/`：開不出樹的那一次也是「有人動過它」，
+        # 靜靜放回根目錄會讓排程把同一件再派一次。
+        print(f"開不出工作樹，這條線沒起來（票在 {單.處理中路徑}）：{錯}", file=sys.stderr)
+        return 阻擋
+    輸出檔 = _背景起一條線(票檔=參數.票檔, 線名=單.名稱, 樹=樹, 專案根=脈絡.根目錄)
+    print(f"派出去了。線名：{單.名稱}")
+    print(f"工作樹：{樹}")
+    print(f"輸出寫在：{輸出檔}")
+    print("看這條線在哪一階：nova 線")
+    return 放行
+
+
+def _背景起一條線(*, 票檔: str, 線名: str, 樹: Path, 專案根: Path) -> Path:
+    """把這一輪丟到背景跑，回傳它的輸出檔。
+
+    重新發射走 `sys.argv` 而不是重組參數（跟 `_丟到背景` 同一條理由）：
+    重組會漏掉旗標，而漏掉的那次剛好就是最難查的那次。
+    """
+    參 = ["工作流" if 格 == "派工" else 格 for 格 in sys.argv[1:] if 格 != 票檔]
+    參 += ["--從收件匣", "--工作目錄", str(樹)]
+    輸出檔 = _備好背景輸出目錄(專案根) / f"{線名}.md"
+    with 輸出檔.open("a", encoding="utf-8") as 手:
+        _發射背景程序(參, 輸出=手, 在哪跑=樹, 環境=os.environ.copy())
+    return 輸出檔
 
 
 def _子命令_工作流(參數: argparse.Namespace) -> int:
@@ -1742,6 +1842,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "重構": _子命令_重構,
     "工作流": _子命令_工作流,
     "跑": _子命令_跑,
+    "派工": _子命令_派工,
     "排程": _子命令_排程,
     "秘密": _子命令_秘密,
     "狀態": _子命令_狀態,
