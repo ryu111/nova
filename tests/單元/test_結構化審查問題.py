@@ -6,6 +6,8 @@
 3. 從審查回覆中剖析結構化問題，相同內容產生確定性穩定 id。
 """
 
+import pytest
+
 from nova.契約.審查問題 import (
     問題數量上限,
     問題狀態,
@@ -89,3 +91,38 @@ class Test讀審查問題列:
         文字 = "看起來沒問題。\nREVIEW: PASS"
         問題列 = 讀審查問題列(文字)
         assert len(問題列) == 0
+
+    @pytest.mark.parametrize(
+        ("文字", "期望編號們", "證據們"),
+        [
+            # (a) 帶編號的行：編號照著行上寫的讀。
+            ("ISSUE-2: [impl] 甲\nREVIEW: CHANGES-REQUESTED", (2,), ("甲",)),
+            # (b) 不帶編號的舊行：用它在這段文字裡的位置補（1-based），不留空。
+            (
+                "ISSUE: [impl] 甲\nISSUE: [impl] 乙\nREVIEW: CHANGES-REQUESTED",
+                (1, 2),
+                ("甲", "乙"),
+            ),
+            # (c) 同一段證據換了個編號：講話的指稱換了，對帳的鍵不准跟著換。
+            ("ISSUE-7: [impl] 甲\nREVIEW: CHANGES-REQUESTED", (7,), ("甲",)),
+        ],
+    )
+    def test_ISSUE的編號讀得出來而且不進識別碼(
+        self, 文字: str, 期望編號們: tuple[int, ...], 證據們: tuple[str, ...]
+    ) -> None:
+        """守：編號是講話用的指稱，識別碼是跨輪對帳用的鍵，兩者不准互相汙染。
+
+        提示裡要說「第 2 條沒解」就得有一個數字可以指，所以每一條都要有編號，
+        舊格式沒寫的用位置補——「這條沒有編號」不是一種可以拿去講話的狀態。
+        同時識別碼只能是 `種類 ＋ 證據` 的函數：未解的條目原封帶到下一輪、
+        重新編號之後仍然要算同一條問題，否則跨輪對帳當場斷掉。
+        """
+        問題列 = 讀審查問題列(文字)
+
+        assert tuple(問.編號 for 問 in 問題列) == 期望編號們
+        assert tuple(問.證據 for 問 in 問題列) == 證據們
+
+        不帶編號的同一批 = 讀審查問題列("\n".join(f"ISSUE: [impl] {證據}" for 證據 in 證據們))
+        assert tuple(問.識別碼 for 問 in 問題列) == tuple(問.識別碼 for 問 in 不帶編號的同一批), (
+            "編號進了識別碼的雜湊：重新編一次號就等於換了一條問題"
+        )
