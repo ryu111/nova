@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO, Any, cast
 
-from nova import 家族額度, 額度
+from nova import 家族額度, 視窗, 額度
 from nova.契約.工作流 import (
     任務,
     停止條件,
@@ -124,6 +124,7 @@ from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.閘鎖 import 佔不到, 等鎖說明
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 花費, 超支了嗎
+from nova.載體.額度 import 只讀快取的額度, 記下狀態列額度
 from nova.迴圈 import 角色工廠, 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 from nova.迴圈.角色工廠 import (
@@ -1261,6 +1262,84 @@ def _派工該擋的理由(參數: argparse.Namespace) -> str | None:
     return None
 
 
+#: 用掉幾成就不派新線。**載體層的常數，不是旗標也不是設定項**：
+#: 調得動的門檻，第一次擋到人就會被調到 100，然後這道門等於不存在。
+額度門檻百分比 = 90
+#: 那一家自己的數字幾秒內算數（2 小時，跟 `~/.claude/statusline.sh` 自己的 stale 門檻同一個）。
+#: 過了就當「查不到」——舊數字比沒有數字更危險，它看起來像是有根據的。
+額度數字最舊秒 = 2 * 60 * 60
+
+
+def _重置的本機時間(重置於: int) -> str:
+    """epoch 秒 → 本機時區的 `年-月-日 時:分`。
+
+    **人是照著自己的鐘等重置的**：印 UTC 的話每個人都要自己在心裡加八小時，
+    而算錯的那一次就會又撞一次。
+    """
+    return datetime.fromtimestamp(重置於, tz=UTC).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _快撞到的視窗(家: 家族額度) -> 視窗 | None:
+    """這一家第一個用到門檻的視窗；每個窗都還有餘就回 None。
+
+    回**視窗本身**不回 True／False：擋下來的那一行要講得出「哪個窗、多少趴、
+    什麼時候重置」，只回一個布林的話呼叫端得再找一次同一個窗。
+    """
+    return next((窗 for 窗 in 家.視窗們 if 窗.用掉百分比 >= 額度門檻百分比), None)
+
+
+def _額度超標訊息(家名: str, 超標視窗: 視窗) -> str:
+    """擋下來時說的那句話：**哪一家、哪個視窗、用了幾趴、什麼時候重置**。
+
+    只回一個 4 的話，人不知道該等多久，也不知道換一家能不能派。
+    """
+    return (
+        f"額度：{家名} {超標視窗.標籤} 用了 {超標視窗.用掉百分比}%，"
+        f"重置 {_重置的本機時間(超標視窗.重置於)} (本機)，不派"
+    )
+
+
+def _額度查不到訊息(查不到的家名們: list[str]) -> str:
+    """放行時說的那句話：哪幾家查不到、為什麼算查不到（放行的理由見 `_額度先擋一下`）。"""
+    return (
+        f"額度：{'、'.join(查不到的家名們)} 查不到"
+        f"（快取沒有／{額度數字最舊秒 // 3600} 小時沒更新），照派"
+    )
+
+
+def _額度先擋一下(參數: argparse.Namespace) -> int | None:
+    """派工前看一眼額度：快撞到就回護欄碼、查不到就放行，**兩種都說出口**。
+
+    形狀照 `_預算先擋一下`（回 `護欄碼` 不回 `阻擋`：額度不足是「按設計停了」，
+    不是「人打錯字」）。擋下來要趕在落票開樹之前——擋了卻已經開了工作樹，
+    留下的是一棵沒有人在跑的樹和一張「處理中」的票，比不擋更難收。
+
+    **只讀快取、不 fork**（理由見 `只讀快取的額度`），而且看的是**那一家自己的**
+    時戳：全域 `ts` 只有一個，拿它頂替等於把別家的舊數字當成新的用。
+
+    **查不到就放行**，跟 `_審查腦碰不到的理由` 同一條理由：擋錯的代價是整個派工
+    停擺而且沒人知道為什麼；放行的最壞情況只是撞一次。但一定要說一聲——不說的話
+    這道門是薛丁格的門，沒擋，人也不知道它到底看了什麼。
+
+    沒事不印（門檻之下安靜放行）：每次派工都印一行額度警告的話，人很快就不看 stderr。
+    """
+    快照 = 只讀快取的額度()
+    家們 = {家.家: 家 for 家 in 快照.家族們} if 快照 is not None else {}
+    現在秒 = int(datetime.now(UTC).timestamp())
+    查不到的家名們: list[str] = []
+    for 家名 in sorted(_哪幾家(參數.用, 階段代碼.實作)):
+        家 = 家們.get(家名)
+        if 家 is None or 現在秒 - 家.時間 > 額度數字最舊秒:
+            查不到的家名們.append(家名)
+            continue
+        if (超標視窗 := _快撞到的視窗(家)) is not None:
+            print(_額度超標訊息(家名, 超標視窗), file=sys.stderr)
+            return 護欄碼
+    if 查不到的家名們:
+        print(_額度查不到訊息(查不到的家名們), file=sys.stderr)
+    return None
+
+
 def _這條線的分支名(線名: str) -> str:
     """`nova/<UTC時戳>-<票末六碼>`——兩個鍵都取自收件檔名，全 ASCII。
 
@@ -1274,7 +1353,35 @@ def _這條線的分支名(線名: str) -> str:
     return f"nova/{時戳}-{票末六碼}"
 
 
-def _子命令_派工(參數: argparse.Namespace) -> int:  # noqa: PLR0911 —— 落票與開樹各有獨立退件碼
+def _落票並搶下來(票檔: str, 收件匣: Path) -> 收件單 | int:
+    """讀票 → 落進收件匣 → 當場搶下來。**回 int ＝ 沒派成，那個數字就是退出碼。**
+
+    抽出來的理由跟 `_問的提示` 同一條（ruff `PLR0911`，而那條規則說的是對的）：
+    這三步各有自己的失敗出口，全擠在 `_子命令_派工` 裡的話，那一長串 return
+    就看不出是哪一道門擋的。搶到票之後才開工作樹，順序不變。
+    """
+    try:
+        內容 = Path(票檔).read_text(encoding="utf-8")
+    except OSError as 錯:
+        print(f"讀不到票：{錯}", file=sys.stderr)
+        return 阻擋
+    try:
+        落點 = 丟一件(內容, 來源=你敲, 目錄=收件匣)
+    except 票太大 as 錯:
+        # 停止規則按設計生效，不是用法錯誤：外圈看到 4 要拆票，不是把上限調高。
+        print(str(錯), file=sys.stderr)
+        return 護欄碼
+    except (ValueError, OSError) as 錯:
+        print(str(錯), file=sys.stderr)
+        return 阻擋
+    單 = 搶下這一件(落點, 收件匣)
+    if 單 is None:
+        print(f"票落進收件匣了，卻搶不下來（有別人先拿走？）：{落點}", file=sys.stderr)
+        return 阻擋
+    return 單
+
+
+def _子命令_派工(參數: argparse.Namespace) -> int:
     """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
 
     今天派線走 `nova 工作流 --提示檔 <票>`，而那條路不碰收件匣，於是**已經在跑的
@@ -1301,24 +1408,14 @@ def _子命令_派工(參數: argparse.Namespace) -> int:  # noqa: PLR0911 —�
     if 擋 := _派工該擋的理由(參數):
         print(擋, file=sys.stderr)
         return 阻擋
+    # 額度那道門排在落票開樹之前：明知道只剩幾趴還派，等於刻意製造一棵
+    # 改到一半、沒有人在跑的工作樹。
+    if (額度擋 := _額度先擋一下(參數)) is not None:
+        return 額度擋
     脈絡 = _專案脈絡(參數)
-    try:
-        內容 = Path(參數.票檔).read_text(encoding="utf-8")
-    except OSError as 錯:
-        print(f"讀不到票：{錯}", file=sys.stderr)
-        return 阻擋
-    try:
-        落點 = 丟一件(內容, 來源=你敲, 目錄=脈絡.收件)
-    except 票太大 as 錯:
-        print(str(錯), file=sys.stderr)
-        return 護欄碼
-    except (ValueError, OSError) as 錯:
-        print(str(錯), file=sys.stderr)
-        return 阻擋
-    單 = 搶下這一件(落點, 脈絡.收件)
-    if 單 is None:
-        print(f"票落進收件匣了，卻搶不下來（有別人先拿走？）：{落點}", file=sys.stderr)
-        return 阻擋
+    單 = _落票並搶下來(參數.票檔, 脈絡.收件)
+    if isinstance(單, int):
+        return 單
     try:
         樹 = 開一個工作樹(
             脈絡.根目錄,
@@ -2127,8 +2224,26 @@ def _子命令_生圖(參數: argparse.Namespace) -> int:
     return _終局的退出碼[果.答.終局]
 
 
+def _從狀態列更新額度() -> None:
+    """從 stdin 讀 claude 狀態列 JSON，能解析就更新額度快取。"""
+    with contextlib.suppress(Exception):
+        原始 = json.loads(sys.stdin.read())
+        if isinstance(原始, Mapping):
+            記下狀態列額度(原始)
+
+
 def _子命令_額度(參數: argparse.Namespace) -> int:
-    """查詢 codex 與 agy 額度並寫入快取。"""
+    """查詢 codex 與 agy 額度並寫入快取；`--從狀態列` 改成讀 stdin 的 claude 狀態列。
+
+    `--從狀態列` 那條路**一律回 0、什麼都不印**：它是被 `~/.claude/statusline.sh`
+    在背景叫的，在那裡吵一句話就會弄髒主 agent 的狀態列。讀不出 JSON、
+    沒有 `rate_limits`（免費方案、視窗過期）都只是沒得寫，不是錯；
+    **寫不進快取**（位置被目錄佔住、狀態碟唯讀）也一樣只是沒得寫——
+    那一家過一會兒就自然過期成「查不到」，派工前那道門會放行並說出口。
+    """
+    if getattr(參數, "從狀態列", False):
+        _從狀態列更新額度()
+        return 放行
 
     def _回報(家: 家族額度) -> None:
         if 家.失敗原因:
