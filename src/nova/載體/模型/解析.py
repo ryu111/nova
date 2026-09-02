@@ -211,6 +211,17 @@ def _codex的錯誤訊息(事件們: list[dict[str, Any]]) -> str:
     return "\n".join(片段)
 
 
+def _codex的非快取輸入(用了: dict[str, Any]) -> int:
+    """codex 的 `input_tokens` **含** `cached_input_tokens`，要扣掉才跟另外兩家同語意。
+
+    codex 自己也是這樣算的（`non_cached_input = input − cached`）。快取欄缺值
+    （8/31 前的 codex 沒這欄）就當 0 扣，整份算新鮮。
+    """
+    整份輸入 = int(用了.get("input_tokens", 0))
+    其中的快取讀取 = int(用了.get("cached_input_tokens") or 0)
+    return max(整份輸入 - 其中的快取讀取, 0)
+
+
 def _解析codex(標準輸出: str, 結束碼: int) -> 回應:
     """`codex exec --json` 的 JSONL 事件流。"""
     事件們 = _逐行json(標準輸出)
@@ -228,9 +239,12 @@ def _解析codex(標準輸出: str, 結束碼: int) -> 回應:
         原始結束碼=結束碼,
         對話識別碼=開場.get("thread_id"),
         用量=用量(
-            輸入token=int(用了.get("input_tokens", 0)),
+            輸入token=_codex的非快取輸入(用了),
             輸出token=int(用了.get("output_tokens", 0)),
             快取讀取token=用了.get("cached_input_tokens"),
+            # `快取建立token` 刻意留白：codex 有 `cache_write_input_tokens`，但沒有證據
+            # 說它在 `input_tokens` 之外（codex 的 `non_cached_input` 也沒扣它）。
+            # 猜錯就會重複計進 `新鮮token`，要接之前先拿實錄把語意釘死。
             思考token=用了.get("reasoning_output_tokens"),
         ),
         原始輸出=tuple(事件們),

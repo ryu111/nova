@@ -95,6 +95,9 @@ class 用量:
     **不准為了讓三家對稱而自己估算**——猜出來的成本比沒有成本更危險。
     """
 
+    #: **不含快取讀取的那份新鮮輸入。**三家原生語意不一樣（codex 的
+    #: `input_tokens` 含快取讀取、claude 的不含），對齊做在解析器裡，
+    #: 進到契約就只剩這一種意思——寫新的解析器要照這個對齊。
     輸入token: int
     輸出token: int
     快取讀取token: int | None = None
@@ -105,13 +108,14 @@ class 用量:
     成本美金: float | None = None
 
     @property
-    def 總token(self) -> int:
-        """預算要拿來加總的那個數。
+    def 新鮮token(self) -> int:
+        """這次呼叫真的燒掉多少——預算與單次上限都比這個數。
 
-        只加輸入與輸出：思考 token 三家都算在輸出裡，快取讀取是另一種計價
-        （而且不是每家都給）。**把不確定的東西加進總數，得到的是猜測不是預算。**
+        輸入（各家在解析器裡都已經扣掉快取讀取）＋輸出＋快取建立。思考 token
+        三家都算在輸出裡；**快取讀取不算**，那是打折重讀的上下文，不是這次燒的。
+        快取建立算，它是真的新鮮輸入而且按 1.25× 計價。
         """
-        return self.輸入token + self.輸出token
+        return self.輸入token + self.輸出token + (self.快取建立token or 0)
 
 
 @dataclass(frozen=True, slots=True)

@@ -105,7 +105,7 @@ class 記帳腦:
         """
         全文 = _遮過再截斷(答, 記全文=self.記全文)
         花費 = 答.用量 if 答 else None
-        超標 = True if (花費 is not None and 花費.總token > self.單次最多token) else None
+        超標 = True if (花費 is not None and 花費.新鮮token > self.單次最多token) else None
         return 事件(
             種類=事件種類.呼叫結束,
             呼叫編號=編號,

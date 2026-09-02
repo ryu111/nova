@@ -152,7 +152,7 @@ class Test逾時的回應:
 
     def test_用量不准從半成品抄(self) -> None:
         """半途的 usage 不是這次的花費。抄過來會讓帳本記到一個假的數字。"""
-        assert 逾時的回應(假解析, codex部分輸出).用量.總token == 0
+        assert 逾時的回應(假解析, codex部分輸出).用量.新鮮token == 0
 
     def test_進度要留在文字裡(self) -> None:
         assert "半成品" in 逾時的回應(假解析, codex部分輸出).文字
