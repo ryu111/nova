@@ -1008,8 +1008,8 @@ _這個檔裡的 = (
         識別="收尾合併不得使用管理員",
         目標檔=Path("src/nova/載體/命令/收.py"),
         操作=替換一次(
-            '        "--delete-branch",\n    )',
-            '        "--delete-branch",\n        "--admin",\n    )',
+            '    指令 = ["gh", "pr", "merge", "--squash"]',
+            '    指令 = ["gh", "pr", "merge", "--squash", "--admin"]',
         ),
         該紅=("tests/整合/test_收尾紅線.py::Test收尾紅線::test_合併指令不准帶管理員旗標",),
         最多秒=3.0,
@@ -1017,7 +1017,7 @@ _這個檔裡的 = (
     變異(
         識別="收尾合併必須刪除分支",
         目標檔=Path("src/nova/載體/命令/收.py"),
-        操作=刪除一次('        "--delete-branch",\n'),
+        操作=刪除一次('    if 刪遠端分支:\n        指令.append("--delete-branch")\n'),
         該紅=("tests/整合/test_收尾紅線.py::Test收尾紅線::test_合併指令一定帶刪除分支旗標",),
         最多秒=3.0,
     ),

@@ -51,6 +51,10 @@ from nova.載體.收件 import 收件目錄, 處理中目錄
 #: 這裡刻意換成一句認得出來的字：測試要釘的是**這句話有沒有被端到人面前**。
 問不出時git的抱怨 = "fatal: 假 git 今天答不出 HEAD 是哪條 ref"
 
+#: 假 git 在「收不掉樹」模式下吐的那句話。真的 git 這時吐的是英文（樹髒、被佔用
+#: 之類），這裡同樣換成認得出來的字。
+收不掉樹時git的抱怨 = "fatal: 假 git 今天收不掉這棵樹"
+
 
 def _跑git(工作目錄: Path, *參數: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603, S607 —— 測試自己組的 git 指令
@@ -77,7 +81,11 @@ import pathlib
 import sys
 with open(os.environ['NOVA_收推分支紀錄'], 'a', encoding='utf-8') as 檔:
     json.dump(
-        {{'程式': pathlib.Path(sys.argv[0]).name, 'argv': sys.argv[1:]}},
+        {{
+            '程式': pathlib.Path(sys.argv[0]).name,
+            'argv': sys.argv[1:],
+            'cwd': os.getcwd(),
+        }},
         檔,
         ensure_ascii=False,
     )
@@ -90,8 +98,15 @@ with open(os.environ['NOVA_收推分支紀錄'], 'a', encoding='utf-8') as 檔:
         f"    sys.stderr.write({問不出時git的抱怨!r} + '\\n')\n"
         "    sys.exit(128)\n"
     )
+    # 同一個開關手法：只攔 `worktree remove` 這一道，其餘照樣委派真的 git——
+    # 「收不掉樹」那一支要看的是 merge 之後的收場，前面每一步都得是真的。
+    收不掉樹 = (
+        "if sys.argv[1:3] == ['worktree', 'remove'] and os.environ.get('NOVA_收推收不掉樹'):\n"
+        f"    sys.stderr.write({收不掉樹時git的抱怨!r} + '\\n')\n"
+        "    sys.exit(1)\n"
+    )
     (執行檔目錄 / "git").write_text(
-        f"{共同開頭}{答不出分支}os.execv({真git!r}, [{真git!r}, *sys.argv[1:]])\n",
+        f"{共同開頭}{答不出分支}{收不掉樹}os.execv({真git!r}, [{真git!r}, *sys.argv[1:]])\n",
         encoding="utf-8",
     )
     (執行檔目錄 / "gh").write_text(共同開頭, encoding="utf-8")
@@ -136,8 +151,38 @@ def _讀呼叫(紀錄: Path) -> list[tuple[str, list[str]]]:
     return 呼叫
 
 
+def _讀呼叫含cwd(紀錄: Path) -> list[tuple[str, list[str], Path]]:
+    """跟 `_讀呼叫` 同一份紀錄，但連每一道指令**是站在哪裡跑的**一起讀出來。
+
+    argv 說得出「跑了什麼」，說不出「在哪裡跑」，而 11b 死掉的那一格正是後者：
+    merge 之後 `根` 隨時會不見，站在那裡發指令的東西全都會跟著它一起掉下去。
+    """
+    if not 紀錄.exists():
+        return []
+    呼叫: list[tuple[str, list[str], Path]] = []
+    for 行 in 紀錄.read_text(encoding="utf-8").splitlines():
+        資料 = cast(dict[str, object], json.loads(行))
+        呼叫.append(
+            (
+                str(資料["程式"]),
+                [str(值) for 值 in cast(list[object], 資料["argv"])],
+                Path(str(資料["cwd"])),
+            )
+        )
+    return 呼叫
+
+
 def _推的那幾次(紀錄: Path) -> list[list[str]]:
     return [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "git" and 參數[:1] == ["push"]]
+
+
+def _斷言有gh指令(紀錄: Path, *開頭: str) -> list[str]:
+    """斷言假 `gh` 收到過以 `開頭` 起首的一道指令，並回傳那次的 argv。"""
+    for 名稱, 參數 in _讀呼叫(紀錄):
+        if 名稱 == "gh" and 參數[: len(開頭)] == list(開頭):
+            return 參數
+    訊息 = f"找不到 gh {' '.join(開頭)}：{_讀呼叫(紀錄)}"
+    raise AssertionError(訊息)
 
 
 def _origin上的分支(origin: Path) -> set[str]:
@@ -231,8 +276,8 @@ def test_收把派工開的分支推成完整refspec(
 ) -> None:
     """派工形狀的樹 → 在裡面改一次 → `收` 推得上去，origin 真的多了那個 ref。
 
-    收場停在 1 是這一格現在**誠實的**結局：PR 開了也合併了，但派工樹自己還站在
-    那條 head 分支上，本地分支刪不掉。`收` 要指名是哪條分支卡住，不准無聲收 0。
+    這一支只釘 push 那一段的形狀（完整 refspec、origin 上真的長出東西）；
+    收場（樹收掉、分支刪掉、退出碼 0）歸下面那一支整趟的測試。
     """
     專案, origin, 起點commit = _造專案與origin(tmp_path)
     紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
@@ -260,11 +305,219 @@ def test_收把派工開的分支推成完整refspec(
         _跑git(origin, "show", f"refs/heads/{分支名}:分支的產出.txt").stdout == "這一條線做完的事\n"
     ), "origin 上那條分支不是這棵樹剛 commit 的東西"
 
-    錯誤 = capsys.readouterr().err
-    assert 碼 == 閘紅, f"樹跟本地分支都還在，這一趟收尾沒收乾淨，不准回 0：收到 {碼}"
-    assert "本地分支" in 錯誤 and 分支名 in 錯誤, (
-        f"收 1 要指名是哪條本地分支沒刪掉，人才知道去刪什麼：{錯誤!r}"
+    輸出 = capsys.readouterr()
+    assert 碼 == 放行, f"閘綠、推成功、PR 也合併了，這一趟該收 0：收到 {碼}\n{輸出.err}"
+
+
+def test_收在派工開的樹上整趟走完要收0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """在派工開的樹上跑 `收`：合併之後**現場要收乾淨**——樹不在、本地分支不在、收 0。
+
+    「收 0」的意思在派工樹上包含兩件事，缺一件都是假綠：那棵樹不在了、它掛的
+    本地分支也不在了。留著樹就是留著一棵沒人會再進去的目錄，留著分支則會讓下一次
+    同名派工撞在一條沒人用的分支上，而且沒人講得出它是哪一票留的（`docs/負控紀錄/
+    0010`）。
+
+    `--delete-branch` 在派工樹上是明確有害的，所以順便釘死 argv：`gh pr merge
+    --delete-branch` 會先 `git checkout <base>`，而 base 正被主工作區佔著，linked
+    worktree 裡那道 checkout 回 128——**merge 已經做完了才回非零**，`收` 收 1，樹
+    與分支照樣留著。遠端那條分支由 repo 的 delete-branch-on-merge 刪，所以派工樹這
+    條路只給 `--squash`；主工作區那條路照舊帶 `--delete-branch`（`test_收尾紅線.py`
+    的 `test_合併指令一定帶刪除分支旗標` 釘著）。
+
+    gh 是假的（測試不准碰 GitHub），git 是真的：這一支要看的是「跑完之後這個 repo
+    上還剩什麼」，拿假 git 自問自答就等於沒測。
+    """
+    專案, origin, 起點commit = _造專案與origin(tmp_path)
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
     )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    assert 碼 == 放行, f"閘綠、PR 合併了，收尾卻回 {碼}\n{輸出.out}\n{輸出.err}"
+    assert not 樹.exists(), f"PR 合併了、樹還在：這棵樹沒人會再進去，卻要人手動清：{樹}"
+    留著的分支 = _跑git(專案, "branch", "--list", 分支名).stdout.strip()
+    assert 留著的分支 == "", (
+        f"本地分支 {分支名} 還在——下一次同名派工會撞在一條沒人用的分支上：{留著的分支!r}"
+    )
+    樹清單 = [
+        行
+        for 行 in _跑git(專案, "worktree", "list", "--porcelain").stdout.splitlines()
+        if 行.startswith("worktree ")
+    ]
+    assert 樹清單 == [f"worktree {專案}"], f"worktree 清單裡還留著派工那棵樹的登記：{樹清單}"
+
+    合併 = _斷言有gh指令(紀錄, "pr", "merge")
+    assert "--squash" in 合併, f"合併政策沒變：一律 squash：{合併}"
+    assert "--delete-branch" not in 合併, (
+        "派工樹上不准帶 `--delete-branch`：gh 會先 checkout base，"
+        f"而 base 被主工作區佔著，那道 checkout 回 128 是在 merge 之後才發生的：{合併}"
+    )
+    assert f"refs/heads/{分支名}" in _origin上的分支(origin), (
+        "本地收乾淨了，但 origin 上那條分支根本沒推上去——這一趟白跑"
+    )
+
+
+def test_合併之後每一道指令的cwd只准是主工作區(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """`gh pr merge` 之後，`收` 發出去的每一道指令都只准站在**主工作區**跑。
+
+    merge 之後這棵派工樹隨時會不見（下一步就是 `收掉工作樹`），所以「站在樹裡發
+    指令」從那一秒起就是一顆定時炸彈：樹一收掉，那個 cwd 就是一個不存在的 inode，
+    後面任何還指著它的東西都會炸——而炸的時候 PR 已經合併、遠端已經動過，`收` 只
+    能回非零，人看到非零會再跑一次，那時連 `cd` 都進不去（票 05／07 的接續同一格）。
+
+    「拿掉樹之前站在樹裡跑」跑得動不等於它是對的：`git worktree remove` 收掉自己
+    站的那棵樹，git 回 0，但那是**運氣**——收的順序、git 版本、樹裡有沒有別的東西
+    佔著，任何一項變了就換成「merge 做完了才回非零、樹與分支留著」，正是 0010 記的
+    那個現場。所以這裡不看「這次有沒有成功」，看的是**位置**：合併之後那幾道
+    `worktree list`／`worktree remove`／`branch -D` 全部都要從主工作區發出去。
+    `收掉工作樹(落點)` 的簽章不必動——它自己已經問得到主工作區在哪。
+
+    argv 由假 CLI 一併記下 cwd（`_讀呼叫含cwd`）：假 gh 收到 `pr merge` 的那一刻
+    就是分界線，那之後每一筆的 cwd 都要等於主工作區。
+    """
+    專案, _origin, 起點commit = _造專案與origin(tmp_path)
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    assert 碼 == 放行, f"這一支要看的是合併之後的 cwd，前面得先走到合併：{碼}\n{輸出.err}"
+    呼叫 = _讀呼叫含cwd(紀錄)
+    合併在第幾筆 = [
+        序
+        for 序, (名稱, 參數, _) in enumerate(呼叫)
+        if 名稱 == "gh" and 參數[:2] == ["pr", "merge"]
+    ]
+    assert len(合併在第幾筆) == 1, f"`gh pr merge` 該恰好發生一次：{呼叫}"
+
+    站錯地方的 = [
+        (名稱, 參數, 位置)
+        for 名稱, 參數, 位置 in 呼叫[合併在第幾筆[0] + 1 :]
+        if 位置.resolve() != 專案.resolve()
+    ]
+    assert 站錯地方的 == [], (
+        f"合併之後有指令不是站在主工作區 {專案} 跑的，站的是那棵隨時會消失的派工樹：\n"
+        + "\n".join(f"  cwd={位置}：{名稱} {' '.join(參數)}" for 名稱, 參數, 位置 in 站錯地方的)
+    )
+
+
+def test_人從樹裡面跑收_收把自己站的cwd刪掉之後照樣收0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """人真正的跑法是 `cd <樹> && nova 收`：程序自己的 cwd 就在那棵要被收掉的樹裡。
+
+    上面那支整趟的測試是從 pytest 的 cwd 跑的，`--工作目錄` 指進樹裡——收掉樹的
+    那一刻，程序自己站的地方沒有消失。人不是這樣跑的：人 `cd` 進去才跑，樹一收掉，
+    這個程序的 cwd 就是一個已經不存在的 inode。從那一秒起 `os.getcwd()` 會炸、
+    任何拿相對路徑去解的動作會炸、任何沒有明講 cwd 的 subprocess 會炸。
+
+    所以這一格釘的是「merge 之後不准有任何東西依賴 `根`／依賴當下的 cwd」：收場
+    每一道指令的 cwd 只准是主工作區。這條路壞掉的樣子特別難查——樹收掉了、分支
+    刪掉了、PR 也合併了，事情其實都做完了，卻回一個非零，而人看到非零的第一反應是
+    再跑一次 `收`，那時樹已經不在，連 `cd` 都進不去（票 05／07 的接續也踩同一格）。
+    """
+    專案, _origin, 起點commit = _造專案與origin(tmp_path)
+    _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    閘放行()
+
+    monkeypatch.chdir(樹)
+    try:
+        碼 = 主程式(_收尾參數(樹))
+    finally:
+        # 樹已經不在了，這個程序沒有一個活著的 cwd——先站回主工作區再做斷言，
+        # 不然紅的會是 pytest 自己的收尾，不是這一支要測的那件事。
+        os.chdir(專案)
+
+    輸出 = capsys.readouterr()
+    assert 碼 == 放行, (
+        f"人站在樹裡跑，收尾把樹收掉之後回了 {碼}：事情做完了卻回非零，"
+        f"人只會再跑一次 `收`，而那時連 cd 都進不去\n{輸出.out}\n{輸出.err}"
+    )
+    assert not 樹.exists(), f"人站在樹裡跑的時候這棵樹就沒收掉：{樹}"
+    留著的分支 = _跑git(專案, "branch", "--list", 分支名).stdout.strip()
+    assert 留著的分支 == "", f"本地分支 {分支名} 還在：{留著的分支!r}"
+
+
+def test_派工樹收不掉時停在一並且明講不要重跑merge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """PR 合併了、樹卻收不掉：回 1、指名那條分支、明講不要重跑 merge，且不重跑。
+
+    這是這條路上唯一一種「已經動過遠端、卻沒收完」的狀態，訊息要照著它寫：merge
+    是冪等不了的那一步（重按只會拿到一句「已經合併過了」），真正沒做完的是清現場
+    那一段——所以人要拿到的指示是「清掉樹之後手動刪本地分支 <分支>」，而不是一句
+    含糊的失敗。分支名一定要出現在訊息裡：樹沒收掉時本地那條分支還在，沒有名字人
+    就不知道要去刪什麼（`docs/負控紀錄/0010`）。
+
+    同時釘死「`gh pr merge` 恰好一次」：收不掉樹不准變成一條會回頭重跑 merge 的
+    路。假 git 只攔 `worktree remove` 這一道，其餘全委派真的 git——攔多了，紅的
+    原因就不是這一支要測的那件事。
+    """
+    專案, _origin, 起點commit = _造專案與origin(tmp_path)
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    monkeypatch.setenv("NOVA_收推收不掉樹", "1")
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    assert 碼 == 閘紅, f"樹沒收掉就不是收乾淨了，不准回 {碼}"
+    assert 樹.exists(), "假 git 讓 `worktree remove` 失敗了，樹卻不見了：這一支測的現場沒造出來"
+    assert 分支名 in 輸出.err, f"沒指名要手動刪哪條本地分支：{輸出.err!r}"
+    assert "不要重跑 merge" in 輸出.err, (
+        f"沒擋掉「再按一次 merge」這個直覺反應，而 merge 已經做過了：{輸出.err!r}"
+    )
+    assert 收不掉樹時git的抱怨 in 輸出.err, f"git 自己的抱怨沒端出來，人查不下去：{輸出.err!r}"
+    合併過的次數 = sum(
+        1 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "gh" and 參數[:2] == ["pr", "merge"]
+    )
+    assert 合併過的次數 == 1, f"`gh pr merge` 該恰好發生一次，實際 {合併過的次數} 次"
 
 
 def test_問不出分支時不准謊報也不准推(
