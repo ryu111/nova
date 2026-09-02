@@ -216,16 +216,24 @@ def _跑到動了測試(工作區: Path) -> 工作流結果:
     """實作員把紅測試改成恆綠——這條 4 是**階段邊界**發的。
 
     修法是「這一步不算數、回去寫實作」，跟上面每一種都不同。
+
+    **第一次伸手不收 4**（退回測試員，那幾個檔怎麼處置是測試員的職權），
+    所以這裡讓實作員伸手兩次才走得到這道護欄；每次寫的內容要不一樣，
+    同樣的內容寫第二次在快照上根本沒動過。
     """
     (工作區 / "tests").mkdir(parents=True, exist_ok=True)
     測試檔 = 工作區 / "tests" / "test_既有.py"
     測試檔.write_text("def test_既有() -> None:\n    assert 1 + 1 == 3\n", encoding="utf-8")
+    伸手次數 = 0
 
     def 執行一步(定義: 階段定義, 任: 任務, _軌跡: tuple[步驟結果, ...]) -> 步驟結果:
+        nonlocal 伸手次數
         del _軌跡
         if 定義.代碼 is 階段代碼.實作:
+            伸手次數 += 1
             (任.工作目錄 / "tests" / "test_既有.py").write_text(
-                "def test_既有() -> None:\n    assert True\n", encoding="utf-8"
+                f"def test_既有() -> None:\n    assert True  # 第 {伸手次數} 次\n",
+                encoding="utf-8",
             )
         return _平凡的一步(定義)
 
