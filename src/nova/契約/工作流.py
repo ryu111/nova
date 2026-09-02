@@ -43,6 +43,16 @@ class 工作區狀態(StrEnum):
 
 type 規則代碼 = str
 
+#: `驗證綠` 紅在這幾條閘規則、而且紅到的路徑**全在 `tests/` 底下**時，那一輪退回測試員。
+#:
+#: 只有這三條是測試員一個 `ruff format`／改一行就修得掉的。`ruff-exemptions` 只掛 ci；
+#: `pytest-unit`、`docs-facts`、`test-count`、`lang-traditional`、`no-secrets`、
+#: `layer-boundaries` 一律不分流——那些不是排版問題。
+#:
+#: 住契約是因為讀證據的 `迴圈` 不准 import 建規則表的 `載體`（`layer-boundaries` 那條閘擋著），
+#: 共用點只能在這裡。代碼改名要當場紅，靠 `載體` 那側的對帳測試盯著。
+測試員修得掉的規則代碼: frozenset[規則代碼] = frozenset({"ruff-check", "ruff-format", "mypy"})
+
 
 @dataclass(frozen=True, slots=True)
 class 工作區判定:

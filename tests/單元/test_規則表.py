@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from nova.契約.工作流 import 測試員修得掉的規則代碼
 from nova.載體.規則表 import 平行度, 建規則表, 版本
 from nova.載體.閘 import 型別, 測試, 規則, 閘點清單, 靜態
 
@@ -63,6 +64,18 @@ def test_四道閘都在ci裡() -> None:
     for 必要 in ("ruff-check", "ruff-format", "mypy"):
         assert 必要 in ci代碼, f"CI 缺少 {必要}"
     assert any(代碼.startswith("pytest") for 代碼 in ci代碼), "CI 沒有跑測試"
+
+
+def test_退給測試員的規則代碼都在規則表上() -> None:
+    """守：`契約` 那份「測試員修得掉的規則代碼」跟規則表對得上帳，代碼改名要當場紅。
+
+    `迴圈` 不准 import `載體`（`layer-boundaries` 那條閘擋著），所以那份集合住 `契約`，
+    誰也不會在改規則代碼時順手改到它。對不上帳的話這條分流只是靜靜失效，
+    症狀是「提交閘紅在測試檔時又開始收 4」——離改名那一手已經很遠了。
+    """
+    代碼 = {條.代碼 for 條 in _規則表()}
+    漏掉的 = 測試員修得掉的規則代碼 - 代碼
+    assert not 漏掉的, f"合格集合點名了規則表上沒有的代碼：{sorted(漏掉的)}"
 
 
 def test_三條新規則都上了() -> None:
