@@ -128,7 +128,8 @@ def test_節點護欄的結果是退出碼四() -> None:
     assert int(結果.結果) == 4
 
 
-def test_護欄原因六種且只有這六種() -> None:
+def test_護欄原因只有這幾種() -> None:
+    #: 值一律是 ASCII：護欄原因要跨程序流進成果帳的 JSON 欄位。
     預期 = {
         護欄原因.預算: "budget",
         護欄原因.步數: "steps",
@@ -136,10 +137,14 @@ def test_護欄原因六種且只有這六種() -> None:
         護欄原因.無進展: "stagnation",
         護欄原因.扇出超限: "fanout-limit",
         護欄原因.輸出不合約: "invalid-output",
+        護欄原因.動了測試: "touched-tests",
+        護欄原因.重構改壞行為: "refactor-broke-behavior",
+        護欄原因.驗收紅: "acceptance-failed",
     }
 
-    assert len(護欄原因) == 6
+    assert len(護欄原因) == 9
     assert {原因: 原因.value for 原因 in 護欄原因} == 預期
+    assert all(原因.value.isascii() for 原因 in 護欄原因)
 
 
 def _不可變案例() -> tuple[tuple[str, object, str, object], ...]:

@@ -1,11 +1,15 @@
 """節點與邊的契約：結構化輸入、輸出、證據與終局。"""
 
 from dataclasses import dataclass
-from enum import IntEnum, StrEnum
+from enum import IntEnum
 from typing import NewType, Protocol
 
 from nova.契約.工作流 import 任務
 from nova.契約.模型回應 import 失敗代碼, 用量
+
+# 護欄原因搬到 `契約.護欄` 了（這裡 import 得到 `契約.工作流`，enum 留在這會繞成環）。
+# 這一行留著讓 `from nova.契約.節點 import 護欄原因` 的舊寫法照樣讀得到。
+from nova.契約.護欄 import 護欄原因 as 護欄原因  # noqa: PLC0414
 
 執行識別碼 = NewType("執行識別碼", str)
 工作流識別碼 = NewType("工作流識別碼", str)
@@ -22,17 +26,6 @@ class 結果代碼(IntEnum):
     確定失敗 = 1
     結果未知 = 3
     護欄 = 4
-
-
-class 護欄原因(StrEnum):
-    """節點因停止政策而停止的原因。"""
-
-    預算 = "budget"
-    步數 = "steps"
-    逾時 = "timeout"
-    無進展 = "stagnation"
-    扇出超限 = "fanout-limit"
-    輸出不合約 = "invalid-output"
 
 
 @dataclass(frozen=True, slots=True)
