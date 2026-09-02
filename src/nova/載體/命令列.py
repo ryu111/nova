@@ -82,6 +82,7 @@ from nova.載體.收件 import (
     收件單,
     收件目錄,
     最多輪次,
+    票太大,
 )
 from nova.載體.模型.接力 import 接力腦, 新端點健康表, 端點健康表
 from nova.載體.模型.本地 import 審查資格理由
@@ -1216,6 +1217,9 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
         return 阻擋
     try:
         丟一件(描述, 來源=你敲, 目錄=_專案脈絡(參數).收件)
+    except 票太大 as 錯:
+        print(str(錯), file=sys.stderr)
+        return 護欄碼
     except (ValueError, OSError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
@@ -1363,6 +1367,10 @@ def _落票並搶下來(票檔: str, 收件匣: Path) -> 收件單 | int:
         return 阻擋
     try:
         落點 = 丟一件(內容, 來源=你敲, 目錄=收件匣)
+    except 票太大 as 錯:
+        # 停止規則按設計生效，不是用法錯誤：外圈看到 4 要拆票，不是把上限調高。
+        print(str(錯), file=sys.stderr)
+        return 護欄碼
     except (ValueError, OSError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
