@@ -86,6 +86,7 @@ def _結束事件(
         輸入token=花費.輸入token if 花費 else None,
         輸出token=花費.輸出token if 花費 else None,
         耗時毫秒=耗時,
+        等待毫秒=結果.等待毫秒 if 結果 else None,
         文字長度=len(結果.證據) if 結果 else None,
         文字雜湊=_指紋(結果.證據) if 結果 else None,
         單次token超標=超標,
