@@ -23,7 +23,9 @@ from pathlib import Path
 from tests.負控.登記 import 替換一次, 變異
 
 _那道門 = "tests/整合/test_派工前看額度.py::test_額度快撞到就不派而查不到就放行且都要說出口"
-_保留別家 = "tests/整合/test_狀態列額度進快取.py::test_兩個寫入端都保留別家_cl帶自己的ts_全域ts不動"
+_保留別家 = (
+    "tests/整合/test_狀態列額度進快取.py::test_狀態列摸新了檔案也不准讓cx_ay的舊數字冒充新鮮"
+)
 _節流那支 = (
     "tests/整合/test_狀態列額度進快取.py::test_六十秒內再餵不重寫_沒rate_limits不寫_百分比四捨五入"
 )
