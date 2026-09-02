@@ -14,6 +14,7 @@ from nova.契約.派工 import 工作種類
 from nova.契約.角色 import 預設逾時秒
 from nova.契約.觸發 import 喚醒來源
 from nova.載體.模型.轉接 import 思考深度們
+from nova.載體.顧問 import 預設窗口, 預設門檻
 
 #: 正典公開動作全集，直接對齊階段代碼，不可獨立維護第二份清單。
 公開階段動作全集: frozenset[str] = frozenset(代碼.value for 代碼 in 階段代碼)
@@ -97,6 +98,7 @@ def 建剖析器(處理們: Mapping[str, 處理型]) -> argparse.ArgumentParser:
     _加檢查類(子, 處理們)
     _加委派類(子, 處理們)
     _加觀測類(子, 處理們)
+    _加顧問(子, 處理們)
     _加階段類(子, 處理們)
     return 剖析器
 
@@ -246,6 +248,11 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
         help="叫它邊做邊寫進這個檔。逾時被殺之後還撿得回進度（要搭 --可編輯）",
     )
     剖析.add_argument(
+        "--載體代寫",
+        action="store_true",
+        help="--輸出檔 由載體寫，模型維持唯讀。唯讀診斷要留下結果就用這個（不會升權）",
+    )
+    剖析.add_argument(
         "--背景",
         action="store_true",
         help="丟到背景跑，立刻回。印出識別碼與輸出檔；看還在跑什麼用 nova 狀態",
@@ -388,6 +395,36 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
         choices=[代碼.value for 代碼 in 階段代碼],
         help="從哪個階段開始。refactor ＝ 只走重構流程（前提是本來就全綠）",
     )
+
+
+def _加顧問(
+    子: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    處理們: Mapping[str, 處理型],
+) -> None:
+    """`nova 顧問`：數帳、打包診斷素材。**自成一支**是因為 `_加觀測類` 撞了敘述長度上限。"""
+    顧問剖析 = 子.add_parser(
+        "顧問", help="數帳：同一個護欄原因反覆出現就打包成診斷素材（只出證據，自己不修東西）"
+    )
+    顧問剖析.set_defaults(執行=處理們["顧問"])
+    # 門檻與窗口是**停止規則不是設定項**（比照 `收件.最多輪次`）：旗標在這裡，
+    # 是為了讓放寬變成人的一次明講，不是讓它撞到了就自己調高。
+    顧問剖析.add_argument(
+        "--門檻", type=int, default=預設門檻, help=f"同一個原因撞幾次才打包（預設 {預設門檻}）"
+    )
+    顧問剖析.add_argument(
+        "--窗口小時",
+        type=float,
+        default=預設窗口.total_seconds() / 3600,
+        help=f"往回看幾小時（預設 {預設窗口.total_seconds() / 3600:g}）",
+    )
+    顧問剖析.add_argument(
+        "--每筆幾行",
+        type=int,
+        default=0,
+        help="每筆節錄事件帳本最後幾行（預設 0 ＝只給路徑，不整份倒進素材）",
+    )
+    顧問剖析.add_argument("--診斷用", default=None, help="派給誰做唯讀診斷。不給就照派工表推理列")
+    顧問剖析.add_argument("--json", action="store_true", help="輸出結構化證據而不是純文字")
 
 
 def _加觀測類(
