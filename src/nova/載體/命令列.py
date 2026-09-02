@@ -143,6 +143,7 @@ from nova.載體.閘鎖 import 佔不到, 等鎖說明
 from nova.載體.階段記帳 import 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 花費, 超支了嗎
 from nova.載體.額度 import 只讀快取的額度, 記下狀態列額度
+from nova.載體.顧問 import 一輪的帳, 盤一輪
 from nova.迴圈 import 角色工廠, 角色提示
 from nova.迴圈.工作流 import 建TDD執行器, 工作流結果, 跑工作流
 from nova.迴圈.角色工廠 import (
@@ -463,7 +464,7 @@ def _問的前置(參數: argparse.Namespace) -> _要問的東西 | int:
         return 擋
     可以做什麼 = _挑權限(參數)
     屍 = Path(參數.輸出檔) if 參數.輸出檔 else None
-    if 屍 is not None:
+    if 屍 is not None and not _載體代寫(參數):
         if 可以做什麼 is 權限.唯讀:
             print("--輸出檔 要它寫檔，就得給 --可編輯（或 --全開）", file=sys.stderr)
             return 阻擋
@@ -700,8 +701,7 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
-    if 這次.屍 is not None:
-        答 = 撿回殘骸(答, 這次.屍)
+    答 = _輸出檔收尾(參數, 這次, 答)
     上限判定 = _用量說不清的判定(答, 單次上限)
     _報這次的答(參數, 這次, 答, 上限判定)
     if 上限判定 is not None:
@@ -781,6 +781,35 @@ def _挑腦(參數: argparse.Namespace) -> tuple[str, str | None, str | None] | 
         print("要給 --用（哪一家）或 --工作（照派工表挑）", file=sys.stderr)
         return None
     return 參數.用, 參數.模型, 參數.思考深度
+
+
+def _輸出檔收尾(參數: argparse.Namespace, 這次: _要問的東西, 答: 回應) -> 回應:
+    """`--輸出檔` 那一格在答完之後怎麼收。沒給輸出檔就原封不動。
+
+    `--載體代寫`：模型是唯讀的，寫檔的是這裡——所以撿殘骸沒有意義，
+    檔裡的字就是它剛回的話。沒給的話仍舊是模型自己邊做邊寫，
+    掛掉時把它寫下的東西撿回來併進證據。
+    """
+    if 這次.屍 is None:
+        return 答
+    if not _載體代寫(參數):
+        return 撿回殘骸(答, 這次.屍)
+    這次.屍.parent.mkdir(parents=True, exist_ok=True)
+    這次.屍.write_text(答.文字, encoding="utf-8")
+    return 答
+
+
+def _載體代寫(參數: argparse.Namespace) -> bool:
+    """`--輸出檔` 是不是由載體寫、模型維持唯讀。
+
+    **這不是自動升權**：唯讀診斷（流 2）要留下結果，靠的是載體把答案落檔，
+    模型一個字都寫不進去。沒給這個旗標時，`--輸出檔` 仍舊是「叫模型邊做邊寫」，
+    那才需要 `--可編輯`。
+
+    走 `getattr`：命名 action 組出來的 Namespace 沒有這個旗標。
+    """
+    代寫: bool = getattr(參數, "載體代寫", False)
+    return 代寫
 
 
 def _挑權限(參數: argparse.Namespace) -> 權限:
@@ -1415,36 +1444,37 @@ def _這條線的分支名(線名: str) -> str:
     return f"nova/{時戳}-{票末六碼}"
 
 
-def _落票並搶下來(票檔: str, 收件匣: Path) -> 收件單 | int:
-    """讀票 → 落進收件匣 → 當場搶下來。**回 int ＝ 沒派成，那個數字就是退出碼。**
+def _搶下要派的那張票(票檔: str, 收件匣: Path) -> 收件單 | int:
+    """拿到這張票的所有權：**匣內直接搶原票，匣外才落新票。**
 
+    回 int ＝ 沒派成，那個數字就是退出碼。
     抽出來的理由跟 `_問的提示` 同一條（ruff `PLR0911`，而那條規則說的是對的）：
-    這三步各有自己的失敗出口，全擠在 `_子命令_派工` 裡的話，那一長串 return
-    就看不出是哪一道門擋的。搶到票之後才開工作樹，順序不變。
+    失敗出口全擠在 `_子命令_派工` 裡的話，那一長串 return 就看不出是哪一道門擋的。
+    搶到票之後才開工作樹，順序不變。
     """
-    try:
-        內容 = Path(票檔).read_text(encoding="utf-8")
-    except OSError as 錯:
-        print(f"讀不到票：{錯}", file=sys.stderr)
-        return 阻擋
-    try:
-        落點 = 丟一件(內容, 來源=你敲, 目錄=收件匣)
-    except 票太大 as 錯:
-        # 停止規則按設計生效，不是用法錯誤：外圈看到 4 要拆票，不是把上限調高。
-        print(str(錯), file=sys.stderr)
-        return 護欄碼
-    except (ValueError, OSError) as 錯:
-        print(str(錯), file=sys.stderr)
-        return 阻擋
-    單 = 搶下這一件(落點, 收件匣)
+    票路 = Path(票檔)
+    if 票路.parent.resolve() == 收件匣.resolve():
+        目標 = 票路
+    else:
+        try:
+            內容 = 票路.read_text(encoding="utf-8")
+            目標 = 丟一件(內容, 來源=你敲, 目錄=收件匣)
+        except 票太大 as 錯:
+            # 停止規則按設計生效，不是用法錯誤：外圈看到 4 要拆票，不是把上限調高。
+            print(str(錯), file=sys.stderr)
+            return 護欄碼
+        except (ValueError, OSError) as 錯:
+            print(f"讀不到票或落檔失敗：{錯}", file=sys.stderr)
+            return 阻擋
+    單 = 搶下這一件(目標, 收件匣)
     if 單 is None:
-        print(f"票落進收件匣了，卻搶不下來（有別人先拿走？）：{落點}", file=sys.stderr)
+        print(f"票在收件匣卻搶不下來（不存在或已被拿走？）：{目標}", file=sys.stderr)
         return 阻擋
     return 單
 
 
 def _子命令_派工(參數: argparse.Namespace) -> int:
-    """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
+    """派一條線：**搶票（匣外則先落票）→ 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
 
     今天派線走 `nova 工作流 --提示檔 <票>`，而那條路不碰收件匣，於是**已經在跑的
     票還躺在收件匣根目錄上**——`nova 收件` 說它「等著」，排程醒來就再派一次。
@@ -1456,7 +1486,7 @@ def _子命令_派工(參數: argparse.Namespace) -> int:
     - **單例鎖**：不動它。`載體/單例.py` 的鎖按專案路徑分（`_工作流鎖`），
       而每條線跑在自己的工作樹裡＝自己的路徑，所以並行派工天生各拿各的鎖。
       要放寬的是「一個目錄一次只跑一個」——那條沒有放寬，也不該放寬。
-    - **票**：`丟一件` 落進主收件匣，當場 `搶下這一件` 搬進 `處理中/`。
+    - **票**：匣內原票直接 `搶下這一件` 搬進 `處理中/`；匣外票先 `丟一件` 落進主收件匣再搶。
       **不准留在根目錄**，也不准用刪掉當修法：`處理中/` 的意思是「有人正在做」。
     - **工作樹**：開在專案旁邊 `nova-wt-<線名>`，起點是主工作區現在的 commit。
       殘骸不另立一套帳，`nova 線` 已經會列工作樹與未提交檔案數。
@@ -1475,7 +1505,7 @@ def _子命令_派工(參數: argparse.Namespace) -> int:
     if (額度擋 := _額度先擋一下(參數)) is not None:
         return 額度擋
     脈絡 = _專案脈絡(參數)
-    單 = _落票並搶下來(參數.票檔, 脈絡.收件)
+    單 = _搶下要派的那張票(參數.票檔, 脈絡.收件)
     if isinstance(單, int):
         return 單
     try:
@@ -2281,6 +2311,73 @@ def _子命令_收件(參數: argparse.Namespace) -> int:
     return 放行
 
 
+def _子命令_顧問(參數: argparse.Namespace) -> int:
+    """數帳：同一個護欄原因在窗口內撞夠多次，就把證據打包成一份診斷素材。
+
+    **這一格自己不呼叫模型、也不修任何東西**：唯一的寫入是素材檔一個，
+    交出去的是一條唯讀診斷指令（`nova 問` 的唯讀預設，不給 `--可編輯`）。
+
+    退出碼：產得出素材、或今天沒有重覆，都回 0——「沒有重覆」是正常結果。
+    帳讀不到回 3：**「看不到」不准長得像「沒東西可看」**。
+    """
+    脈絡 = _專案脈絡(參數)
+    try:
+        這輪 = 盤一輪(
+            專案=脈絡.根目錄,
+            窗口=timedelta(hours=參數.窗口小時),
+            門檻=參數.門檻,
+            每筆幾行=參數.每筆幾行,
+        )
+    except OSError as 錯:
+        print(f"讀不到成果帳，答不出有沒有重覆的原因：{錯}", file=sys.stderr)
+        return 未知
+    _報顧問的證據(參數, 這輪)
+    return 放行
+
+
+def _報顧問的證據(參數: argparse.Namespace, 這輪: 一輪的帳) -> None:
+    """把素材落在哪、那條派工指令、還有略過了幾筆舊帳講出來。
+
+    略過幾筆**達不達門檻都要講**：不達門檻那條路根本不產素材，
+    只寫進素材等於在最需要它的那條路上剛好沒有它——
+    「今天沒有重覆」跟「有一半的帳我數不進去」在終端機上就長得一模一樣了。
+
+    `--json` 走結構化，兩條路的欄位一樣。
+    """
+    落點 = 這輪.落點
+    指令 = None if 落點 is None else _診斷派工指令(落點, 診斷用=參數.診斷用)
+    if 參數.json:
+        素材 = None if 落點 is None else str(落點)
+        print(
+            json.dumps(
+                {"素材": 素材, "指令": 指令, "略過幾筆": 這輪.略過幾筆},
+                ensure_ascii=False,
+            )
+        )
+        return
+    print(f"略過沒記原因的舊帳：{這輪.略過幾筆} 筆")
+    if 落點 is None:
+        print(f"沒有護欄原因達門檻 {參數.門檻}（達了的話也可能已經有票或已經有素材）")
+        return
+    print(f"診斷素材：{落點}")
+    print("貼這條去派唯讀診斷（它只讀不改，出的是一張票不是一次修改）：")
+    print(f"  {指令}")
+
+
+def _診斷派工指令(素材: Path, *, 診斷用: str | None) -> str:
+    """把素材餵給唯讀診斷的那一條指令。**貼了就要跑得動**——
+
+    顧問自己不呼叫模型，這條指令就是它唯一的產出介面；跑不動等於沒有產出。
+    答案落到哪是**顧問這邊的事**：走 shell 重導向落回素材旁邊，
+    不借 `nova 問` 那組旗標替診斷開寫入路徑——它的唯讀規則是別的模組的保證，
+    顧問只借它，不改它。所以這裡既不加 `--可編輯`，也不加 `--輸出檔`。
+    """
+    派 = 怎麼派(工作種類.推理)
+    用 = 診斷用 or ",".join(派.腦們)
+    答案檔 = 素材.with_name(f"{素材.stem}.答.md")
+    return f"uv run nova 問 --用 {用} --思考深度 {派.思考深度} --提示檔 {素材} > {答案檔}"
+
+
 def _子命令_帳本(參數: argparse.Namespace) -> int:
     """看帳本：不給識別碼就列出最近幾次，給了就看那一次。
 
@@ -2478,6 +2575,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "狀態": _子命令_狀態,
     "線": 執行線,
     "收件": _子命令_收件,
+    "顧問": _子命令_顧問,
     "收": 收.子命令_收,
     "帳本": _子命令_帳本,
     "已處理": _子命令_已處理,
