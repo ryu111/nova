@@ -76,6 +76,7 @@ def 進度執行器(內層: 執行器, 檔: Path) -> 執行器:
             pass
         return 結果
 
+    setattr(執行一步, "__wrapped__", 內層)  # noqa: B010 —— 保留內層執行器供解包
     return 執行一步
 
 
