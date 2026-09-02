@@ -1,0 +1,542 @@
+<meta charset="utf-8">
+<title>nova 派工現況</title>
+<style>
+body { margin: 0; background: #12100E; color: #E8E3DD;
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Noto Sans TC", "PingFang TC", sans-serif; }
+a { color: #60A5FA; } a:hover { color: #93C5FD; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* 生命跡象：只給「真的在跑」的東西，收掉的線不脈動 */
+.活 { display: inline-flex; align-items: baseline; gap: 6px; }
+.活::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #4ADE80; flex: none; align-self: center; }
+
+/* 比例條：數字先在，長的是條 */
+.條 { transform-origin: left center; }
+
+/* 線表每一列是通往「一條線點進去」的入口 */
+.線列 { display: grid; grid-template-columns: 84px minmax(0, 1fr) 108px 78px minmax(0, 1fr); gap: 0 14px;
+  align-items: center; padding: 9px 0; }
+.列 { position: relative; cursor: pointer; }
+.列:hover, .列:focus-visible { background: #242120; box-shadow: 0 0 0 8px #242120; outline: none; }
+.列::after { content: "點開看七階與停止原話 →"; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: #4ADE80; opacity: 0; pointer-events: none; background: #242120; padding: 0 0 0 10px; }
+.列:hover::after, .列:focus-visible::after { opacity: 1; }
+
+/* 只有沒要求減少動態的人才看得到動畫；reduce 的人拿到的是靜態終態 */
+@media (prefers-reduced-motion: no-preference) {
+  .活::before { animation: 呼吸 2.4s ease-in-out infinite; }
+  /* 線表八列全在跑，點只當「有在跑」的靜態記號；只讓 KPI 卡那一顆動，免得變聖誕樹 */
+  .線列 .活::before { animation: none; }
+  @keyframes 呼吸 { 0%, 100% { opacity: .35; transform: scale(.75); } 50% { opacity: 1; transform: scale(1); } }
+  /* 視覺壓力：只給超過門檻的那幾格 */
+  .超門檻 { animation: 壓力 1.6s ease-in-out infinite; }
+  @keyframes 壓力 { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5); } }
+  /* 四條同時長、寬度差 187 倍，速度差就是資料 */
+  .條 { animation: 長出 .6s cubic-bezier(.2, .7, .2, 1) both; }
+  @keyframes 長出 { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  .列 { transition: background-color .15s, box-shadow .15s; }
+  .列::after { transition: opacity .15s; }
+}
+
+/* 未接線：契約裡沒有這一格就喊出來，不准安靜顯示假數字（未接線規格.md） */
+.未接線 { display: inline-flex; align-items: center; gap: 5px; border: 1px dashed #6B635C; border-radius: 5px;
+  padding: 1px 7px; font-size: 11px; color: #9B938B; font-weight: 400; letter-spacing: 0; text-transform: none;
+  background: repeating-linear-gradient(135deg, transparent 0 5px, #6B635C14 5px 10px); }
+.未接線::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #6B635C; flex: none; }
+.未接線:hover { border-color: #FBBF24; color: #FBBF24; }
+.未接線:hover::before { background: #FBBF24; }
+
+/* 每一格點下去的白話說明：原生 details／summary，鍵盤可達、不用 JS */
+details.說 { }
+details.說 > summary {
+  display: block;               /* 拿掉預設的三角形版面 */
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  border-radius: inherit;
+  transition: background-color .15s;
+}
+details.說 > summary::-webkit-details-marker { display: none; }
+details.說 > summary:hover { background: #262220; }
+details.說 > summary:focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }
+
+/* 右上角一個小小的「?」，告訴人這裡點得下去 */
+details.說 > summary::after {
+  content: "?";
+  position: absolute; top: 10px; right: 12px;
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 1px solid #3A3532; color: #8A8178;
+  font-size: 10.5px; line-height: 14px; text-align: center;
+  transition: border-color .15s, color .15s;
+}
+details.說 > summary:hover::after { border-color: #60A5FA; color: #60A5FA; }
+details.說[open] > summary::after { content: "×"; border-color: #60A5FA; color: #60A5FA; }
+
+.說內文 {
+  margin: 10px 0 0; padding: 12px 14px;
+  background: #12100E; border: 1px solid #3A3532;
+  border-left: 3px solid #60A5FA; border-radius: 0 8px 8px 0;
+  color: #C9C2BA; font-size: 12.5px; line-height: 1.75;
+}
+.說內文 strong { color: #E8E3DD; }
+
+@media (prefers-reduced-motion: no-preference) {
+  details.說[open] .說內文 { animation: 說展開 .22s ease-out both; }
+  @keyframes 說展開 { from { opacity: 0; transform: translateY(-4px); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  details.說 > summary { transition: none; }
+  details.說[open] .說內文 { animation: none; }
+}
+/* 版面手術：卡片自己就是 details 時，padding 放在 summary 上，hover 才會填滿整張卡 */
+details.說.卡 > .說內文 { margin: 0 18px 16px; }
+/* 窄格（線表欄頭）的說明用浮層，不然會被 108px 的欄寬擠成一條 */
+.線列 { position: relative; }
+.線列 details.說 > summary::after { top: -2px; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 9.5px; }
+.線列 details.說 > .說內文 { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 2; margin: 0; }
+</style>
+
+<div style="background: #12100E; color: #E8E3DD; font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Noto Sans TC', 'PingFang TC', sans-serif; padding: 28px 32px 36px; min-height: 100%;">
+
+  <!-- 標頭 -->
+  <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-bottom: 16px; border-bottom: 1px solid #3A3532;">
+<details class="說"><summary style='padding-right: 36px;'>
+    <div>
+      <div style="font-size: 19px; font-weight: 700; letter-spacing: -0.01em;">nova 派工儀表板</div>
+      <div style="color: #9B938B; font-size: 12.5px; margin-top: 3px;">
+        三天不用人管，做完的時候拿得出證據 —— 這一頁就是那份證據
+      </div>
+    </div>
+</summary>
+<div class="說內文">
+      <div>有一個機器人管家，你給它一個目標，它自己把事情拆成一件一件，派給別的機器人去做，做完自己檢查，做錯了叫他們重做。這一頁是它的工作紀錄——<strong>它做了什麼、花了多少錢、有沒有偷懶，全在這裡</strong>。來源：--json 的 generated_at、--json 的 workdir、--json 的 head、--json 的 worktrees</div>
+    </div></details>
+    <div style="text-align: right; color: #9B938B; font-size: 11.5px; line-height: 1.5; max-width: 360px; flex: none;">
+      <div class="mono num">${產生時間}</div>
+      <div>工作目錄 <span class="mono" style="color: #E8E3DD;">${工作目錄}</span></div>
+      <div>main <span class="mono" style="color: #E8E3DD;">${目前commit}</span> · 今日合併 <span class="num" style="color: #E8E3DD;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></div>
+<details class="說"><summary style='padding-right: 24px;'>
+      <div>燒了 <span class="num" style="color: #E8E3DD;">${總token}</span> token · <span class="num" style="color: #E8E3DD; font-weight: 600;">US$$${總成本美金}</span> · <span class="num">${呼叫次數}</span> 次呼叫 · 負控閘 <span class="num" style="color: #F87171; font-weight: 600;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></div>
+</summary>
+<div class="說內文" style='text-align: left;'>
+      <div>機器人講話是要付錢的，按「字數」算，那個字數就是 token。<strong>算不出成本的執行有 ${算不出成本的執行數} 次，沒有當成 0 加進總額</strong>——低報的成本比沒有成本更危險，<strong>因為它看起來像個數字</strong>。來源：--json 的 tokens、--json 的 cost_usd、--json 的 runs_without_cost、--json 的 calls</div>
+    </div></details>
+    </div>
+  </div>
+
+  <!-- 第一區：目標的三個數字 -->
+  <div style="margin-top: 26px;">
+    <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;">
+      <div style="font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">目標的三個數字</div>
+      <div style="color: #8A8178; font-size: 11.5px;">沒有這三個數字的回報不算回報</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;">
+
+      <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px;"><summary style="padding: 16px 18px;">
+        <div style="color: #9B938B; font-size: 12px;">主 agent 自己動手的實作</div>
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 6px;">
+          <div class="num" style="font-size: 40px; font-weight: 700; line-height: 1; color: #4ADE80;"><span class="未接線" title="契約裡沒有這一格">未接線</span></div>
+          <div style="color: #9B938B; font-size: 12px;">件 · 例外用了 <span class="num">${繞過次數}</span> 次</div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #2C2826; color: #9B938B; font-size: 11.5px; line-height: 1.55;">
+          這一格量的是「我有沒有違反這個 goal」。<br>
+          派工、驗收、決策、收尾以外的動手一律計數。來源：--json 的 bypasses
+        </div>
+      </summary>
+    <div class="說內文">
+      <div>管家的工作是<strong>派工、檢查、做決定、收尾</strong>，不是自己動手做。這一格在數：<strong>管家有沒有偷偷自己做？</strong>hook 擋下來的次數<strong>沒有落盤</strong>，所以契約裡沒有這一格，它只能喊未接線；旁邊的「例外用了」是真的數得出來的。</div>
+    </div></details>
+
+      <div style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px; padding: 16px 18px;">
+        <details class="說"><summary>
+<div style="color: #9B938B; font-size: 12px;">派出去的線</div>
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 6px;">
+          <div class="num" style="font-size: 40px; font-weight: 700; line-height: 1;">${在跑的線}</div>
+          <div class="活" style="color: #9B938B; font-size: 12px;">條在跑</div>
+        </div>
+</summary>
+<div class="說內文">
+      <div>「一條線」＝派出去的一份工作，有一個機器人正在做它。這一格只數<strong>不是主工作區、而且真的還活著</strong>的那幾條。來源：--json 的 lanes_running</div>
+    </div></details>
+        <details class="說"><summary>
+        <div style="color: #8A8178; font-size: 11px; margin-top: 10px; text-transform: uppercase; letter-spacing: .06em;">已收線的退出碼（不含在跑的）· 其他 ${退出碼_其他}</div>
+        <div style="display: flex; gap: 6px; margin-top: 5px;">
+          <div style="flex: 1; background: #4ADE8018; border: 1px solid #4ADE80; border-radius: 6px; padding: 5px 8px;">
+            <div class="num" style="font-size: 17px; font-weight: 700; color: #4ADE80;">${退出碼_成功}</div>
+            <div style="font-size: 11px; color: #9B938B;">0 成功</div>
+          </div>
+          <div style="flex: 1; background: #242120; border: 1px solid #3A3532; border-radius: 6px; padding: 5px 8px;">
+            <div class="num" style="font-size: 17px; font-weight: 700; color: #8A8178;">${退出碼_確定失敗}</div>
+            <div style="font-size: 11px; color: #9B938B;">1 失敗</div>
+          </div>
+          <div style="flex: 1; background: #FBBF2418; border: 1px solid #FBBF24; border-radius: 6px; padding: 5px 8px;">
+            <div class="num" style="font-size: 17px; font-weight: 700; color: #FBBF24;">${退出碼_未知}</div>
+            <div style="font-size: 11px; color: #9B938B;">3 未知</div>
+          </div>
+          <div style="flex: 1; background: #C084FC18; border: 1px solid #C084FC; border-radius: 6px; padding: 5px 8px;">
+            <div class="num" style="font-size: 17px; font-weight: 700; color: #C084FC;">${退出碼_護欄}</div>
+            <div style="font-size: 11px; color: #9B938B;">4 護欄</div>
+          </div>
+        </div>
+        <div style="margin-top: 10px; color: #9B938B; font-size: 11.5px;">
+          <span style="color: #FBBF24;">3 不准重跑</span> · <span style="color: #C084FC;">4 不准去修</span>
+        </div>
+</summary>
+<div class="說內文">
+      <div>工作做完會回報一個數字，告訴你「怎麼結束的」（來源：--json 的 exit_codes）：</div>
+      <ul style="margin: 6px 0 0; padding-left: 18px;"><li><strong>0 成功</strong>——做完了，沒問題。</li><li><strong>1 失敗</strong>——確定沒做成。</li><li><strong>3 不知道</strong>——<strong>電話斷了，不知道他做完沒</strong>。像你叫人去買牛奶，講到一半斷線——你不能再叫一次，不然可能買回來兩瓶。所以這個數字的規矩是「<strong>不准重來</strong>」。</li><li><strong>4 安全鎖擋住</strong>——<strong>不是壞掉</strong>，是它照規矩把你攔下來了。像安全帶扣住你，那是它在做事，不是它故障。規矩是「<strong>不准去把鎖拆掉</strong>」。</li></ul>
+    </div></details>
+      </div>
+
+      <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px;"><summary style="padding: 16px 18px;">
+        <div style="color: #9B938B; font-size: 12px;">收件匣還剩幾張</div>
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 6px;">
+          <div class="num" style="font-size: 40px; font-weight: 700; line-height: 1;">${收件匣_等著}</div>
+          <div style="color: #F87171; font-size: 12px;">張 · 其中幾張是真的 <span class="num" style="font-weight: 700;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></div>
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #2C2826; color: #9B938B; font-size: 11.5px; line-height: 1.55;">
+          <span style="color: #F87171;">鬼影有幾張 <span class="未接線" title="契約裡沒有這一格">未接線</span></span> —— <span class="mono">收件/鬼影/</span> 是人手搬出來的目錄，
+          nova 一個都不讀。<br>來源：--json 的 inbox.waiting
+        </div>
+      </summary>
+    <div class="說內文">
+      <div>「收件匣」是待辦事項的籃子。nova 數得出來的是<strong>等著、處理中、已完成、讀不動</strong>這四格；<strong>「鬼影」是人手搬出來的目錄</strong>，契約裡沒有這一格，所以那裡喊未接線，<strong>不拿一個看起來像數字的東西頂替</strong>。</div>
+    </div></details>
+
+    </div>
+  </div>
+
+  <!-- 第二區：收件匣分佈 + 閘鎖 -->
+  <div style="display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 14px; margin-top: 22px;">
+
+    <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px;"><summary style="padding: 16px 18px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <div style="font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">收件匣分佈</div>
+        <div style="color: #8A8178; font-size: 11px;">票的四個去處</div>
+      </div>
+
+      <div role="img" aria-label="收件匣分佈：等著、處理中、已完成三段；已併入那一段契約裡沒有"
+           style="display: flex; height: 34px; margin-top: 14px; border-radius: 6px; overflow: hidden; gap: 2px;">
+        <div style="width: 50%; background: #FBBF24; position: relative; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <div aria-hidden="true" style="position: absolute; top: 0; bottom: 0; right: 0; left: 41.5%;
+               background: repeating-linear-gradient(135deg, #12100E99 0 4px, transparent 4px 9px);"></div>
+          <span class="num" style="position: relative; font-size: 13px; font-weight: 700; color: #12100E;">${收件匣_等著}</span>
+          <span class="num" style="position: relative; font-size: 11px; font-weight: 600; color: #12100E;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+        </div>
+        <div style="width: 25.6%; background: #60A5FA; display: flex; align-items: center; justify-content: center;">
+          <span class="num" style="font-size: 13px; font-weight: 700; color: #12100E;">${收件匣_處理中}</span>
+        </div>
+        <div style="width: 19.5%; background: #4ADE80; display: flex; align-items: center; justify-content: center;">
+          <span class="num" style="font-size: 13px; font-weight: 700; color: #12100E;">${收件匣_已完成}</span>
+        </div>
+        <div style="width: 4.9%; background: #C084FC; display: flex; align-items: center; justify-content: center;">
+          <span class="num" style="font-size: 11px; font-weight: 700; color: #12100E;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px;">
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 9px; height: 9px; border-radius: 2px; background: #FBBF24; flex: none;"></span>
+          <span style="font-size: 12px;">等著 <span class="num" style="color: #9B938B;">${收件匣_等著}</span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 9px; height: 9px; border-radius: 2px; flex: none; background: repeating-linear-gradient(135deg, #12100E99 0 2px, #FBBF24 2px 4px);"></span>
+          <span style="font-size: 12px;">其中鬼影 <span class="num" style="color: #F87171;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 9px; height: 9px; border-radius: 2px; background: #60A5FA; flex: none;"></span>
+          <span style="font-size: 12px;">處理中 <span class="num" style="color: #9B938B;">${收件匣_處理中}</span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 9px; height: 9px; border-radius: 2px; background: #4ADE80; flex: none;"></span>
+          <span style="font-size: 12px;">已完成 <span class="num" style="color: #9B938B;">${收件匣_已完成}</span></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 9px; height: 9px; border-radius: 2px; background: #C084FC; flex: none;"></span>
+          <span style="font-size: 12px;">已併入 <span class="num" style="color: #9B938B;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></span>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; background: #12100E; border: 1px solid #3A3532; border-left: 3px solid #F87171; border-radius: 0 7px 7px 0; padding: 10px 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #F87171;">讀不動的那幾張也要數出來</div>
+        <div style="color: #9B938B; font-size: 11.5px; margin-top: 3px; line-height: 1.55;">
+          清單上兩件、實際上三件的差距只有「讀不動」看得見：這一輪讀不動的有
+          <span class="num" style="color: #E8E3DD; font-weight: 600;">${收件匣_讀不動}</span> 張。
+          <span class="mono" style="color: #E8E3DD;">已完成／已併入／鬼影／待派</span> 是人手搬的目錄、<span class="mono" style="color: #E8E3DD;">nova 一個都不讀</span>。來源：--json 的 inbox（waiting／in_progress／done／unreadable）
+        </div>
+      </div>
+    </summary>
+    <div class="說內文">
+      <div>同一批紙條，看它們現在在哪裡：<strong>等著</strong>（還沒人做）、<strong>處理中</strong>（有人正在做）、<strong>已完成</strong>（做完了）、<strong>已併入</strong>（跟別張合併了）。最後那一段是人手搬的目錄，nova 答不出來，所以它在畫面上喊未接線。</div>
+    </div></details>
+
+    <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px;"><summary style="padding: 16px 18px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <div style="font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">全域閘鎖</div>
+        <div style="color: #8A8178; font-size: 11px;">跨專案一把</div>
+      </div>
+
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 12px;">
+        <div class="num" style="font-size: 40px; font-weight: 700; line-height: 1; color: #F87171;"><span class="未接線" title="契約裡沒有這一格">未接線</span></div>
+        <div style="color: #9B938B; font-size: 12px;">個在排隊 · 門檻 <span class="num"><span class="未接線" title="契約裡沒有這一格">未接線</span></span></div>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
+        <div role="img" aria-label="排隊與門檻：這兩格契約裡都沒有，等閘鎖那邊先吐得出數字"
+             style="position: relative; display: flex; gap: 3px; height: 22px; align-items: stretch; padding-top: 6px;">
+          <div style="flex: 1; background: #4ADE80; border-radius: 3px 0 0 3px;"></div>
+          <div style="flex: 1; background: #4ADE80;"></div>
+          <div style="flex: 1; background: #FBBF24;"></div>
+          <div style="flex: 1; background: #FBBF24;"></div>
+          <div class="超門檻" style="flex: 1; background: #F87171;"></div>
+          <div class="超門檻" style="flex: 1; background: #F87171; border-radius: 0 3px 3px 0;"></div>
+          <div style="flex: 1; background: #242120; border: 1px dashed #6B635C; border-radius: 3px; box-sizing: border-box;"></div>
+          <div style="flex: 1; background: #242120; border: 1px dashed #6B635C; border-radius: 3px; box-sizing: border-box;"></div>
+          <div aria-hidden="true" style="position: absolute; left: calc(50% - 1.5px); top: 0; bottom: -4px; width: 0; border-left: 2px solid #FBBF24;"></div>
+        </div>
+        <div style="position: relative; height: 16px; color: #8A8178; font-size: 11px;">
+          <span class="num" style="position: absolute; left: 0;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+          <span class="num" style="position: absolute; left: 50%; transform: translateX(-50%); color: #FBBF24;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+          <span class="num" style="position: absolute; right: 0;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+        </div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; color: #9B938B; font-size: 11px;">
+          <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: #4ADE80;"></span>門檻內</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: #FBBF24;"></span>貼著門檻</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: #F87171;"></span>超過門檻</span>
+          <span style="display: inline-flex; align-items: center; gap: 5px;"><span style="width: 8px; height: 8px; border-radius: 2px; border: 1px dashed #6B635C; box-sizing: border-box;"></span>空位</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+          <span style="color: #9B938B;">一次閘要跑多久</span>
+          <span class="num" style="font-weight: 600;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px;">
+          <span style="color: #9B938B;">設計預算</span>
+          <span class="num" style="font-weight: 600; color: #F87171;">&lt; 10 秒</span>
+        </div>
+      </div>
+
+      <div style="margin-top: 13px; color: #9B938B; font-size: 11.5px; line-height: 1.55; padding-top: 10px; border-top: 1px solid #2C2826;">
+        排隊、門檻、一次閘要跑多久這三格<span style="color: #E8E3DD;">要等閘鎖那邊吐得出數字</span>，這一頁不自己拼目錄名，
+        也不猜一個看起來合理的值。
+      </div>
+    </summary>
+    <div class="說內文">
+      <div>每份工作交出去之前要先給檢查員檢查。<strong>但整個系統只有一個檢查員</strong>，所以大家要排隊，一次只能檢查一個。<strong>排隊幾個</strong>、<strong>門檻多少</strong>、<strong>一次要跑多久</strong>這三格 nova 現在答不出來，所以它們<strong>一律喊未接線</strong>。</div>
+    </div></details>
+
+  </div>
+
+  <!-- 第三區：線的即時狀態 -->
+  <div style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px; padding: 16px 18px; margin-top: 22px;">
+    <details class="說"><summary style='padding-right: 28px;'>
+<div style="display: flex; align-items: baseline; justify-content: space-between;">
+      <div style="font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">線的即時狀態</div>
+      <div style="color: #8A8178; font-size: 11px;">工作樹 ${工作樹數} 棵 · 在跑 ${在跑的線} 條 · 同一波內兩條不准動到同一個檔</div>
+    </div>
+</summary>
+<div class="說內文">
+      <div>每一列是一條線：它在做哪張票、做到第幾階、跑多久了。<strong>點開那一列</strong>看它的路徑、退出碼與七階。來源：--json 的 lanes、--json 的 worktrees</div>
+    </div></details>
+
+    <div class="線列" style="margin-top: 14px; padding: 0 0 7px; border-bottom: 1px solid #2C2826; color: #8A8178; font-size: 11px; text-transform: uppercase; letter-spacing: .06em;">
+      <div>線</div><div>票</div><details class="說"><summary style='display: flex; align-items: center; gap: 6px;'>
+<div style="display: flex; align-items: center; gap: 6px;">階段</div>
+</summary>
+<div class="說內文">
+      <div>這一欄從<strong>帳本</strong>讀得出來：查得到就是那一階，<strong>查不到就說查不到</strong>，不拿上一次的階段頂替。</div>
+    </div></details><div>已跑</div><div>佔住的檔 <span class="未接線" title="契約裡沒有這一格">未接線</span></div>
+    </div>
+
+    <div style="display: flex; flex-direction: column;">
+
+      <template id="線列">
+      <details class="說 列"><summary>
+        <div class="mono" style="font-size: 12px; color: #C084FC;">${名字}</div>
+        <div style="font-size: 12.5px;">${票標題}</div>
+        <div><span style="display: inline-block; background: #60A5FA18; border: 1px solid #60A5FA; color: #60A5FA; border-radius: 5px; padding: 1px 7px; font-size: 11px;">${目前階段}</span></div>
+        <div class="num" style="font-size: 12px; color: #9B938B;">${跑了幾秒}</div>
+        <div class="mono" style="font-size: 11px; color: #9B938B; overflow-wrap: anywhere;">沒提交的檔 ${未提交檔案數} 個 · 檔名 <span class="未接線" title="契約裡沒有這一格">未接線</span></div>
+      </summary>
+      <div class="說內文">
+        <div>路徑 ${路徑} · 在跑嗎 ${在跑嗎} · 啟動 ${啟動時間} · 退出碼 ${退出碼} · 護欄原話 ${護欄原因}</div>
+        <div>七階 ${七階們}</div>
+      </div></details>
+      </template>
+      ${線列們}
+      <template id="階格">
+      <span class="num">${階段} ${終局}（判準 ${判準綠}）</span>
+      </template>
+
+    </div>
+  </div>
+
+  <!-- 第四區：用量 -->
+  <div style="display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 14px; margin-top: 22px;">
+
+    <div style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px; padding: 16px 18px;">
+      <details class="說"><summary style='padding-right: 28px;'>
+<div style="display: flex; align-items: baseline; justify-content: space-between;">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">用量 · 依家</div>
+        <div style="color: #8A8178; font-size: 11px;">次數、token、佔比、平均每次都從帳本數出來</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 13px; margin-top: 16px;">
+
+        <template id="各家列">
+        <div>
+          <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="width: 10px; height: 10px; border-radius: 2px; background: #9333EA; flex: none;"></span>
+              <span style="font-size: 12.5px; font-weight: 600;">${供應商}</span>
+              <span class="num" style="font-size: 11.5px; color: #9B938B;">${次數} 次</span>
+            </div>
+            <div><span class="num" style="font-size: 13px; font-weight: 700;">${token}</span> <span style="font-size: 11px; color: #9B938B;">token <span class="num">(${佔比})</span></span></div>
+          </div>
+          <div style="height: 12px; background: #242120; border-radius: 3px; overflow: hidden;">
+            <div class="條" style="width: ${佔比條寬}; height: 100%; background: #9333EA;"></div>
+          </div>
+          <div class="num" style="font-size: 11px; color: #9B938B; margin-top: 3px;">平均 ${平均每次} / 次</div>
+        </div>
+        </template>
+        ${各家列們}
+
+      </div>
+</summary>
+<div class="說內文">
+      <div>我們用好幾種機器人做事，這裡看每一種燒掉多少 token。<strong>條越長＝這一家吃掉的比例越大</strong>，條的長度跟旁邊那個百分比是同一個數。來源：--json 的 families</div>
+    </div></details>
+
+      <details class="說"><summary>
+<div style="margin-top: 16px; background: #12100E; border: 1px solid #3A3532; border-left: 3px solid #16A34A; border-radius: 0 7px 7px 0; padding: 10px 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #16A34A;">次數多的那一家，不一定是 token 多的那一家</div>
+        <div style="color: #9B938B; font-size: 11.5px; margin-top: 3px; line-height: 1.55;">
+          單位成本差多少，看上面每一家的 <span class="num" style="color: #E8E3DD; font-weight: 600;">平均每次</span> 那一行。
+          差別不在模型，在<span style="color: #E8E3DD;">有沒有真的使喚它</span>——
+          多輪工具迴圈一次講的話，比按需只讀要用的檔多得多。
+        </div>
+      </div>
+</summary>
+<div class="說內文">
+      <div>同樣做一件事，有的機器人<strong>幾千個字</strong>就講完了，有的要講<strong>好幾百萬個字</strong>，<strong>差好幾個數量級</strong>。差別不在誰比較聰明，在<strong>有沒有讓它一直翻資料</strong>。翻得越多，講得越多，錢燒得越快。</div>
+    </div></details>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+
+      <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px;"><summary style="padding: 16px 18px;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">帳本看得到多少</div>
+        <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 10px;">
+          <div class="num" style="font-size: 34px; font-weight: 700; line-height: 1; color: #F87171;">${可見度_本專案token}<span style="font-size: 20px;"> token</span></div>
+          <div style="color: #9B938B; font-size: 12px;"><span class="mono">nova 帳本</span> 本專案這一份；跨專案共 ${可見度_全部token}</div>
+        </div>
+        <div style="display: flex; height: 10px; margin-top: 12px; border-radius: 3px; overflow: hidden;">
+          <div class="條" style="width: 18%; background: #4ADE80;"></div>
+          <div style="width: 82%; background: #3A3532;"></div>
+        </div>
+        <div style="margin-top: 11px; color: #9B938B; font-size: 11.5px; line-height: 1.55;">
+          每棵工作樹算一個獨立專案鍵，所以帳本碎成
+          <span class="num" style="color: #E8E3DD; font-weight: 600;">${可見度_專案鍵總數}</span> 份（<span class="num">${可見度_有內容的專案鍵}</span> 份有內容）。
+          這一輪跳過 ${可見度_跳過的檔} 個讀不動的檔——跳過了就要數出來，
+          <span style="color: #E8E3DD;">不准當 0 混進總數</span>。來源：--json 的 visibility
+        </div>
+      </summary>
+    <div class="說內文">
+      <div>花的錢有記帳，但帳本<strong>被拆成很多本</strong>——每開一個新的工作區就多一本。而現在的查帳工具<strong>只翻得開自己手上那一本</strong>。<div style="margin-top:8px">上面那一格就是在講這件事：<strong>手上這一本有多少</strong>、<strong>跨專案全部有多少</strong>，兩個數字分開放。</div></div>
+    </div></details>
+
+      <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px; flex: 1;"><summary style="padding: 16px 18px;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">失敗碼 · 前七名</div>
+        <div style="display: flex; flex-direction: column; gap: 7px; margin-top: 13px;">
+
+          <template id="失敗碼列">
+          <div style="display: grid; grid-template-columns: 118px 1fr 30px; gap: 9px; align-items: center;">
+            <div class="mono" style="font-size: 11.5px;">${代碼}</div>
+            <div style="height: 8px; background: #2C2826; border-radius: 2px; overflow: hidden;"><div class="條" style="width: ${佔比條寬}; height: 100%; background: #F87171;"></div></div>
+            <div class="num" style="font-size: 11.5px; color: #9B938B; text-align: right;">${次數}</div>
+          </div>
+          </template>
+          ${失敗碼列們}
+
+        </div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #2C2826; color: #9B938B; font-size: 11.5px; line-height: 1.55;">
+          <span style="color: #F87171;">最上面那個碼是最貴的一格</span>——「不知道工作做了沒」，
+          腳本不准重跑，只能人去看。來源：--json 的 failure_codes
+        </div>
+      </summary>
+    <div class="說內文">
+      <div>工作失敗的時候會說一個原因。這裡是最常見的那幾種。<strong>最上面那個「不知道」是最貴的一種</strong>——因為連「到底做了沒」都答不出來，只能人自己去看。</div>
+    </div></details>
+
+    </div>
+  </div>
+
+  <!-- 第五區：負控覆蓋 -->
+  <details class="說 卡" style="background: #1B1917; border: 1px solid #3A3532; border-radius: 10px; margin-top: 22px;"><summary style="padding: 16px 18px;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between;">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em; color: #9B938B; font-weight: 600;">負控覆蓋率</div>
+      <div style="color: #8A8178; font-size: 11px;">沒有會 fail 的測試背書，就是沒有保證</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 14px;">
+
+      <div style="background: #12100E; border: 1px solid #2C2826; border-radius: 8px; padding: 13px 15px;">
+        <div style="color: #9B938B; font-size: 11.5px;">機械保證（會自己重跑）</div>
+        <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 5px;">
+          <span class="num" style="font-size: 28px; font-weight: 700; line-height: 1; color: #4ADE80;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+          <span style="color: #9B938B; font-size: 11.5px;">把刀</span>
+        </div>
+        <div class="mono" style="color: #8A8178; font-size: 11px; margin-top: 5px;">tests/負控/登記們/ · ${負控_登記檔數} 檔</div>
+      </div>
+
+      <div style="background: #12100E; border: 1px solid #2C2826; border-radius: 8px; padding: 13px 15px;">
+        <div style="color: #9B938B; font-size: 11.5px;">人的紀錄（不會自己重跑）</div>
+        <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 5px;">
+          <span class="num" style="font-size: 28px; font-weight: 700; line-height: 1; color: #FBBF24;">${負控_紀錄檔數}</span>
+          <span style="color: #9B938B; font-size: 11.5px;">份紀錄</span>
+        </div>
+        <div class="mono" style="color: #8A8178; font-size: 11px; margin-top: 5px;">docs/負控紀錄/</div>
+      </div>
+
+      <div style="background: #12100E; border: 1px solid #2C2826; border-radius: 8px; padding: 13px 15px;">
+        <div style="color: #9B938B; font-size: 11.5px;">檢查負控存在的閘</div>
+        <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 5px;">
+          <span class="num" style="font-size: 28px; font-weight: 700; line-height: 1; color: #F87171;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+          <span style="color: #9B938B; font-size: 11.5px;">條 · 共 ${負控_閘規則數} 條閘規則</span>
+        </div>
+        <div class="mono" style="color: #8A8178; font-size: 11px; margin-top: 5px;">硬規則 4 目前是純懇求</div>
+      </div>
+
+      <div style="background: #12100E; border: 1px solid #2C2826; border-radius: 8px; padding: 13px 15px;">
+        <div style="color: #9B938B; font-size: 11.5px;">寫負控的合法階段</div>
+        <div style="display: flex; align-items: baseline; gap: 7px; margin-top: 5px;">
+          <span class="num" style="font-size: 28px; font-weight: 700; line-height: 1; color: #F87171;"><span class="未接線" title="契約裡沒有這一格">未接線</span></span>
+          <span style="color: #9B938B; font-size: 11.5px;">階 · 共 ${負控_階段數} 階</span>
+        </div>
+        <div class="mono" style="color: #8A8178; font-size: 11px; margin-top: 5px;">驗證紅 期望紅，負控寫完是綠的</div>
+      </div>
+
+    </div>
+
+    <div style="margin-top: 14px; background: #12100E; border: 1px solid #3A3532; border-left: 3px solid #C084FC; border-radius: 0 7px 7px 0; padding: 11px 13px;">
+      <div style="font-size: 12px; font-weight: 600; color: #C084FC;">這一區的四個數字要一起讀</div>
+      <div style="color: #9B938B; font-size: 11.5px; margin-top: 4px; line-height: 1.6;">
+        登記檔數與紀錄檔數是真的數得出來的；「幾把刀」要 import tests、src 不准，
+        所以那一格喊未接線；第三格與第四格的分子也沒有資料欄，一樣未接線。
+        閘綠而負控缺：<span style="color: #E8E3DD;">分母數得出來、分子沒有</span>——
+        所以這一頁只給分母。來源：--json 的 mutation
+      </div>
+    </div>
+  </summary>
+    <div class="說內文">
+      <div>「負控」是這樣一件事：<strong>你怎麼知道保全系統真的有在運作？故意去弄壞一次，看警報會不會響。</strong></div>
+      <ul style="margin: 6px 0 0; padding-left: 18px;"><li><strong>幾把刀</strong>——要 import tests 才數得出來，<strong>src 不准</strong>，所以這一格未接線。</li><li><strong>幾份紀錄</strong>——寫在紙上給人看的，<strong>電腦不會自己重做</strong>。</li><li><strong>幾條閘在檢查</strong>——<strong>閘規則沒有「這條守的是負控」這個欄位</strong>，分子答不出來。</li><li><strong>幾階被指派</strong>——連「誰該去做」都還沒落成欄位。</li></ul>
+      <div style="margin-top: 8px;"><strong>分子未接線、分母數得出來——這兩件事在畫面上要分得開。</strong></div>
+      <div style="margin-top: 8px;">---</div>
+    </div></details>
+
+</div>
