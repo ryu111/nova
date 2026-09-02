@@ -11,6 +11,9 @@ from nova.載體.工作樹 import 主工作區, 收掉工作樹
 from nova.載體.規則表 import 建規則表
 from nova.載體.閘 import 跑閘
 
+#: GitHub `createPullRequest` 的標題上限，收在提交閘前擋下超長標題。
+標題上限 = 256
+
 __all__ = [
     "子命令_收",
     "_收尾閘",
@@ -65,28 +68,40 @@ def 子命令_收(參數: argparse.Namespace) -> int:
     """確定性收尾：閘 → commit → push → PR → required CI → merge。"""
     from nova.載體 import 命令列  # noqa: PLC0415 —— 延遲匯入避免循環依賴
 
-    根 = 命令列._專案脈絡(參數).根目錄  # noqa: SLF001 —— 借用命令列共用專案脈絡
-    if (碼 := _收尾閘(參數, 根)) != 放行:
-        return 碼
-
-    現場, 碼 = _開工前問清楚現場(根)
-    if 現場 is None:
-        return 碼
-    分支, 主區, 是派工樹 = 現場
+    根目錄 = 命令列._專案脈絡(參數).根目錄  # noqa: SLF001 —— 借用命令列共用專案脈絡
 
     訊息 = 參數.訊息 or " ".join(參數.提交訊息) or "nova：收尾"
-    if (碼 := _提交推送並開PR(根, 訊息=訊息, 分支=分支)) != 放行:
+    收尾訊息 = _切收尾訊息(訊息)
+    if (碼 := _動手之前的檢查(參數, 根目錄, 標題=收尾訊息.標題)) != 放行:
         return 碼
 
+    現場, 現場碼 = _開工前問清楚現場(根目錄)
+    if 現場 is None:
+        return 現場碼
+    分支 = 現場.分支
+    主區 = 現場.主區
+    是派工樹 = 現場.是派工樹
+
     if (
-        碼 := _跑並印收尾指令(根, "gh", "pr", "checks", "--required", "--watch", 逾時秒=參數.等CI秒)
+        碼 := _提交推送並開PR(
+            根目錄,
+            收尾訊息=收尾訊息,
+            分支=分支,
+        )
     ) != 放行:
         return 碼
 
-    if (碼 := _合併這個PR(根, 刪遠端分支=not 是派工樹)) != 放行:
+    if (
+        碼 := _跑並印收尾指令(
+            根目錄, "gh", "pr", "checks", "--required", "--watch", 逾時秒=參數.等CI秒
+        )
+    ) != 放行:
         return 碼
 
-    return _合併之後收乾淨(根, 主區=主區, 分支=分支, 是派工樹=是派工樹)
+    if (碼 := _合併這個PR(根目錄, 刪遠端分支=not 是派工樹)) != 放行:
+        return 碼
+
+    return _合併之後收乾淨(根目錄, 主區=主區, 分支=分支, 是派工樹=是派工樹)
 
 
 class _收尾現場(NamedTuple):
@@ -113,7 +128,8 @@ def _開工前問清楚現場(根目錄: Path) -> tuple[_收尾現場 | None, in
         sys.stderr.write(f"問不出這棵樹的主工作區在哪，不 commit 不 push：{錯}\n")
         return None, 閘紅
     # macOS 的 `/var` 是 `/private/var` 的 symlink，兩邊都要 resolve 才比得出來。
-    return _收尾現場(分支, 主區, 是派工樹=主區.resolve() != 根目錄.resolve()), 放行
+    是派工樹 = 主區.resolve() != 根目錄.resolve()
+    return _收尾現場(分支=分支, 主區=主區, 是派工樹=是派工樹), 放行
 
 
 def _合併之後收乾淨(根目錄: Path, *, 主區: Path, 分支: str, 是派工樹: bool) -> int:
@@ -179,17 +195,65 @@ def _回報沒有分支可以推(抱怨: str) -> int:
     return 閘紅
 
 
-def _提交推送並開PR(根目錄: Path, *, 訊息: str, 分支: str) -> int:
+def _動手之前的檢查(參數: argparse.Namespace, 根目錄: Path, *, 標題: str) -> int:
+    """git 與 gh 一個字都還沒發之前要過的兩關，貴的那關排後面。
+
+    標題長度是看一眼字串就有答案的檢查，排在提交閘前面；提交閘本體實測 8.5 秒，
+    完整測試套件約兩分鐘是驗證成本，不是 `收` 執行的提交閘成本。順序反過來的話，
+    人得等閘全綠才被告知一個開跑前就看得出來的錯。
+    """
+    if (碼 := _擋掉過長的標題(標題)) != 放行:
+        return 碼
+    return _收尾閘(參數, 根目錄)
+
+
+def _擋掉過長的標題(標題: str) -> int:
+    """第一行超過 GitHub 上限就在這裡停，不讓後面的 git 與 gh 開始。"""
+    if len(標題) <= 標題上限:
+        return 放行
+    sys.stderr.write(
+        f"訊息第一行 {len(標題)} 字，PR 標題超過 {標題上限} 字上限，收尾停在這裡"
+        f"（沒有跑閘、沒有 commit、沒有 push）。\n"
+        f"把第一行縮到 {標題上限} 字以內，其餘寫進本文。\n"
+    )
+    return 閘紅
+
+
+class _收尾訊息(NamedTuple):
+    """一段收訊息的三種用法：commit 收全文，PR 標題收第一行，PR 本文收其餘。"""
+
+    全文: str
+    標題: str
+    本文: str
+
+
+def _切收尾訊息(全文: str) -> _收尾訊息:
+    """照 git 慣例把收訊息切成「第一行標題」與「其餘本文」。
+
+    PR 標題只收得下一行（GitHub 上限 256 字），本文才是放負控段那些的地方。開頭
+    空白行會去掉，但本文第一行自己的縮排要原樣保留；沒有本文可切時退回第一行。
+    """
+    第一行, _, 其餘 = 全文.partition("\n")
+    標題 = 第一行.strip()
+    本文行 = 其餘.splitlines(keepends=True)
+    while 本文行 and not 本文行[0].strip():
+        本文行.pop(0)
+    本文 = "".join(本文行)
+    return _收尾訊息(全文=全文, 標題=標題, 本文=本文 or 標題)
+
+
+def _提交推送並開PR(根目錄: Path, *, 收尾訊息: _收尾訊息, 分支: str) -> int:
     """commit → push → 開 PR，其中一步不放行就停在那一步的退出碼。
 
     push 用完整 refspec `HEAD:refs/heads/<分支>`：只寫 `HEAD` 會被 git 回一句
     「not a full refname」，而那時閘已經全綠、commit 也成功了，整套白跑。
     """
+    訊息 = 收尾訊息.全文
     for 指令 in (
         ("git", "add", "-A"),
         ("git", "commit", "-m", 訊息),
         ("git", "push", "--set-upstream", "origin", f"HEAD:refs/heads/{分支}"),
-        ("gh", "pr", "create", "--title", 訊息, "--body", 訊息),
+        ("gh", "pr", "create", "--title", 收尾訊息.標題, "--body", 收尾訊息.本文),
     ):
         if (碼 := _跑並印收尾指令(根目錄, *指令)) != 放行:
             return 碼
