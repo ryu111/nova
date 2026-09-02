@@ -28,8 +28,10 @@ _一筆 = 成果(
 _欄位齊全 = 成果(
     執行識別碼="20260830T091500Z-full",
     任務=已經遮過了("每一格都有值", 因為="測試資料，裡面沒有祕密"),
-    收場="完成",
-    退出碼=0,
+    # 收在護欄的那一輪才有護欄原因，所以這一筆整個做成收在護欄的樣子——
+    # 「每一格都有值」要是配一個退出碼 0，那一格就是自相矛盾的測試資料。
+    收場="guardrail",
+    退出碼=4,
     起="2026-08-30T09:15:00Z",
     迄="2026-08-30T09:31:00Z",
     走了幾階=5,
@@ -38,6 +40,7 @@ _欄位齊全 = 成果(
     來源="typed",
     規則表版本="sha256:aaaa",
     起點commit="0123456789abcdef",
+    護欄原因="stagnation",
     驗收=(驗收紀錄(指令="pytest -q", 退出碼=0),),
 )
 
@@ -70,6 +73,7 @@ def test_落盤的欄位名是ASCII() -> None:
         "cost_usd",
         "policy_version",
         "rollback_point",
+        "guardrail_reason",
         "acceptance",
     }
 
@@ -153,15 +157,19 @@ def test_帳上答得出當時的規則表與該退回哪個commit() -> None:
     assert 字典轉成果(字典) == _有得歸因
 
 
+#: 驗收紅那一輪：**工作流自己收在「完成」**（`outcome` 是 `done`），
+#: 是收尾的 `_驗收說了算` 事後把退出碼改成 4 的。所以這一筆的 `outcome`
+#: 不是 `guardrail`——只認 `outcome` 的人會把它讀成一次順利的執行。
 _驗收紅了 = 成果(
     執行識別碼="20260831T104500Z-acc",
     任務=已經遮過了("讓收尾真的去跑驗收", 因為="測試資料，裡面沒有祕密"),
-    收場="護欄",
+    收場="done",
     退出碼=4,
     起="2026-08-31T10:45:00Z",
     迄="2026-08-31T10:58:00Z",
     走了幾階=6,
     總token=31337,
+    護欄原因="acceptance-failed",
     驗收=(
         驗收紀錄(指令="pytest -q tests/", 退出碼=0),
         驗收紀錄(指令="ruff check .", 退出碼=2),
@@ -170,7 +178,7 @@ _驗收紅了 = 成果(
 
 
 def test_帳上答得出這一輪跑了哪幾條驗收與哪一條擋住了() -> None:
-    """成果帳的 `outcome` 只寫得出「護欄」，而護欄有好幾種來源。
+    """驗收紅那條 4，`outcome` 那一格寫的是 `done`——答不出這一輪被誰擋下來。
 
     分不出「模型每次都撞上限」與「模型每次都說做完了但驗收不過」的話，
     事後查「這件為什麼一直做不完」就查不出來——**而那兩件事的修法完全相反**。
@@ -186,6 +194,9 @@ def test_帳上答得出這一輪跑了哪幾條驗收與哪一條擋住了() ->
         {"command": "pytest -q tests/", "exit_code": 0},
         {"command": "ruff check .", "exit_code": 2},
     ]
+    # 退出碼是 4、`outcome` 卻是 `done`：這一格的答案只在 `guardrail_reason` 上。
+    assert (字典["outcome"], 字典["exit_code"]) == ("done", 4)
+    assert 字典["guardrail_reason"] == "acceptance-failed"
     assert json.loads(json.dumps(字典, ensure_ascii=False)) == 字典
     assert 字典轉成果(字典) == _驗收紅了
 
@@ -223,3 +234,40 @@ def test_舊帳沒有後加的那幾欄也讀得回來() -> None:
     assert 回來.規則表版本 is None
     assert 回來.起點commit is None
     assert 回來.驗收 is None
+
+
+def test_舊帳沒記到護欄原因與這次沒撞護欄分得開() -> None:
+    """兩筆都沒有那一格，**要靠 `exit_code` 分得出來**——所以那一格不准編。
+
+    `guardrail_reason` 是之後才加的，舊的成果檔一格都沒有。舊帳裡那些**收在
+    退出碼 4** 的紀錄，是「那時候還沒有這一欄」；退出碼 0 的那些，是「這次
+    根本沒撞到護欄」。兩者讀回來都是 `None`，而分辨的依據是退出碼——
+    所以缺的那一格要老實留成 `None`，補成空字串就等於替舊帳編了一個
+    「沒有護欄」的答案，看板會照著印一個看起來很有把握的空白。
+    """
+    舊帳裡收在護欄的一筆 = {
+        "run_id": "20260101T000000Z-old",
+        "task": "很久以前",
+        "outcome": "guardrail",
+        "exit_code": 4,
+    }
+    沒記到 = 字典轉成果(舊帳裡收在護欄的一筆)
+    assert 沒記到.退出碼 == 4
+    assert 沒記到.護欄原因 is None, "舊帳缺的那一格不准補成空字串假裝『沒有護欄』"
+
+    沒撞護欄的字典 = 成果轉字典(_一筆)
+    assert "guardrail_reason" not in 沒撞護欄的字典, "沒撞護欄的那一筆不准落一格空的"
+    沒有護欄 = 字典轉成果(沒撞護欄的字典)
+    assert 沒有護欄.退出碼 == 0
+    assert 沒有護欄.護欄原因 is None
+
+    收在護欄 = dataclasses.replace(_一筆, 收場="guardrail", 退出碼=4, 護欄原因="stagnation")
+    字 = 成果轉字典(收在護欄)
+    assert 字["guardrail_reason"] == "stagnation"
+    assert 字典轉成果(字).護欄原因 == "stagnation"
+
+    # `None` 與空字串是兩件事：真的被記成一格空的，落盤時那一格要看得見，
+    # 不准跟「這一欄不存在」壓成同一種形狀（比照 `起點commit`）。
+    記成空的 = 成果轉字典(dataclasses.replace(收在護欄, 護欄原因=""))
+    assert 記成空的["guardrail_reason"] == ""
+    assert 字典轉成果(記成空的).護欄原因 == ""

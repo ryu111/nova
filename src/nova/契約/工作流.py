@@ -14,6 +14,9 @@ from types import MappingProxyType
 
 from nova.契約.模型回應 import 用量, 終局
 
+# 取別名是因為 `結束` 有個同名欄位：不換名字，那一格就得寫成 `護欄原因: 護欄原因 | None`。
+from nova.契約.護欄 import 護欄原因 as 護欄種類
+
 
 class 階段代碼(StrEnum):
     """TDD 的五個階段。值跨程序流動（journal、CLI 輸出）所以是 ASCII。"""
@@ -159,6 +162,11 @@ class 結束:
 
     代碼: 結束代碼
     原因: str
+    #: 收在護欄時**是哪一種**護欄（`契約.護欄.護欄原因`，值是 ASCII）。
+    #: `原因` 是給人看的句子，字串會改；這一格是給機器歸因的，要跨程序流到成果帳。
+    #: 標死列舉：拼錯的值型別檢查就攔下來，不會流到成果帳變成讀不懂的一格。
+    #: 沒撞護欄、或撞了但當時沒歸類，都是 `None`——不是空字串。
+    護欄原因: 護欄種類 | None = None
 
 
 @dataclass(frozen=True, slots=True)
