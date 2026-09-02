@@ -239,6 +239,25 @@ def 要求覆蓋的行(目標: Path, 一筆: 變異) -> frozenset[int]:
     return 推導的行 | 一筆.必須覆蓋
 
 
+def _子行程也算的設定(暫存: Path, 根目錄: Path, nodeid: str) -> Path:
+    """讓「測試自己開的 python 子行程」跑過的行也記進同一份 coverage。
+
+    有些固定測試只走得到真的 `nova`（那條路上有好幾格直接讀 `sys.argv`，
+    行程內叫測到的是別的東西）。子行程的行不算的話，那種測試點的刀會被判成
+    `WRONG_TEST`——但它其實走到了那一行，只是走在別的行程裡。
+
+    `context` 要跟外層 `--context` 同一個字串，否則按 nodeid 過濾時看不到。
+    """
+    設定檔 = 暫存 / f"覆蓋設定-{abs(hash(nodeid))}.ini"
+    設定檔.write_text(
+        "[run]\nparallel = true\n"
+        f"context = {nodeid}\n"
+        f"source =\n    {根目錄 / 'src'}\n    {根目錄 / 'tests'}\n",
+        encoding="utf-8",
+    )
+    return 設定檔
+
+
 def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
     """**目標檔不是 Python 就跳過這一關。**
 
@@ -259,6 +278,7 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
         資料檔 = Path(暫存) / ".coverage"
         for nodeid in 一筆.該紅:
             _丟掉pycache(根目錄)
+            設定檔 = _子行程也算的設定(Path(暫存), 根目錄, nodeid)
             try:
                 結果 = subprocess.run(
                     [
@@ -283,7 +303,11 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
                     text=True,
                     check=False,
                     timeout=一筆.最多秒,
-                    env=_環境(根目錄, COVERAGE_FILE=str(資料檔)),
+                    env=_環境(
+                        根目錄,
+                        COVERAGE_FILE=str(資料檔),
+                        COVERAGE_PROCESS_START=str(設定檔),
+                    ),
                 )
             except (OSError, subprocess.TimeoutExpired) as 錯:
                 _錯(f"RUN_ERROR：coverage 無法完成：{nodeid}", 來源=錯)
