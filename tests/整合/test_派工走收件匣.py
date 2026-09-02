@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 
 from nova.契約.退出碼 import 護欄碼
+from nova.載體 import 命令列
+from nova.載體.命令列 import 主程式
 
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]
@@ -179,7 +181,12 @@ def test_指名四支測試的票派工收4而且收件匣不留檔(
     assert not list(專案.parent.glob("nova-wt-*"))
 
 
-def test_派收件匣裡的票直接搶原票且張數守恆(佈景: tuple[Path, Path], 做假CLI: 做假CLI型) -> None:
+def test_派收件匣裡的票直接搶原票且張數守恆(
+    佈景: tuple[Path, Path],
+    做假CLI: 做假CLI型,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """守派工收件匣裡的票時直接搶原票，維持收件匣張數守恆且原票移入處理中。"""
     狀態, 專案 = 佈景
     執行檔, _ = 做假CLI("claude")
@@ -192,7 +199,10 @@ def test_派收件匣裡的票直接搶原票且張數守恆(佈景: tuple[Path,
     派工前處理中 = [路.name for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
     派工前總數 = len(派工前待處理) + len(派工前處理中)
 
-    派完 = _跑(
+    monkeypatch.setenv("XDG_STATE_HOME", str(狀態))
+    monkeypatch.chdir(專案)
+    monkeypatch.setattr(命令列, "_發射背景程序", lambda *_args, **_kwargs: None)
+    參數 = [
         "派工",
         str(原票),
         "--用",
@@ -205,11 +215,12 @@ def test_派收件匣裡的票直接搶原票且張數守恆(佈景: tuple[Path,
         "0",
         "--判準",
         "true",
-        狀態=狀態,
-        在=專案,
-    )
+    ]
+    monkeypatch.setattr(sys, "argv", ["nova", *參數])
 
-    assert 派完.returncode == 0, f"派工自己就失敗了：\n{派完.stderr[:600]}"
+    碼 = 主程式(參數)
+    輸出 = capsys.readouterr()
+    assert 碼 == 0, f"派工自己就失敗了：\n{輸出.err}\n{輸出.out}"
 
     派工後待處理 = [路.name for 路 in 匣.iterdir() if 路.is_file()]
     派工後處理中 = [路.name for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
