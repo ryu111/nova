@@ -82,6 +82,7 @@ from nova.載體.收件 import (
     收件單,
     收件目錄,
     最多輪次,
+    票太大,
 )
 from nova.載體.模型.接力 import 接力腦, 新端點健康表, 端點健康表
 from nova.載體.模型.本地 import 審查資格理由
@@ -1215,6 +1216,9 @@ def _子命令_跑(參數: argparse.Namespace) -> int:
         return 阻擋
     try:
         丟一件(描述, 來源=你敲, 目錄=_專案脈絡(參數).收件)
+    except 票太大 as 錯:
+        print(str(錯), file=sys.stderr)
+        return 護欄碼
     except (ValueError, OSError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋
@@ -1270,7 +1274,7 @@ def _這條線的分支名(線名: str) -> str:
     return f"nova/{時戳}-{票末六碼}"
 
 
-def _子命令_派工(參數: argparse.Namespace) -> int:
+def _子命令_派工(參數: argparse.Namespace) -> int:  # noqa: PLR0911 —— 落票與開樹各有獨立退件碼
     """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
 
     今天派線走 `nova 工作流 --提示檔 <票>`，而那條路不碰收件匣，於是**已經在跑的
@@ -1305,6 +1309,9 @@ def _子命令_派工(參數: argparse.Namespace) -> int:
         return 阻擋
     try:
         落點 = 丟一件(內容, 來源=你敲, 目錄=脈絡.收件)
+    except 票太大 as 錯:
+        print(str(錯), file=sys.stderr)
+        return 護欄碼
     except (ValueError, OSError) as 錯:
         print(str(錯), file=sys.stderr)
         return 阻擋

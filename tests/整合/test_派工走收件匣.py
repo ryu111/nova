@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from nova.契約.退出碼 import 護欄碼
+
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]
 
@@ -47,6 +49,14 @@ nova執行檔 = Path(sys.executable).parent / "nova"
 
 做不出來就停下來問人
 """
+
+_指名四支 = (
+    "tests/單元/test_甲.py::test_甲",
+    "tests/單元/test_乙.py::test_乙",
+    "test/整合/test_丙.py::test_丙",
+    "tests/驗收/test_丁.py::test_丁",
+)
+四支指名的票內容 = 票內容 + "\n" + "\n".join(_指名四支) + "\n"
 
 
 def _跑(*參數: str, 狀態: Path, 在: Path) -> subprocess.CompletedProcess[str]:
@@ -132,3 +142,38 @@ def test_派出去的票不准留在收件匣根目錄(佈景: tuple[Path, Path]
     assert any("把某件事做完" in 路.read_text(encoding="utf-8") for 路 in 在別處), (
         f"票既不在收件匣、也不在 處理中/ 或 已處理/——被刪掉不是修法：{[路.name for 路 in 在別處]}"
     )
+
+
+@pytest.mark.parametrize("子命令", ("派工", "跑"), ids=("派工入口", "跑入口"))
+def test_指名四支測試的票派工收4而且收件匣不留檔(
+    佈景: tuple[Path, Path], 做假CLI: 做假CLI型, 子命令: str
+) -> None:
+    """守派工與跑遇到超過三支指名測試時都回護欄碼，且不落票、不開工作樹。"""
+    狀態, 專案 = 佈景
+    執行檔, _ = 做假CLI("claude")
+    票檔 = 專案 / "票.md"
+    票檔.write_text(四支指名的票內容, encoding="utf-8")
+
+    參數 = ("派工", str(票檔)) if 子命令 == "派工" else ("跑", "--提示檔", str(票檔))
+    派完 = _跑(
+        *參數,
+        "--用",
+        "claude",
+        "--審查用",
+        "codex",
+        "--執行檔",
+        str(執行檔),
+        "--最多步數",
+        "0",
+        "--判準",
+        "true",
+        狀態=狀態,
+        在=專案,
+    )
+
+    assert 派完.returncode == 護欄碼, f"派工未以護欄碼退件：\n{派完.stderr}"
+    assert all(一支 in 派完.stderr for 一支 in _指名四支), 派完.stderr
+    匣 = _收件匣(狀態, 專案)
+    assert not [路 for 路 in 匣.glob("*") if 路.is_file()]
+    assert not [路 for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
+    assert not list(專案.parent.glob("nova-wt-*"))
