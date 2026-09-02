@@ -22,7 +22,7 @@ from nova.契約.節點 import (
 class _用量累計:
     """扇出 runner 自己持有的階段總用量。"""
 
-    總token: int = 0
+    累計新鮮token: int = 0
 
     def 加入[輸出](self, 結果: 節點結果[輸出]) -> int:
         """記下結果的用量；確定失敗沒有用量，不計入總額。"""
@@ -30,8 +30,8 @@ class _用量累計:
             return 0
         if 結果.用量 is None:
             return 0
-        花費 = 結果.用量.總token
-        self.總token += 花費
+        花費 = 結果.用量.新鮮token
+        self.累計新鮮token += 花費
         return 花費
 
 
@@ -58,7 +58,7 @@ def 執行扇出[輸入, 輸出, 依賴](
     def _盡量派送() -> None:
         nonlocal 下一個, 已呼叫, 已觸發護欄
         while 下一個 < len(工作) and len(進行中) < 政策.最大並行數 and not 已觸發護欄:
-            if _上限阻止再派一顆(已呼叫, 用量累計.總token, len(進行中), 開始, 政策):
+            if _上限阻止再派一顆(已呼叫, 用量累計.累計新鮮token, len(進行中), 開始, 政策):
                 已觸發護欄 = True
                 break
             工作項 = 工作[下一個]
@@ -213,7 +213,7 @@ def _收回完成分支[輸入, 輸出, 依賴](
         花費 = 用量累計.加入(結果)
         if 花費 > 政策.每分支最多token:
             本批觸發護欄 = True
-        if 用量累計.總token > 政策.階段最多token or isinstance(結果, 節點護欄):
+        if 用量累計.累計新鮮token > 政策.階段最多token or isinstance(結果, 節點護欄):
             本批觸發護欄 = True
     return 本批觸發護欄
 

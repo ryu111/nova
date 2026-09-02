@@ -75,7 +75,7 @@ def _結束事件(
 ) -> 事件:
     """`結果 is None` ＝ 內層丟了例外，那是**結果未知**不是確定失敗。"""
     花費 = 結果.花費 if 結果 else None
-    超標 = True if (花費 is not None and 花費.總token > 單次最多token) else None
+    超標 = True if (花費 is not None and 花費.新鮮token > 單次最多token) else None
     return 事件(
         種類=事件種類.階段結束,
         呼叫編號=編號,
