@@ -83,25 +83,19 @@ _pytest沒驗到 = {
     4: "pytest 用法錯誤，旗標打錯或路徑不存在（exit 4）",
 }
 
-排除目錄前綴: tuple[str, ...] = ("tests/負控/登記們/",)
-排除相對路徑: tuple[str, ...] = (
-    "tests/負控/登記.py",
-    "tests/負控/執行器.py",
-)
-排除檔名: tuple[str, ...] = (
-    "conftest.py",
-    "__init__.py",
-)
-
 
 def 可作指定pytest目標(路徑: str) -> bool:
-    """排除負控登記資料、執行器、conftest 等無法作為指定 pytest 目標的非測試檔。"""
-    if any(路徑.startswith(前綴) or f"/{前綴}" in 路徑 for 前綴 in 排除目錄前綴):
-        return False  #: 負控登記們
-    if any(路徑 == 排除 or 路徑.endswith(f"/{排除}") for 排除 in 排除相對路徑):
-        return False
+    """檔名對得上 pytest 的 `python_files`（`test_*.py`／`*_test.py`）才能當指定目標。
+
+    這裡問的是**「pytest 收得到嗎」**，不是「這個檔在不在黑名單上」。原本的
+    deny-list（登記們、登記.py、執行器.py、conftest.py、`__init__.py`）不是
+    不信任那幾個檔，是 pytest 只收得到上面那兩種檔名——所以那幾條全被這一行
+    涵蓋，刪掉。deny-list 每補一條就是在等下一種副檔名開下一次洞：
+    09-01 登記們 exit 5、09-02 01:34 `實錄/*.json` exit 4、09-02 09:50
+    `資料/*.css` exit 4，三次都收成「結果未知」、一支測試都沒跑到。
+    """
     檔名 = 路徑.rsplit("/", 1)[-1]
-    return 檔名 not in 排除檔名
+    return 檔名.endswith(".py") and (檔名.startswith("test_") or 檔名.endswith("_test.py"))
 
 
 def _像pytest(指令: Sequence[str]) -> bool:

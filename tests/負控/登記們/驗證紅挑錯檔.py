@@ -14,14 +14,17 @@ from pathlib import Path
 from tests.負控.登記 import 替換一次, 變異
 
 登記 = (
-    #: 政策裡拿掉登記們那條＝驗證紅又會拿沒有測試函式的資料模組去跑 pytest。
+    #: 政策的檔名比對拿掉＝驗證紅又會拿沒有測試函式的資料模組去跑 pytest。
+    #: 原本的錨點是 deny-list 的 `return False  #: 負控登記們`，那條在
+    #: allow-list 之後不存在了，錨點跟著搬到同一個保證現在住的那一行。
     變異(
         識別="指定測試目標不再排除負控登記們",
         目標檔=Path("src/nova/載體/判準.py"),
         # 錨點挑「可執行行」：docstring 那行沒有覆蓋率紀錄，執行器會判 RUN_ERROR。
         操作=替換一次(
-            "        return False  #: 負控登記們\n",
-            "        return True  #: 負控登記們\n",
+            '    return 檔名.endswith(".py") and '
+            '(檔名.startswith("test_") or 檔名.endswith("_test.py"))\n',
+            "    return True\n",
         ),
         該紅=(
             (

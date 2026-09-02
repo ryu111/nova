@@ -24,6 +24,7 @@ from nova.迴圈.狀態機 import (
     下一步,
     卡住了,
     卡住門檻,
+    失敗行的測試節點,
     查階段,
     紅在哪些既有測試,
 )
@@ -199,6 +200,27 @@ class Test驗證綠紅在既有測試該退回誰:
             )
             is 階段代碼.實作
         )
+
+
+def test_失敗行的nodeid帶轉義或未轉義的中文參數id都抽得完整() -> None:
+    r"""中文參數 id 的兩種長相都要抽出**整條** nodeid，含 `[...]` 那一段。
+
+    pytest 9 預設用 `ascii_escaped` 把非 ASCII 參數 id `[儀表板]` 轉成 `[\u5100\u8868\u677f]`
+    （`_pytest/compat.py`）。2026-09-02 09:50 那次驗證紅收成「結果未知」時，
+    證據裡正好有這種長相，於是它被誤診成真因——查證之後不成立：`結果未知` 只從
+    `判準終局.跑不起來` 來，跟 `FAILED` 行怎麼解析無關。所以轉義**不改也不解碼**
+    （不動 `pyproject.toml` 的選項、不在這裡 `unicode_escape`），改成釘住現況：
+    反斜線與十六進位都是非空白，`\S+::\S+` 本來就吃得下。
+
+    兩種形狀一起釘，是為了讓「以後真要關掉轉義」變成純設定題：解析器兩邊都已背書，
+    不必回頭改它。抽到一半（例如把樣式縮成只吃 ASCII）會截成
+    `tests/x.py::T::test_a[`，兩輪之間的連紅比對就會拿殘缺 nodeid 去比。
+    """
+    轉義的 = r"FAILED tests/x.py::T::test_a[\u5100\u8868\u677f] - AssertionError"
+    assert 失敗行的測試節點(轉義的) == r"tests/x.py::T::test_a[\u5100\u8868\u677f]"
+
+    未轉義的 = "[全測試] FAILED tests/x.py::T::test_a[儀表板]"
+    assert 失敗行的測試節點(未轉義的) == "tests/x.py::T::test_a[儀表板]"
 
 
 class Test結果未知:
