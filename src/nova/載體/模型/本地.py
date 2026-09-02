@@ -340,10 +340,32 @@ def _出門了嗎(錯誤: BaseException) -> bool:
     return not isinstance(錯誤, urllib.error.URLError)
 
 
+#: 錯誤回應體只留這麼多字元。上游那句話（例如 oMLX 的 unload pending）就在裡面，
+#: 丟掉它的話，看訊息的人只剩一個狀態碼，不知道要去修哪台服務。
+_錯誤回應體上限 = 500
+
+
+def _讀錯誤回應體(錯誤: urllib.error.HTTPError) -> str:
+    """把 HTTP 錯誤的回應體讀成一行字；讀不到就當沒有，不准因此再炸一次。"""
+    try:
+        原始 = 錯誤.read()
+    except Exception:  # noqa: BLE001 —— 讀不到回應體只是少一段線索，不該蓋掉原本的錯
+        return ""
+    文 = 原始.decode("utf-8", errors="replace")
+    return " ".join(文.split())[:_錯誤回應體上限]
+
+
+def _HTTP錯誤訊息(網址: str, 錯誤: urllib.error.HTTPError) -> str:
+    """指名端點、狀態碼，並盡量帶上上游那句原話。"""
+    回應體 = _讀錯誤回應體(錯誤)
+    開頭 = f"{網址} 回 HTTP {錯誤.code}"
+    return f"{開頭}：{回應體}" if 回應體 else 開頭
+
+
 def _把例外收成回應(網址: str, 逾時秒: float, 錯誤: BaseException) -> 回應:
     """例外 → 結構化回應。**收成哪一種終局由「出門了沒」決定，不由例外的名字決定。**"""
     if isinstance(錯誤, urllib.error.HTTPError):
-        return _建立失敗回應(f"{網址} 回 HTTP {錯誤.code}", 失敗代碼.上游, 結束碼=錯誤.code)
+        return _建立失敗回應(_HTTP錯誤訊息(網址, 錯誤), 失敗代碼.上游, 結束碼=錯誤.code)
     是逾時 = isinstance(錯誤, TimeoutError) or (
         isinstance(錯誤, urllib.error.URLError) and isinstance(錯誤.reason, TimeoutError)
     )
