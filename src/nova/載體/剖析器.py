@@ -171,7 +171,7 @@ def _加委派旗標(剖析: argparse.ArgumentParser, *, 題目說明: str) -> N
         choices=[種.value for 種 in 工作種類],
         help="照派工表自動挑腦：routine 給 agy、build 給 local、reasoning 給 sol",
     )
-    剖析.add_argument("--模型", default=None, help="模型字串，原樣傳下去不翻譯")
+    剖析.add_argument("--模型", default=None, help="模型字串，通過家族檢查後原樣傳給該家")
     剖析.add_argument(
         "--思考深度",
         default=None,
@@ -335,7 +335,7 @@ def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
     剖析.add_argument(
         "--模型",
         default=None,
-        help="這一次用哪顆型號，蓋掉派工表的策略。"
+        help="只套在 --用 指名的那幾階（審查那階留派工表的型號）；"
         "用在『這一家的某個池用完了、但它代跑的另一個池還有』",
     )
     剖析.add_argument(
