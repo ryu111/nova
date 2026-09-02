@@ -119,7 +119,13 @@ from nova.載體.語言 import 找非繁體字
 from nova.載體.跑驗收 import 跑驗收, 驗收結果
 from nova.載體.進度 import 一步上限, 檢查進度檔位置, 讀進度, 進度執行器
 from nova.載體.遮罩 import 遮罩
-from nova.載體.重構護欄 import 動到測試了嗎, 拍全樹快照, 拍快照, 跑出範圍了嗎
+from nova.載體.重構護欄 import (
+    動到測試了嗎,
+    建立測試檔快照能力,
+    拍全樹快照,
+    拍快照,
+    跑出範圍了嗎,
+)
 from nova.載體.閘 import 跑閘
 from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.閘鎖 import 佔不到, 等鎖說明
@@ -1616,6 +1622,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                 起點=階段代碼(參數.起點),
                 拍快照=拍工作區快照,
                 動到測試了嗎=動到測試了嗎,
+                測試檔快照能力=建立測試檔快照能力(),
                 判定工作區=判定工作區,
             )
     except (ValueError, FileNotFoundError) as 錯:
