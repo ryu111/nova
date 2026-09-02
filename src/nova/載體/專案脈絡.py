@@ -6,11 +6,12 @@ from pathlib import Path
 from nova.載體.已處理 import 已處理目錄
 from nova.載體.帳本 import 預設帳本目錄
 from nova.載體.收件 import 收件目錄
+from nova.載體.顧問 import 顧問目錄
 
 
 @dataclass(frozen=True, slots=True)
 class 專案執行脈絡:
-    """同一次執行共用的專案鍵與五個狀態路徑。"""
+    """同一次執行共用的專案鍵與六個狀態路徑。"""
 
     根目錄: Path
     收件: Path = field(init=False)
@@ -18,6 +19,8 @@ class 專案執行脈絡:
     帳本: Path = field(init=False)
     已處理: Path = field(init=False)
     鎖: Path = field(init=False)
+    #: 診斷素材落這裡，**不落在工作目錄**：它是要被餵回模型的東西。
+    顧問: Path = field(init=False)
 
     def __post_init__(self) -> None:
         """把所有狀態路徑固定在同一個專案鍵下。"""
@@ -30,6 +33,7 @@ class 專案執行脈絡:
         object.__setattr__(self, "帳本", 預設帳本目錄(根))
         object.__setattr__(self, "已處理", 已處理)
         object.__setattr__(self, "鎖", 已處理.parent / "工作流.鎖")
+        object.__setattr__(self, "顧問", 顧問目錄(根))
 
 
 def 建專案執行脈絡(工作目錄: str | Path | None = None) -> 專案執行脈絡:
