@@ -18,6 +18,10 @@ from nova.契約.退出碼 import 放行, 未知, 閘紅
 from nova.載體.命令 import 收 as 命令列
 from nova.載體.命令列 import 主程式
 
+#: 假 git 在「拓撲問不出來」模式下吐的那句話。真的 git 這時吐的是英文 fatal，
+#: 這裡換成一句認得出來的字：要釘的是**這句話有沒有被原樣端到人面前**。
+問不出拓撲時git的抱怨 = "fatal: 假 git 今天答不出 worktree list"
+
 
 def _造假git與gh(專案: Path, 測具: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """在專案外造會記錄 argv 的假 `git` 與假 `gh`。"""
@@ -42,6 +46,16 @@ with 路徑.open('a', encoding='utf-8') as 檔:
 # 否則旗標一改這裡就靜靜地答不出分支，紅的原因就不是這幾支要測的那件事。
 if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['symbolic-ref']:
     print('nova/20260101T000000Z-abc123')
+# 拓撲也要答得出來：`收` 在第一個 git 寫入之前會問「這棵樹的主工作區在哪」，
+# 答不出來就當場停（那時 commit／push 一道都還沒發）。這幾支測的是別的紅線，
+# 所以這裡照實答「這就是主工作區」，讓它們走主工作區那條路。
+if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['worktree']:
+    # 開關擺在環境變數上，這樣「拓撲問不出來」那一支跟其餘幾支共用同一個假 git。
+    if os.environ.get('NOVA_收尾拓撲') == '問不出':
+        sys.stderr.write({問不出拓撲時git的抱怨!r} + '\\n')
+        sys.exit(128)
+    print('worktree ' + os.environ['NOVA_收尾專案'])
+    print('branch refs/heads/main')
 if pathlib.Path(sys.argv[0]).name == 'gh' and sys.argv[1:3] == ['pr', 'checks']:
     模式 = os.environ.get('NOVA_收尾CI', '')
     if 模式 == '紅':
@@ -54,6 +68,7 @@ if pathlib.Path(sys.argv[0]).name == 'gh' and sys.argv[1:3] == ['pr', 'checks']:
         路徑.write_text(原文, encoding="utf-8")
         路徑.chmod(路徑.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("NOVA_收尾紀錄", str(紀錄))
+    monkeypatch.setenv("NOVA_收尾專案", str(專案))
     monkeypatch.setenv(
         "PATH",
         os.pathsep.join((str(執行檔目錄), os.environ.get("PATH", ""))),
@@ -168,6 +183,70 @@ class Test收尾紅線:
 
         合併 = _斷言有指令(_讀呼叫(紀錄), "gh", "pr", "merge")
         assert "--delete-branch" in 合併
+
+    def test_主工作區那條路收完不准去收樹(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        閘放行: Callable[[], None],
+    ) -> None:
+        """`收` 跑在主工作區裡（根 == 主工作區）時，收完不准跑 `git worktree remove`。
+
+        「收 0 要把樹收掉」只適用於派工樹。同一段收場沒有分辨主工作區就照收，收掉的
+        會是人正在裡面工作的那棵樹——`git worktree remove` 對主工作區其實會被 git 擋
+        下來，但那是 git 幫的忙，不是這個程式的判斷；而在假 CLI 之下（測試裡）以及任
+        何未來改用別的收法的寫法之下，這一步就是靜靜地把現場毀掉。
+
+        所以派工樹那條路的每一道收場動作，這裡都要反著釘一次：`worktree remove` 一道
+        都不准發、stdout 不准出現「樹已收掉」那句只屬於派工樹的話，退出碼照舊是 0。
+        """
+        專案, 紀錄 = _準備收尾(tmp_path, monkeypatch)
+        閘放行()
+
+        assert 主程式(_收尾參數(專案)) == 放行
+
+        呼叫紀錄 = _讀呼叫(紀錄)
+        _斷言有指令(呼叫紀錄, "gh", "pr", "merge")
+        _斷言沒有指令(呼叫紀錄, "git", "worktree", "remove")
+        _斷言沒有指令(呼叫紀錄, "git", "branch", "-D")
+        assert "樹已收掉" not in capsys.readouterr().out, (
+            "主工作區那條路報了一句只屬於派工樹的收場，人會以為自己的工作區被收掉了"
+        )
+
+    def test_問不出主工作區時連一個git寫入都不准發生(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        閘放行: Callable[[], None],
+    ) -> None:
+        """`worktree list` 答不出來 → 停在 1，而且 commit／push／merge 一道都沒發。
+
+        「這棵樹是不是派工樹」決定了後面兩件事：`gh pr merge` 帶不帶
+        `--delete-branch`、收完要不要把樹收掉。問不出來還往下走，等於拿一個猜的
+        拓撲去 merge——猜錯的下場是 `--delete-branch` 先 `git checkout <base>`，
+        而 base 被主工作區佔著，那道 checkout 回 128 是在 **merge 已經做完之後**
+        才發生的：PR 合併了、退出碼 1、樹與分支照樣留著（`docs/負控紀錄/0010`）。
+
+        所以拓撲要在**第一個 git 寫入之前**問。這一支釘的就是那個順序：紅的時候
+        現場乾淨得可以整趟重跑，不必有人去 GitHub 上收拾一個已經合併的 PR。
+        """
+        專案, 紀錄 = _準備收尾(tmp_path, monkeypatch)
+        monkeypatch.setenv("NOVA_收尾拓撲", "問不出")
+        閘放行()
+
+        assert 主程式(_收尾參數(專案)) == 閘紅
+
+        呼叫紀錄 = _讀呼叫(紀錄)
+        _斷言有指令(呼叫紀錄, "git", "worktree", "list")
+        _斷言沒有指令(呼叫紀錄, "git", "commit")
+        _斷言沒有指令(呼叫紀錄, "git", "push")
+        _斷言沒有指令(呼叫紀錄, "gh", "pr", "create")
+        _斷言沒有指令(呼叫紀錄, "gh", "pr", "merge")
+        錯誤 = capsys.readouterr().err
+        assert "主工作區" in 錯誤, f"沒講清楚是「問不出主工作區」停下來的：{錯誤!r}"
+        assert 問不出拓撲時git的抱怨 in 錯誤, f"git 自己的抱怨沒端出來，人查不下去：{錯誤!r}"
 
     def test_CI紅時不會組出合併指令(
         self,

@@ -4,8 +4,10 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from nova.契約.退出碼 import 放行, 未知, 閘紅
+from nova.載體.工作樹 import 主工作區, 收掉工作樹
 from nova.載體.規則表 import 建規則表
 from nova.載體.閘 import 跑閘
 
@@ -67,9 +69,10 @@ def 子命令_收(參數: argparse.Namespace) -> int:
     if (碼 := _收尾閘(參數, 根)) != 放行:
         return 碼
 
-    分支, 抱怨 = _這棵樹的分支(根)
-    if 分支 is None:
-        return _回報沒有分支可以推(抱怨)
+    現場, 碼 = _開工前問清楚現場(根)
+    if 現場 is None:
+        return 碼
+    分支, 主區, 是派工樹 = 現場
 
     訊息 = 參數.訊息 or " ".join(參數.提交訊息) or "nova：收尾"
     if (碼 := _提交推送並開PR(根, 訊息=訊息, 分支=分支)) != 放行:
@@ -80,13 +83,57 @@ def 子命令_收(參數: argparse.Namespace) -> int:
     ) != 放行:
         return 碼
 
-    _, 頭分支 = _跑收尾指令(根, "git", "branch", "--show-current")
-    頭分支 = 頭分支.strip()
-
-    if (碼 := _合併這個PR(根)) != 放行:
+    if (碼 := _合併這個PR(根, 刪遠端分支=not 是派工樹)) != 放行:
         return 碼
 
-    return _查證本地分支已刪(根, 頭分支)
+    return _合併之後收乾淨(根, 主區=主區, 分支=分支, 是派工樹=是派工樹)
+
+
+class _收尾現場(NamedTuple):
+    """`收` 開工前問到的拓撲：這棵樹掛哪條分支、主工作區在哪、它自己是不是派工樹。"""
+
+    分支: str
+    主區: Path
+    是派工樹: bool
+
+
+def _開工前問清楚現場(根目錄: Path) -> tuple[_收尾現場 | None, int]:
+    """在**第一個 git 寫入之前**把拓撲問清楚：回 (現場, 碼)，問不出來時現場是 None。
+
+    問不出來就停在這裡，`收` 一個 commit、一次 push 都還沒發。查不到主工作區不准
+    猜成「當它不是派工樹」——猜錯的下場是 `gh pr merge --delete-branch` 在 merge
+    做完之後才回 128，樹與分支照樣留著（`docs/負控紀錄/0010`）。
+    """
+    分支, 抱怨 = _這棵樹的分支(根目錄)
+    if 分支 is None:
+        return None, _回報沒有分支可以推(抱怨)
+    try:
+        主區 = 主工作區(根目錄)
+    except OSError as 錯:
+        sys.stderr.write(f"問不出這棵樹的主工作區在哪，不 commit 不 push：{錯}\n")
+        return None, 閘紅
+    # macOS 的 `/var` 是 `/private/var` 的 symlink，兩邊都要 resolve 才比得出來。
+    return _收尾現場(分支, 主區, 是派工樹=主區.resolve() != 根目錄.resolve()), 放行
+
+
+def _合併之後收乾淨(根目錄: Path, *, 主區: Path, 分支: str, 是派工樹: bool) -> int:
+    """PR 合併之後把現場收乾淨：派工樹連它的本地分支一起走，再查證分支真的不在了。
+
+    merge 之後 `根目錄` 隨時會不見（派工樹被自己收掉），所以這之後每一道指令的
+    cwd 只准是主區。收不掉是「merge 已經發生過」的狀態，訊息要明講不要重跑
+    merge——重跑只會拿到一句「已經合併過了」，真正沒做完的是清現場那一段。
+    """
+    if 是派工樹:
+        try:
+            收掉工作樹(根目錄)
+        except OSError as 錯:
+            sys.stderr.write(
+                f"PR 已合併，但這棵樹沒收乾淨：{錯}。"
+                f"不要重跑 merge；清掉樹之後手動刪本地分支 {分支}\n"
+            )
+            return 閘紅
+        sys.stdout.write(f"樹已收掉，回主工作區：{主區}\n")
+    return _查證本地分支已刪(主區, 分支)
 
 
 def _這棵樹的分支(根目錄: Path) -> tuple[str | None, str]:
@@ -149,16 +196,18 @@ def _提交推送並開PR(根目錄: Path, *, 訊息: str, 分支: str) -> int:
     return 放行
 
 
-def _合併這個PR(根目錄: Path) -> int:
-    """既有政策：squash 合併並刪遠端分支，絕不帶 `--admin`。"""
-    return _跑並印收尾指令(
-        根目錄,
-        "gh",
-        "pr",
-        "merge",
-        "--squash",
-        "--delete-branch",
-    )
+def _合併這個PR(根目錄: Path, *, 刪遠端分支: bool) -> int:
+    """既有政策：一律 squash，絕不帶 `--admin`。
+
+    `--delete-branch` 只給主工作區那條路。派工樹上它是有害的：gh 刪本地分支前會先
+    `git checkout <base>`，而 base 被主工作區佔著，linked worktree 裡那道 checkout
+    回 128——**merge 已經做完了才回非零**。遠端那條分支由 repo 的
+    delete-branch-on-merge 刪。
+    """
+    指令 = ["gh", "pr", "merge", "--squash"]
+    if 刪遠端分支:
+        指令.append("--delete-branch")
+    return _跑並印收尾指令(根目錄, *指令)
 
 
 def _查證本地分支已刪(根目錄: Path, 頭分支: str) -> int:

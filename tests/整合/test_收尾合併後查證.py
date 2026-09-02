@@ -29,8 +29,14 @@ def _造假git與gh_分支刪不掉(專案: Path, 測具: Path, monkeypatch: pyt
     """造出「GitHub 合併了、本地分支沒刪掉」的假 CLI，並記下每一道 argv。
 
     合併後查證要問的那幾件事都給得出答案（PR 已 merged、有 mergeCommit、
-    工作樹清單只剩主工作樹、工作樹是乾淨的），只有 `git branch --list`
-    刻意回報分支還在——這樣測試紅的時候，紅的原因只會是「沒查本地分支」。
+    工作樹是乾淨的），只有 `git branch --list` 刻意回報分支還在——這樣測試紅的
+    時候，紅的原因只會是「沒查本地分支」。
+
+    `worktree list` 刻意排成**兩棵**樹：第一棵是主工作區（站在 main 上，`收` 就是
+    在它裡面跑的），第二棵是別人開的樹，正佔著那條 head 分支。這是 0010 的現場原樣
+    ——分支刪不掉幾乎一定是「被某棵 worktree 佔著」。歷來兩次想把這一格弄綠的解法
+    （「被任一 worktree 佔著就放行」、「問不到主工作區就當它是主工作區」）都是把
+    查證換成猜測；這份清單就是要讓那兩種寫法在這裡永遠回不了綠。
     """
     專案.mkdir()
     執行檔目錄 = 測具 / "假執行檔"
@@ -57,6 +63,10 @@ elif 名稱 == 'git' and 參數[:1] == ['worktree']:
     print("worktree " + os.environ['NOVA_收尾專案'])
     print("HEAD 1111111111111111111111111111111111111111")
     print("branch refs/heads/main")
+    print("")
+    print("worktree " + os.environ['NOVA_收尾別的樹'])
+    print("HEAD 1111111111111111111111111111111111111111")
+    print("branch refs/heads/" + 分支)
 elif 名稱 == 'git' and 參數[:1] == ['rev-parse']:
     print("1111111111111111111111111111111111111111")
 elif 名稱 == 'gh' and 參數[:2] == ['pr', 'view']:
@@ -76,6 +86,7 @@ sys.exit(0)
     monkeypatch.setenv("NOVA_收尾紀錄", str(紀錄))
     monkeypatch.setenv("NOVA_收尾分支", 分支名)
     monkeypatch.setenv("NOVA_收尾專案", str(專案))
+    monkeypatch.setenv("NOVA_收尾別的樹", str(專案.parent / "別的樹"))
     monkeypatch.setenv("PATH", os.pathsep.join((str(執行檔目錄), os.environ.get("PATH", ""))))
     return 紀錄
 
@@ -87,11 +98,14 @@ def test_gh回零但本地分支還在要回一並且指名那條分支(
 ) -> None:
     """假 `gh pr merge` 回 0、本地分支仍在時，收尾必須回 1 並講出是哪條分支沒刪掉。
 
-    三件事一起守：
+    四件事一起守：
     1. 退出碼不准是 0——`gh` 的 0 只代表 GitHub 那端，不是完整成功的充分條件。
     2. 真的去問過 `git branch --list`——沒問過就宣告成功等於把查證省掉。
     3. 訊息要分得出「GitHub 合併了」與「本地分支沒刪乾淨」，
        不然人看到紅只會以為合併失敗，跑去重按一次 merge。
+    4. 那條分支**正被另一棵 worktree 佔著**（見假 `worktree list`），還是要回 1：
+       「被佔著」是這件事最常見的成因，不是可以放行的例外。把它當例外放行，
+       等於 0010 記的那個現場從此再也測不出來。
     """
     專案 = tmp_path / "專案"
     紀錄 = _造假git與gh_分支刪不掉(專案, tmp_path / "測具", monkeypatch)

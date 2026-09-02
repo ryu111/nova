@@ -13,7 +13,7 @@ from nova.載體.git查詢 import 跑git
 #: 單純 import 進來的名字不算這個模組的公開屬性，測試 monkeypatch 它會紅。
 #: 走 `__all__` 不走 `as 跑git`——後者會被 ruff 的 PLC0414 擋，
 #: 而為了繞過它加 noqa 就得再去登記豁免，那條路比較長也比較沒說服力。
-__all__ = ["收掉工作樹", "收集證據", "開一個工作樹", "跑git"]
+__all__ = ["主工作區", "收掉工作樹", "收集證據", "開一個工作樹", "跑git"]
 
 
 def _跑git或報錯(工作目錄: Path, *參數: str, 出事時說: str) -> str:
@@ -88,10 +88,13 @@ def 收掉工作樹(落點: Path) -> None:
 
     收證據要在收掉之前——見 `收集證據`。
     """
-    # 這兩件事都要在樹還在的時候問：樹一收掉，這個路徑就沒有 git 可以問了。
-    分支 = _這棵樹掛的分支(落點)
-    主區 = _主工作區(落點)
-    _跑git或報錯(落點, "worktree", "remove", str(落點), 出事時說=f"收不掉工作樹，現場留在：{落點}")
+    # 一道 git 都不准站在這棵樹裡跑：收樹的這一刻它隨時會不見（`收` 走到這裡時
+    # PR 已經合併了），站在裡面發出去的指令是定時炸彈——樹一收掉那個 cwd 就是一個
+    # 不存在的 inode，後面還指著它的東西全跟著掉下去（0010 的現場）。
+    # 主工作區與樹的門牌名改讀 `<落點>/.git` 這張門牌：純文字一行，不必站在樹裡。
+    主區, 門牌 = _讀這棵樹的門牌(落點)
+    分支 = _這棵樹掛的分支(主區, 門牌, 落點=落點)
+    _跑git或報錯(主區, "worktree", "remove", str(落點), 出事時說=f"收不掉工作樹，現場留在：{落點}")
     if 分支:
         # 刪不掉就當場 raise：靜默吞掉的話「看起來收乾淨了，其實分支還在」，
         # 下一次同名派工會撞在一條沒人用的分支上，而現場一點線索都沒留。
@@ -104,13 +107,41 @@ def 收掉工作樹(落點: Path) -> None:
         )
 
 
-def _這棵樹掛的分支(落點: Path) -> str:
+def _讀這棵樹的門牌(落點: Path) -> tuple[Path, str]:
+    """讀 `<落點>/.git` 這張門牌，回 (主工作區, 這棵樹在 `.git/worktrees` 底下的名字)。
+
+    讀檔不是問 git，這是刻意的：收樹的那一刻不准有任何指令站在這棵樹裡跑，而
+    「主工作區在哪」正是那時唯一還缺的東西。門牌只有一行 `gitdir: <共用
+    git>/worktrees/<名字>`，形狀不對就 raise——**不猜、不退回把落點當主工作區**。
+    """
+    門牌檔 = 落點 / ".git"
+    出事時說 = f"讀不出這棵樹的門牌（樹在：{落點}）"
+    try:
+        內容 = 門牌檔.read_text(encoding="utf-8").strip()
+    except OSError as 錯:
+        說明 = f"{出事時說}：{錯}"
+        raise OSError(說明) from 錯
+    if not 內容.startswith("gitdir: "):
+        說明 = f"{出事時說}：{門牌檔} 不是 `gitdir: …` 的形狀"
+        raise OSError(說明)
+    這棵樹的git目錄 = Path(內容.removeprefix("gitdir: ").strip())
+    共用git目錄 = 這棵樹的git目錄.parent.parent
+    if 這棵樹的git目錄.parent.name != "worktrees" or 共用git目錄.name != ".git":
+        說明 = f"{出事時說}：門牌指到 {這棵樹的git目錄}，那不是 `<主工作區>/.git/worktrees/<名字>`"
+        raise OSError(說明)
+    return 共用git目錄.parent, 這棵樹的git目錄.name
+
+
+def _這棵樹掛的分支(主區: Path, 門牌: str, *, 落點: Path) -> str:
     """這棵樹站在哪條分支上；detached（rc 1）回空字串，問不成（其他非零）就 raise。
+
+    問話站在**主工作區**、指名 `worktrees/<門牌>/HEAD`（樹自己的 HEAD 在共用 git
+    目錄裡有一份），這樣樹一收掉也不會有東西還站在它裡面。
 
     `-q` 是關鍵：有它 detached 才會靜靜回 1，其餘非零就都是「這道 git 根本沒問成」。
     把兩者混成一件事的後果是壞掉時當 detached、樹照收、分支留著沒人知道。
     """
-    結果 = 跑git(落點, "symbolic-ref", "-q", "--short", "HEAD")
+    結果 = 跑git(主區, "symbolic-ref", "-q", "--short", f"worktrees/{門牌}/HEAD")
     if 結果.returncode == 0:
         return 結果.stdout.strip()
     if 結果.returncode == 1:
@@ -119,11 +150,11 @@ def _這棵樹掛的分支(落點: Path) -> str:
     raise OSError(說明)
 
 
-def _主工作區(落點: Path) -> Path:
+def 主工作區(落點: Path) -> Path:
     """問 git 這個 repo 的主工作區在哪——`git branch -D` 只能在還活著的樹裡跑。
 
     問不出來就 raise，不回 None：讀不到主工作區還往下走，等於拿一個猜的路徑
-    去刪分支。
+    去刪分支。`收` 也要用它分辨「這棵樹是不是派工樹」，所以是公開的。
     """
     出事時說 = f"問不出主工作區在哪（樹在：{落點}）"
     輸出 = _跑git或報錯(落點, "worktree", "list", "--porcelain", 出事時說=出事時說)
