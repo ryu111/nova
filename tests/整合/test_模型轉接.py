@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import stat
 import sys
 import tomllib
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from nova.契約.模型回應 import 終局
+from nova.契約.模型回應 import 失敗代碼, 終局
 from nova.契約.角色 import 呼叫選項, 權限, 預設逾時秒
 from nova.載體.模型.執行 import 跑cli
 from nova.載體.模型.解析 import 解析agy
@@ -97,6 +98,45 @@ class Test全鏈路:
         )
         assert 答.終局 != "success"
         assert 答.失敗代碼 == "timeout"
+
+    def test_agy自己收的逾時走完整鏈路要判成逾時(self, 假CLI: Path) -> None:
+        """`逾時看得出來` 這個純函式判得對，不等於它會被叫到。
+
+        這支走的是 `詢問` → `_問一次` → 解析 → 改寫的**真實路徑**：時間由子程序
+        真的睡出來，不是傳進去的參數。純函式那三支（`tests/單元/test_逾時看得出來.py`）
+        全部是直呼，接線那一行拔掉它們照樣全綠——這支就是為了砍那一格負空間。
+
+        時間怎麼安排：`逾時秒=1.0` ⇒ agy 那側的上限是 0.5 秒（餘裕吃掉一半）。
+        假 CLI 睡 0.6 秒，所以 **0.6 ≥ 0.5**（判得成逾時）而且 **0.6 < 1.0**
+        （不會先被 nova 的 SIGKILL 砍掉——被砍掉就走 `逾時的回應`，usage 寫死 0/0，
+        那條路是另一支測的，也正是這條線要避開的壞處）。
+
+        逾時的信封**結束碼是 0**、`status=ERROR`、`response` 空、`usage` 非零，
+        `error` 那句話不命中 `_樣式表` 任何一組——所以解析器只能給 `未知`。
+        判成逾時的唯一根據是**時間**，不是那句話。
+        """
+        答 = 建命令列("agy", 執行檔=假CLI).詢問(
+            "在嗎",
+            選項=呼叫選項(逾時秒=1.0),
+            環境=_環境("agy_timeout.json", 0, 假CLI_睡="0.6"),
+        )
+        assert 答.失敗代碼 is 失敗代碼.逾時, (
+            "agy 自己收掉的逾時被收成 unknown：帳本上那 32 筆查不出根因，就是這一格漏的"
+        )
+        assert 答.終局 == 終局.結果未知, "誠實度改的是代碼，不是終局——逾時一樣不准換腦"
+        assert 答.用量.輸入token == 134241, "usage 不准在改寫時掉光（那正是 SIGKILL 路徑的壞處）"
+        assert 答.用量.輸出token == 14942
+
+    def test_agy沒到時間就回來的不准被誤判成逾時(self, 假CLI: Path) -> None:
+        """反向：同一份信封、同一條路徑，只差在時間沒到。
+
+        `逾時秒=20.0` ⇒ agy 那側上限 10 秒，假 CLI 不睡、當場就吐——
+        改寫要放它過去，維持 `未知`。沒有這一格，上一支用「一律改寫」就能騙過。
+        """
+        答 = 建命令列("agy", 執行檔=假CLI).詢問(
+            "在嗎", 選項=呼叫選項(逾時秒=20.0), 環境=_環境("agy_timeout.json", 0)
+        )
+        assert 答.失敗代碼 is 失敗代碼.未知, "秒回的失敗被說成逾時，等於把診斷換成另一個謊"
 
     def test_失敗又沒話說時要把stderr當證據(self, 假CLI: Path) -> None:
         """診斷丟掉比結論丟掉更難查——它看起來完全正常。
@@ -404,8 +444,59 @@ class Test權限是漏出的:
         assert "--dangerously-bypass-approvals-and-sandbox" not in 參數
 
 
+#: Go duration string 的單位表（`time.ParseDuration`）。agy 是 Go 寫的，
+#: `--print-timeout` 的預設印成 `5m0s`，所以值大機率是這個格式；但**格式留給實作者**，
+#: 純秒數（`"1770"`）也讀得出來。這裡不收的只有一種：讀不出秒數的東西。
+_時間單位秒 = {"ns": 1e-9, "us": 1e-6, "µs": 1e-6, "ms": 1e-3, "s": 1.0, "m": 60.0, "h": 3600.0}
+
+
+def _取print逾時值(參數: list[str]) -> str:
+    """從 argv 撈 `--print-timeout` 的值。旗標與值分兩格（跟 `--model`、`--mode` 同形）。"""
+    assert "--print-timeout" in 參數, f"agy 的 print mode 有自己的 5 分鐘上限，argv 沒帶：{參數}"
+    位置 = 參數.index("--print-timeout")
+    assert 位置 + 1 < len(參數), "`--print-timeout` 是最後一格，沒有值"
+    return 參數[位置 + 1]
+
+
+def _讀秒數(值: str) -> float:
+    """把 `--print-timeout` 的值換算成秒。"""
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", 值):
+        return float(值)
+    片段 = re.findall(r"(-?\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)", 值)
+    assert 片段 and "".join(數 + 單位 for 數, 單位 in 片段) == 值, f"看不懂的逾時值：{值!r}"
+    return sum(float(數) * _時間單位秒[單位] for 數, 單位 in 片段)
+
+
 class Test逾時由呼叫端決定:
     """逾時應該跟工作的形狀走，不能因為模型名稱就偷偷改寫。"""
+
+    def test_agy的argv要帶print_timeout而且值跟著逾時秒走(self) -> None:
+        """nova 的逾時只落在子程序那一側，agy 完全不知道，所以它照自己的 5 分鐘收。
+
+        實測（2026-09-02）：`agy --help` 有 `--print-timeout (default 5m0s)`，
+        而 `_agy組參數` 一個字都沒對它說——`TDD階段預設逾時秒 = 3600.0` 從來沒生效過，
+        真正的上限是 300 秒，差 12 倍。帳本上是 32 筆 `duration_ms` 中位數 304,008 的
+        `unknown`（`text_len=0`），agy 自己的 log 寫著 `Print mode: timed out`。
+        """
+        參數 = 建命令列("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(逾時秒=1800.0))
+        assert "--print-timeout" in 參數
+
+        # 換一個逾時，值要跟著變——寫死一個常數等於換一個數字繼續騙人。
+        參數短 = 建命令列("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(逾時秒=60.0))
+        assert _取print逾時值(參數) != _取print逾時值(參數短)
+
+    def test_agy的鐘要比nova的鐘早響(self) -> None:
+        """順序反了就回到今天的壞處：nova 先 SIGKILL，走 `逾時的回應`，usage 被寫死 0/0。
+
+        agy 自己收的話至少信封還在、usage 還在，才知道燒了多少。
+        所以傳給 agy 的值要**嚴格小於** `選項.逾時秒`，留餘裕給它自己吐信封；
+        又不能小於等於 0（那等於關掉或立刻逾時），短逾時也不准被餘裕吃光。
+        """
+        for 逾時秒 in (60.0, 300.0, 1800.0, 3600.0):
+            參數 = 建命令列("agy", 執行檔=Path("/x")).組參數("提示", 呼叫選項(逾時秒=逾時秒))
+            值 = _讀秒數(_取print逾時值(參數))
+            assert 值 > 0, f"傳 0 或負數等於關掉／立刻逾時（逾時秒={逾時秒}）"
+            assert 值 < 逾時秒, f"agy 要有機會自己吐信封，不能跟 SIGKILL 同時到（{值} vs {逾時秒}）"
 
     def test_一般模型維持三十分鐘(self) -> None:
         assert 決定逾時秒(呼叫選項()) == 預設逾時秒
