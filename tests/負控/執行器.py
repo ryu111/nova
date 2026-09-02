@@ -221,6 +221,24 @@ def _是模組層常數替換(文字: str, 一筆: 變異) -> bool:
     return False
 
 
+def 要求覆蓋的行(目標: Path, 一筆: 變異) -> frozenset[int]:
+    """算出這一筆「該紅的測試必須走到」的那幾行。
+
+    切出來是為了讓跑前體檢（`跑前體檢.py`）算的行跟這裡**是同一份**：
+    抄第二份的話，體檢說過、CI 說沒過，回饋反而更難信。
+    """
+    推導的行 = _推導破壞行(目標, 一筆)
+    if 一筆.必須覆蓋 is None:
+        return 推導的行
+    if not 一筆.必須覆蓋 and _是模組層常數替換(目標.read_text(encoding="utf-8"), 一筆):
+        # 這個顯式空集合是「沒有可追 coverage 行」的標記，不是預設值。
+        return frozenset()
+    if not 一筆.必須覆蓋:
+        # 一般空集合沒有額外斷言，破壞行仍由操作推導並必須被覆蓋。
+        return 推導的行
+    return 推導的行 | 一筆.必須覆蓋
+
+
 def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
     """**目標檔不是 Python 就跳過這一關。**
 
@@ -236,17 +254,7 @@ def _覆蓋率前置(根目錄: Path, 一筆: 變異) -> None:
     目標 = 根目錄 / 一筆.目標檔
     if 目標.suffix != ".py":
         return
-    推導的行 = _推導破壞行(目標, 一筆)
-    if 一筆.必須覆蓋 is None:
-        必須覆蓋 = 推導的行
-    elif not 一筆.必須覆蓋 and _是模組層常數替換(目標.read_text(encoding="utf-8"), 一筆):
-        # 這個顯式空集合是「沒有可追 coverage 行」的標記，不是預設值。
-        必須覆蓋 = frozenset()
-    elif not 一筆.必須覆蓋:
-        # 一般空集合沒有額外斷言，破壞行仍由操作推導並必須被覆蓋。
-        必須覆蓋 = 推導的行
-    else:
-        必須覆蓋 = 推導的行 | 一筆.必須覆蓋
+    必須覆蓋 = 要求覆蓋的行(目標, 一筆)
     with tempfile.TemporaryDirectory(prefix="nova-覆蓋率-", dir="/tmp") as 暫存:
         資料檔 = Path(暫存) / ".coverage"
         for nodeid in 一筆.該紅:
