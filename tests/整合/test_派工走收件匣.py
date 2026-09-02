@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 
 from nova.契約.退出碼 import 護欄碼
+from nova.載體 import 命令列
+from nova.載體.命令列 import 主程式
 
 nova執行檔 = Path(sys.executable).parent / "nova"
 做假CLI型 = Callable[..., tuple[Path, Path]]
@@ -177,3 +179,63 @@ def test_指名四支測試的票派工收4而且收件匣不留檔(
     assert not [路 for 路 in 匣.glob("*") if 路.is_file()]
     assert not [路 for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
     assert not list(專案.parent.glob("nova-wt-*"))
+
+
+def test_派收件匣裡的票直接搶原票且張數守恆(
+    佈景: tuple[Path, Path],
+    做假CLI: 做假CLI型,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """守派工收件匣裡的票時直接搶原票，維持收件匣張數守恆且原票移入處理中。"""
+    狀態, 專案 = 佈景
+    執行檔, _ = 做假CLI("claude")
+    匣 = _收件匣(狀態, 專案)
+    匣.mkdir(parents=True, exist_ok=True)
+    原票 = 匣 / "20260901T130009Z-typed-01-門面解析.md"
+    原票.write_text(票內容, encoding="utf-8")
+
+    派工前待處理 = [路.name for 路 in 匣.iterdir() if 路.is_file()]
+    派工前處理中 = [路.name for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
+    派工前總數 = len(派工前待處理) + len(派工前處理中)
+
+    monkeypatch.setenv("XDG_STATE_HOME", str(狀態))
+    monkeypatch.chdir(專案)
+    monkeypatch.setattr(命令列, "_發射背景程序", lambda *_args, **_kwargs: None)
+    參數 = [
+        "派工",
+        str(原票),
+        "--用",
+        "claude",
+        "--審查用",
+        "codex",
+        "--執行檔",
+        str(執行檔),
+        "--最多步數",
+        "0",
+        "--判準",
+        "true",
+    ]
+    monkeypatch.setattr(sys, "argv", ["nova", *參數])
+
+    碼 = 主程式(參數)
+    輸出 = capsys.readouterr()
+    assert 碼 == 0, f"派工自己就失敗了：\n{輸出.err}\n{輸出.out}"
+
+    派工後待處理 = [路.name for 路 in 匣.iterdir() if 路.is_file()]
+    派工後處理中 = [路.name for 路 in (匣 / "處理中").glob("*") if 路.is_file()]
+
+    assert 原票.name not in 派工後待處理, f"原票仍留在待處理根目錄：{派工後待處理}"
+    assert len(派工後待處理) == len(派工前待處理) - 1, (
+        f"待處理張數未減少：前 {len(派工前待處理)}，後 {len(派工後待處理)}"
+    )
+    assert len(派工後待處理) + len(派工後處理中) == 派工前總數, (
+        f"張數不守恆（產生新票副本）：前總數 {派工前總數}，"
+        f"後待處理 {len(派工後待處理)} + 處理中 {len(派工後處理中)}"
+    )
+    assert any(路.name.endswith(原票.name) for 路 in (匣 / "處理中").glob("*")), (
+        f"處理中沒有原票的 rename 產物：{派工後處理中}"
+    )
+    assert any(路.read_text(encoding="utf-8") == 票內容 for 路 in (匣 / "處理中").glob("*")), (
+        "處理中找不到原票內容"
+    )
