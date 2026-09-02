@@ -29,7 +29,6 @@ from typing import cast
         "per-file-ignores:tests/**:D101",
         "per-file-ignores:tests/**:D102",
         "per-file-ignores:tests/**:D103",
-        "per-file-ignores:tests/**:D104",
         "per-file-ignores:tests/**:FBT001",
         "per-file-ignores:tests/**:FBT002",
         "per-file-ignores:tests/**:FBT003",
@@ -42,6 +41,7 @@ from typing import cast
         "per-file-ignores:tests/**:PLR1714",
         "per-file-ignores:tests/**:PLC0415",
         "per-file-ignores:tests/**:PLR0402",
+        "per-file-ignores:tests/整合/test_閘鎖等待承載.py:B010",
     }
 )
 

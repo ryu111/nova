@@ -16,7 +16,7 @@ from time import monotonic
 from nova.契約.帳本 import 事件, 事件種類
 from nova.契約.檢查結果 import 檢查結果
 from nova.載體.帳本 import 不記帳本, 帳本
-from nova.載體.閘鎖 import 佔住, 池大小
+from nova.載體.閘鎖 import 佔住, 佔用, 池大小
 
 檢查函式 = Callable[[], tuple[bool, str]]
 
@@ -72,12 +72,12 @@ class 規則:
 
 
 @contextmanager
-def _拿這條的額度(條: 規則, *, 鎖目錄: Path | None, 核心數: int | None) -> Iterator[int]:
-    """跟機器要這一條規則的 CPU 額度，跑完就還。yield 出**排了幾毫秒**。"""
+def _拿這條的額度(條: 規則, *, 鎖目錄: Path | None, 核心數: int | None) -> Iterator[佔用]:
+    """跟機器要這一條規則的 CPU 額度，跑完就還。yield 出額度收據。"""
     宣告 = 條.要幾個token
     要幾個 = 池大小(核心數) if isinstance(宣告, _抽乾整池型) else 宣告
     with 佔住("閘", 要幾個token=要幾個, 鎖目錄=鎖目錄, 核心數=核心數) as 收據:
-        yield 收據.等待毫秒
+        yield 收據
 
 
 def _跑一條(
@@ -88,7 +88,8 @@ def _跑一條(
     規則自己爆掉一律算紅（fail-closed）——檢查壞了卻放行，等於保證靜默消失。
     """
     編號 = 記帳.新呼叫編號()
-    with _拿這條的額度(條, 鎖目錄=鎖目錄, 核心數=核心數) as 等待毫秒:
+    with _拿這條的額度(條, 鎖目錄=鎖目錄, 核心數=核心數) as 收據:
+        等待毫秒 = 收據.等待毫秒
         # **拿到額度才記「開始」**：這一筆要帶著「排了多久」，
         # 而那個數字要等到拿得到才知道。等待逐條發生，不是只有第一條會等。
         記帳.記一筆(
