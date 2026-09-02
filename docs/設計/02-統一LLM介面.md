@@ -398,12 +398,12 @@ agent_message  失敗：系統拒絕寫入 `/Users/sbu/nova-越界測試.txt`（
 
 代價是真的：auto-deny 正是 agy 唯一的越界保護（`--sandbox` 與 `--mode plan`
 都擋不住寫，三種組合都實測過）。使用者裁定接受這個交換，
-由 `test_agy的可編輯沒有邊界這是已知事實_換網路換來的` 誠實釘住。
+由 `test_agy的可編輯沒有邊界這是已知事實_換網路換來的`（手動跑）誠實釘住。
 
 **要邊界就用 codex**——三家裡唯一的 OS 層沙箱，而且它開網路不必付這個代價
 （`-c sandbox_workspace_write.network_access=true`，實測 `curl` 從 `000` 變 `200`，
 同一條 `printf > ~/x.txt` 照樣 operation not permitted）。
-由 `test_codex可編輯要開網路而且不必拿掉沙箱` 與 `test_可編輯真的上得了網` 背書。
+由 `test_codex可編輯要開網路而且不必拿掉沙箱` 與 `test_可編輯真的上得了網`（手動跑）背書。
 
 `呼叫選項.權限` 預設值是 `權限.唯讀`，門面與 CLI 各自的 `_挑權限()` 在
 `全開` 與 `可編輯` 都沒給時回唯讀——**最嚴的那一邊當預設**，這一條在三處都成立。
