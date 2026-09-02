@@ -1,6 +1,7 @@
 """`nova 線` 的 composition adapter：組合觀測來源與呈現。"""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -21,8 +22,9 @@ from nova.載體.工作樹觀測 import (
     目前commit,
 )
 from nova.載體.已處理 import 列出成果, 已處理目錄
-from nova.載體.帳本 import 預設帳本目錄
+from nova.載體.帳本 import 專案識別, 預設帳本目錄
 from nova.載體.帳本讀取 import 列出執行, 讀原始事件
+from nova.載體.狀態 import 狀態根目錄
 from nova.載體.狀態檔 import 狀態檔, 讀現況
 from nova.載體.程序觀測 import (
     找nova程序,
@@ -54,8 +56,8 @@ def 查並行現況(專案: Path) -> tuple[線現況, ...]:
     # `git worktree list` 第一筆固定是主工作區，`工作樹們` 也保證至少回一筆
     (主路徑, 主分支), *其餘工作樹 = 工作樹們(根)
     return (
-        _查一條(主路徑, 主分支, 清查, 是主工作區=True),
-        *(_查一條(路徑, 分支, 清查, 是主工作區=False) for 路徑, 分支 in 其餘工作樹),
+        _查一條(主路徑, 主分支, 清查, 是主工作區=True, 主專案=主路徑),
+        *(_查一條(路徑, 分支, 清查, 是主工作區=False, 主專案=主路徑) for 路徑, 分支 in 其餘工作樹),
     )
 
 
@@ -80,18 +82,20 @@ def _查一條(
     清查: 程序清查 | None,
     *,
     是主工作區: bool,
+    主專案: Path | None = None,
 ) -> 線現況:
     成果們 = 列出成果(已處理目錄(工作樹))
     上一次 = 成果們[0] if 成果們 else None
     程序 = 這條線的程序(工作樹, 清查)
     名字 = 工作樹.name + (f"／{分支}" if 分支 else "")
     基底 = 比對基底(工作樹)
+    在跑 = 是否在跑(工作樹, 清查)
     return 線現況(
         名字=名字,
-        在跑嗎=是否在跑(工作樹, 清查),
+        在跑嗎=在跑,
         跑多久=None if 程序 is None else 程序.跑多久,
         啟動時間=None if 程序 is None else 程序.啟動時間,
-        目前階段=_目前階段(工作樹),
+        目前階段=_目前階段(工作樹, 主專案=主專案, 上一次=上一次, 在跑=在跑),
         上一次=上一次,
         護欄原因=_護欄原因(工作樹, 上一次),
         未提交檔案數=未提交檔案數(工作樹),
@@ -106,19 +110,70 @@ def _查一條(
     )
 
 
-def _目前階段(專案: Path) -> str | None:
+def _目前階段(
+    專案: Path,
+    *,
+    主專案: Path | None = None,
+    上一次: 成果 | None = None,
+    在跑: bool | None = None,
+) -> str | None:
     """查最近一次執行的目前階段。
 
     `列出執行` 依時間由新到舊排列。只讀最新一本可讀帳本的階段資訊；
-    若該本帳無階段記錄，即代表該次執行未記錄階段，不往舊帳本回溯。
+    若該本帳無階段記錄，即代表該次執行未記錄階段，退回讀背景輸出檔。
     """
+    if 在跑 is False and 上一次 is not None and 上一次.退出碼 == _護欄退出碼:
+        return "護欄"
     for 路徑 in 列出執行(預設帳本目錄(專案)):
         try:
             事件們 = 讀原始事件(路徑)
         except OSError:
             continue
-        return _這本帳的階段(事件們)
+        階段 = _這本帳的階段(事件們)
+        if 階段 is not None:
+            return 階段
+        break
+    return _讀背景階段(專案, 主專案=主專案)
+
+
+def _背景檔候選(專案: Path, 主專案: Path | None = None) -> list[Path]:
+    檔名們 = [f"{專案.name.removeprefix('nova-wt-')}.md", f"{專案.name}.md"]
+    專案清單 = [專案]
+    if 主專案 is not None and 主專案 != 專案:
+        專案清單.insert(0, 主專案)
+
+    候選: list[Path] = []
+    根目錄們 = [狀態根目錄()]
+    if 根 := os.environ.get("XDG_STATE_HOME"):
+        根目錄們.append(Path(根))
+
+    for 目錄 in 根目錄們:
+        for 對象 in 專案清單:
+            識別 = 專案識別(對象)
+            候選.extend(目錄 / "專案" / 識別 / "背景" / 檔名 for 檔名 in 檔名們)
+    return 候選
+
+
+def _讀背景階段(專案: Path, 主專案: Path | None = None) -> str | None:
+    for 路徑 in _背景檔候選(專案, 主專案=主專案):
+        try:
+            內容 = 路徑.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if 階段 := _解析背景階段(內容):
+            return 階段
     return None
+
+
+def _解析背景階段(內容: str) -> str | None:
+    階段: str | None = None
+    for 行 in 內容.splitlines():
+        條 = 行.strip()
+        if 條.startswith("→"):
+            片段 = 條.removeprefix("→").strip().split()
+            if 片段:
+                階段 = 片段[0]
+    return 階段
 
 
 def _這本帳的階段(事件們: list[dict[str, object]]) -> str | None:
