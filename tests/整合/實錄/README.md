@@ -12,6 +12,16 @@
 | `agy_ok.json` | `agy -p --output-format json` 成功 | 0 |
 | `agy_stream.jsonl` | `agy --output-format stream-json` | 0 |
 | `agy_bad.txt` | 指定不存在的模型 | 1 |
+| `agy_timeout.json` | agy 自己的 `--print-timeout` 響了（**合成**，見下） | 0 |
+
+**`agy_timeout.json` 是半合成的。** `status`／`response`／`error`／`num_turns` 與
+**結束碼 0** 來自 `agy --print-timeout 1s` 的手動實跑（記在
+`docs/負控紀錄/0015-agy的逾時要真的送到agy.md`）；`usage` 那三個數字是**填上去的**，
+取自帳本 2026-09-02 那 32 筆之一（`input=134241 output=14942 duration_ms=303510`）——
+因為真跑那次 1 秒就收，usage 全 0，測不出「usage 不准在改寫時掉光」。
+
+吃它的測試一律用**時間**判逾時，**不准有任何規則去比對 `error` 那句話**：
+`解析.py` 的 `_樣式表` 要不要加 timeout 關鍵詞是另一張票。
 
 **唯一的改動**：session／conversation／thread id 換成固定的假 UUID，
 讓 fixture 可重現，也不把本機 session 識別碼放進 public repo。其餘一個位元組都沒動。

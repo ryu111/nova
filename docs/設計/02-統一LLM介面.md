@@ -136,6 +136,18 @@ SDK 底層就是 `claude --output-format stream-json`（實測 `subprocess_cli.p
 | 預設型號 | 不設 | `gpt-5.6-luna`（高階 `gpt-5.6-sol`） | `gemini-3.7-flash-high` |
 | 推理強度 | 有 `--effort`，目前不用 | **沒有旗標**，走 `-c model_reasoning_effort="max"` | **包在型號裡** |
 | 不隔離 | `--restricted`（設定檔照樣隔離，CLAUDE.md 仍被讀） | 只留 `--ephemeral` | — |
+| 逾時 | ❌ 沒有旗標，只有 nova 這側的 `communicate(timeout=)` | ❌ 沒有旗標，同左 | `--print-timeout <Go duration>`（**預設只有 5m0s**，不傳就是它說了算） |
+
+**agy 的逾時一定要傳。** 2026-09-02 實測：`agy --help` 有
+`--print-timeout (default 5m0s)`，而 nova 一個字都沒對它說——
+`TDD階段預設逾時秒 = 3600.0` 從來沒生效過，真正的上限是 300 秒，差 12 倍。
+帳本上是 32 筆 `duration_ms` 中位數 304,008 的 `unknown`（`text_len=0`），
+agy 自己的 log 寫著 `Print mode: timed out after 1494 polls (printed=43)`。
+
+值由 `選項.逾時秒` 減 `轉接.agy逾時餘裕秒` 算出來，**嚴格小於 nova 的鐘**：
+順序反了就是 nova 先 SIGKILL，走 `逾時的回應`——那條路 usage 寫死 0/0，
+連燒了多少都不知道。agy 自己收的話信封還在、usage 還在。
+由 `test_agy的鐘要比nova的鐘早響` 背書。
 
 **原本以為的 claude 取捨已經解除。** 一度認為 `--bare` 是唯一能關掉 CLAUDE.md
 自動探索的旗標，而它會連 keychain 與 OAuth 一起關掉（訂閱登入變成「Not logged in」）。
