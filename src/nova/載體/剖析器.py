@@ -481,6 +481,10 @@ def _加觀測類(
         help="節流：快取比這麼多秒新就什麼都不做。不給就一律重新去問",
     )
 
+    儀剖析 = 子.add_parser("儀表板", help="把派工現況生成一頁 HTML 寫到狀態目錄；--json 只吐資料")
+    儀剖析.set_defaults(執行=處理們["儀表板"])
+    儀剖析.add_argument("--json", action="store_true", help="只把那份契約印到 stdout，不寫檔")
+
 
 def _加階段類(
     子: "argparse._SubParsersAction[argparse.ArgumentParser]",

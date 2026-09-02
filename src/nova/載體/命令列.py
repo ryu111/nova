@@ -51,6 +51,7 @@ from nova.契約.退出碼 import (
     阻擋,
 )
 from nova.載體.git查詢 import 目前commit
+from nova.載體.儀表板.命令 import 執行儀表板
 from nova.載體.判準 import 判準指令, 可作指定pytest目標, 建判準, 建重構判準, 建預設判準
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.命令 import 收
@@ -2155,6 +2156,7 @@ def _子命令_額度(參數: argparse.Namespace) -> int:
     "已處理": _子命令_已處理,
     "生圖": _子命令_生圖,
     "額度": _子命令_額度,
+    "儀表板": 執行儀表板,
 }
 
 
