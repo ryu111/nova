@@ -5,8 +5,11 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,9 +33,10 @@ from nova.載體.命令列 import (
     主程式,
     處理們,
 )
-from nova.載體.帳本 import 不記帳本
+from nova.載體.帳本 import 不記帳本, 預設帳本目錄
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 組提示
+from nova.載體.閘鎖 import 佔住, 鎖檔路徑
 from nova.迴圈 import 角色提示
 from nova.迴圈.狀態機 import TDD階段表
 
@@ -180,6 +184,121 @@ class Test閘:
         結果 = _跑("閘", "提交")
         assert 結果.returncode == 0, 結果.stdout + 結果.stderr
         assert "lang-traditional" in 結果.stdout
+
+
+class Test閘印等鎖:
+    """**正在等的那個人，是唯一沒有事後對帳機會的讀者。**
+
+    帳本查得到、證據字串留得下，但那都是事後；盯著一個沒有輸出的終端機三分鐘的人
+    只會下一個結論：閘壞了或機器當了。於是他 `Ctrl-C`、加大逾時、或者更糟——
+    去改那條「很慢」的規則。stderr 上一行 `等鎖 3.2 秒（lang-traditional）`
+    就分得出「檢查本身重」跟「機器上排了十二條」，而兩者的下一步完全相反。
+
+    這裡跑真的 `nova` 執行檔：這一格的東西只在真的 CLI 走完才看得到。
+    """
+
+    @staticmethod
+    def _建一個閘會紅的專案(路徑: Path) -> None:
+        """一個 `lang-traditional` 會紅的 git 專案。
+
+        **故意讓第一條規則就紅**：提交閘 `提前停止=True`，第一條紅就收工，
+        整次 CLI 只跑一條規則、只跟池子要一次額度，幾秒內結束。
+        """
+        路徑.mkdir()
+        for 指令 in (
+            ["git", "init", "-b", "main"],
+            ["git", "config", "user.name", "測試員"],
+            ["git", "config", "user.email", "test@nova.local"],
+        ):
+            subprocess.run(指令, cwd=路徑, check=True, capture_output=True)
+        (路徑 / "壞.py").write_text("# 简体中文\n", encoding="utf-8")  # nova:允許非繁體
+        subprocess.run(["git", "add", "."], cwd=路徑, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "第一版"], cwd=路徑, check=True, capture_output=True)
+
+    @staticmethod
+    def _擋到CLI排上隊再放手(佔住整池: threading.Event) -> None:
+        """抽乾整池，**等到看見 CLI 的號碼牌**才開始計時，擋一秒再放手。
+
+        不能擋固定秒數：等待方是真的 `nova` 執行檔，要先起 Python、
+        import 整包載體才走到 `佔住`，在平行測試底下啟動花掉兩三秒不奇怪。
+        固定擋三秒會被啟動吃光，`等鎖` 印不出來，然後有人來「修」這支測試。
+        """
+        排隊目錄 = 鎖檔路徑("閘").parent / "閘.排隊"
+        with 佔住("閘"):  # 不給 `要幾個token` ＝ 抽乾整池
+            # **差集，不是「非空」**：我自己那張牌 close 之後檔案還躺在那裡，
+            # 用「非空」會在自己的牌上立刻誤觸，於是根本沒等到 CLI 就放手。
+            起跑前的牌 = set(排隊目錄.iterdir())
+            佔住整池.set()
+            起 = time.monotonic()
+            while not (set(排隊目錄.iterdir()) - 起跑前的牌):
+                if time.monotonic() - 起 > 30.0:
+                    break  # CLI 根本沒起來，放手讓它的 stderr 說話
+                time.sleep(0.05)
+            # 這一秒才是被量到的等待：被擋住的毫秒只累計輪詢的睡眠段，
+            # CLI 自己啟動花多久都不會混進這個數字。
+            time.sleep(1.0)
+
+    # 不標 `serial`：鎖檔在 tmp 裡，碰不到真機器那個池子，
+    # 標了只會把 `serial-ratio` 往上推。
+    def test_有等待才印零等待不印(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """排過隊就在 stderr 印一行，沒排過就一個字都不准印。
+
+        **無條件印 `等鎖 0.0 秒` 等於沒印**：每一次都出現的欄位會被學會忽略，
+        連真的排了三分鐘那一次也一起忽略。
+
+        **CLI 印的數字跟帳本落的 `lock_wait_ms` 要用等號對得起來**：
+        兩個出口讀同一個值才是一個來源；各量各的話，有人拿 CLI 的數字對帳
+        會發現兩邊差幾百毫秒，然後開始不信任其中一個（通常是錯的那一個）。
+        """
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "狀態"))
+        monkeypatch.setenv("NOVA_RUN_ID", "20260902T000000Z-aaaaaa")
+        專案 = tmp_path / "專案"
+        self._建一個閘會紅的專案(專案)
+
+        佔住整池 = threading.Event()
+        擋著的 = threading.Thread(target=self._擋到CLI排上隊再放手, args=(佔住整池,))
+        擋著的.start()
+        try:
+            assert 佔住整池.wait(30.0), "抽乾池子的那條線根本沒拿到 token"
+            排過隊的 = _跑("閘", "提交", 在=專案)
+        finally:
+            擋著的.join(timeout=40.0)
+
+        assert 排過隊的.returncode != 未知, (
+            f"閘要真的跑到，不是等到上限就放棄：{排過隊的.stdout + 排過隊的.stderr}"
+        )
+        對到 = re.search(r"^等鎖 (\d+\.\d) 秒（lang-traditional）$", 排過隊的.stderr, re.MULTILINE)
+        assert 對到 is not None, f"排了隊，stderr 卻沒有那一行：{排過隊的.stderr!r}"
+        assert float(對到.group(1)) >= 0.5, f"擋了一秒才放手，卻只印 {對到.group(1)} 秒"
+
+        開跑了 = _規則開跑的那筆(專案, "20260902T000000Z-aaaaaa", "lang-traditional")
+        落盤的 = 開跑了["lock_wait_ms"]
+        assert isinstance(落盤的, int), f"帳本那格不是整數毫秒：{落盤的!r}"
+        assert f"{落盤的 / 1000:.1f}" == 對到.group(1), (
+            f"CLI 印 {對到.group(1)} 秒、帳本記 {落盤的} 毫秒——兩個出口在各量各的"
+        )
+
+        # 換一個執行識別碼再跑一次：帳本用 `x` 開檔，撞號會當場炸。
+        monkeypatch.setenv("NOVA_RUN_ID", "20260902T000000Z-bbbbbb")
+        沒排隊的 = _跑("閘", "提交", 在=專案)
+
+        assert 沒排隊的.returncode != 未知, 沒排隊的.stdout + 沒排隊的.stderr
+        assert "等鎖" not in 沒排隊的.stderr, f"沒有人跟它搶，卻還是印了等鎖：{沒排隊的.stderr!r}"
+
+
+def _規則開跑的那筆(專案: Path, 執行識別碼: str, 規則代碼: str) -> dict[str, object]:
+    """從落盤的帳本裡挑出那條規則的 `rule_started` 事件。"""
+    帳本檔 = 預設帳本目錄(專案) / f"{執行識別碼}.jsonl"
+    assert 帳本檔.is_file(), f"CLI 那本帳沒落盤：{帳本檔}"
+    行們 = 帳本檔.read_text(encoding="utf-8").splitlines()
+    事件們: list[dict[str, object]] = [json.loads(行) for 行 in 行們 if 行.strip()]
+    開跑們 = [
+        事件
+        for 事件 in 事件們
+        if 事件.get("event") == "rule_started" and 事件.get("rule") == 規則代碼
+    ]
+    assert len(開跑們) == 1, f"{規則代碼} 的開跑事件有 {len(開跑們)} 筆：{開跑們}"
+    return 開跑們[0]
 
 
 class Test檢查提交訊息:
