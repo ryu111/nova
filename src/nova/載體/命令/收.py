@@ -67,15 +67,13 @@ def 子命令_收(參數: argparse.Namespace) -> int:
     if (碼 := _收尾閘(參數, 根)) != 放行:
         return 碼
 
+    分支, 抱怨 = _這棵樹的分支(根)
+    if 分支 is None:
+        return _回報沒有分支可以推(抱怨)
+
     訊息 = 參數.訊息 or " ".join(參數.提交訊息) or "nova：收尾"
-    for 指令 in (
-        ("git", "add", "-A"),
-        ("git", "commit", "-m", 訊息),
-        ("git", "push", "--set-upstream", "origin", "HEAD"),
-        ("gh", "pr", "create", "--title", 訊息, "--body", 訊息),
-    ):
-        if (碼 := _跑並印收尾指令(根, *指令)) != 放行:
-            return 碼
+    if (碼 := _提交推送並開PR(根, 訊息=訊息, 分支=分支)) != 放行:
+        return 碼
 
     if (
         碼 := _跑並印收尾指令(根, "gh", "pr", "checks", "--required", "--watch", 逾時秒=參數.等CI秒)
@@ -89,6 +87,66 @@ def 子命令_收(參數: argparse.Namespace) -> int:
         return 碼
 
     return _查證本地分支已刪(根, 頭分支)
+
+
+def _這棵樹的分支(根目錄: Path) -> tuple[str | None, str]:
+    """讀這棵樹掛在哪條分支上，**不猜名字**；回 (分支, git 沒問成時的抱怨)。
+
+    `git symbolic-ref -q --short HEAD` 是三態：rc 0 是分支名、rc 1 是 detached、
+    其他非零是「這道查詢自己壞了」。把後兩者併起來，人拿到的會是一句「這棵樹
+    不是派工開的形狀，請用 nova 派工 重開」——照著做只會重開一棵一樣壞的樹。
+    """
+    結果 = subprocess.run(  # noqa: S603 —— 收尾指令由這個節點固定組出
+        ["git", "symbolic-ref", "-q", "--short", "HEAD"],  # noqa: S607
+        cwd=根目錄,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if 結果.returncode == 0:
+        return (結果.stdout.strip() or None), ""
+    if 結果.returncode == 1:
+        return None, ""
+    抱怨 = (結果.stdout + 結果.stderr).strip()
+    return None, 抱怨 or f"git symbolic-ref 退出碼 {結果.returncode}"
+
+
+def _回報沒有分支可以推(抱怨: str) -> int:
+    """沒問出分支就停在這裡：不猜分支名，也不讓後面的 commit／push 開始。
+
+    兩種情形要分開講，不然人拿到的建議會是錯的：`抱怨` 非空是「這道查詢自己
+    壞了」，git 那句話要原樣交出去；空的才是 detached，那才叫「這棵樹不是派工
+    開的形狀」、重開一棵才有用。
+    """
+    if 抱怨:
+        sys.stderr.write(
+            f"問不出這棵樹掛在哪條分支上，收尾停在這裡（沒有 commit、沒有 push）。\n"
+            f"git 說：{抱怨}\n"
+        )
+    else:
+        sys.stderr.write(
+            "這棵樹不是派工開的形狀：HEAD 是 detached，沒有分支可以推。\n"
+            "派工開的樹從第一秒就掛在 nova/<時戳>-<六碼> 上；"
+            "這一棵請用 nova 派工 重開，不要猜名字硬推。\n"
+        )
+    return 閘紅
+
+
+def _提交推送並開PR(根目錄: Path, *, 訊息: str, 分支: str) -> int:
+    """commit → push → 開 PR，其中一步不放行就停在那一步的退出碼。
+
+    push 用完整 refspec `HEAD:refs/heads/<分支>`：只寫 `HEAD` 會被 git 回一句
+    「not a full refname」，而那時閘已經全綠、commit 也成功了，整套白跑。
+    """
+    for 指令 in (
+        ("git", "add", "-A"),
+        ("git", "commit", "-m", 訊息),
+        ("git", "push", "--set-upstream", "origin", f"HEAD:refs/heads/{分支}"),
+        ("gh", "pr", "create", "--title", 訊息, "--body", 訊息),
+    ):
+        if (碼 := _跑並印收尾指令(根目錄, *指令)) != 放行:
+            return 碼
+    return 放行
 
 
 def _合併這個PR(根目錄: Path) -> int:

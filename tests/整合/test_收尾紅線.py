@@ -37,6 +37,11 @@ with 路徑.open('a', encoding='utf-8') as 檔:
     資料 = {{'程式': pathlib.Path(sys.argv[0]).name, 'argv': sys.argv[1:]}}
     json.dump(資料, 檔, ensure_ascii=False)
     檔.write("\\n")
+# 派工開的樹掛在一條分支上，假 git 也要照著答——`收` 要靠它組出完整 refspec。
+# 比對**前綴**：`--short HEAD` 與 `-q --short HEAD` 兩種寫法都要答得出來，
+# 否則旗標一改這裡就靜靜地答不出分支，紅的原因就不是這幾支要測的那件事。
+if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['symbolic-ref']:
+    print('nova/20260101T000000Z-abc123')
 if pathlib.Path(sys.argv[0]).name == 'gh' and sys.argv[1:3] == ['pr', 'checks']:
     模式 = os.environ.get('NOVA_收尾CI', '')
     if 模式 == '紅':
