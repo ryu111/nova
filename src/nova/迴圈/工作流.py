@@ -196,7 +196,7 @@ def 跑工作流(  # noqa: PLR0913, PLR0911 —— 唯讀收場注入點；每�
         結果 = _填上這輪動過的測試檔(結果, 定義, 動過的測試檔, 軌跡快照)
         軌跡.append(結果)
         工作區雜湊們.append(_工作區雜湊(任務.工作目錄) if 定義.種類 is 種類.判準 else None)
-        已花token += 結果.花費.總token if 結果.花費 is not None else 0
+        已花token += _這步燒了多少token(結果)
         if 結果.終局 is 終局.結果未知:
             return 工作流結果(
                 結束=_結果未知收場(任務, 定義, 結果未知判定, 前快照, 階段表, 判定工作區=判定工作區),
@@ -306,9 +306,14 @@ def _動了測試就收護欄(定義: 階段定義, 動了: tuple[str, ...]) -> 
     )
 
 
+def _這步燒了多少token(結果: 步驟結果) -> int:
+    """一步的新鮮 token；沒有花費（判準階段不叫模型）當 0。"""
+    return 結果.花費.新鮮token if 結果.花費 is not None else 0
+
+
 def _單次超支(定義: 階段定義, 結果: 步驟結果, 停止: 停止條件) -> 結束 | None:
     """這一次呼叫是不是自己就爆了單次上限。沒爆回 `None`。"""
-    單次token = 結果.花費.總token if 結果.花費 is not None else 0
+    單次token = _這步燒了多少token(結果)
     if 單次token <= 停止.單次最多token:
         return None
     return 結束(
@@ -431,8 +436,9 @@ def _估下一階(軌跡: tuple[步驟結果, ...]) -> int:
     第一階沒有歷史可用，回 0 ＝ 照舊只擋「已經超了」，這是誠實的退化不是漏洞。
     """
     for 步 in reversed(軌跡):
-        if 步.花費 is not None and 步.花費.總token > 0:
-            return 步.花費.總token
+        這步 = _這步燒了多少token(步)
+        if 這步 > 0:
+            return 這步
     return 0
 
 

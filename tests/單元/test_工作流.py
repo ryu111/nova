@@ -351,7 +351,7 @@ class Testtoken預算:
         執行, _ = _執行器([False, True])
         果 = 跑工作流(一件事, 執行一步=執行)
         模型步 = [步 for 步 in 果.軌跡 if 步.階段 in (階段代碼.測試, 階段代碼.實作, 階段代碼.審查)]
-        assert all(步.花費 is not None and 步.花費.總token > 0 for 步 in 模型步)
+        assert all(步.花費 is not None and 步.花費.新鮮token > 0 for 步 in 模型步)
         判準步 = [步 for 步 in 果.軌跡 if 步.階段 in (階段代碼.驗證紅, 階段代碼.驗證綠)]
         assert all(步.花費 is None for 步 in 判準步), "判準不叫模型，不該假裝有花費"
 

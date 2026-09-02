@@ -546,7 +546,7 @@ class _單次超標(Exception):
     """
 
     def __init__(self, 答: 回應, 單次上限: int) -> None:
-        super().__init__(f"單次呼叫花費 {答.用量.總token} token，超過單次上限 {單次上限}")
+        super().__init__(f"單次呼叫花費 {答.用量.新鮮token} token，超過單次上限 {單次上限}")
         self.答 = 答
         self.單次上限 = 單次上限
 
@@ -569,7 +569,7 @@ class _單次上限腦:
 
     def 詢問(self, 提示: str, *, 選項: 呼叫選項 = 預設選項) -> 回應:
         答 = self.內層.詢問(提示, 選項=選項)
-        if 答.用量.總token > self.單次上限:
+        if 答.用量.新鮮token > self.單次上限:
             raise _單次超標(答, self.單次上限)
         return 答
 
@@ -581,7 +581,7 @@ def _用量說不清的判定(答: 回應, 單次上限: int) -> _單次上限�
     這裡只剩「成功卻拿不到用量」那一種：未知碼 3。
     """
     # 成功卻一個 token 都沒記到＝實錄根本沒吐用量。**未知不能當 0 放行。**
-    說不清 = 答.用量.總token == 0 and 答.終局 is 終局.成功
+    說不清 = 答.用量.新鮮token == 0 and 答.終局 is 終局.成功
     if not 說不清:
         return None
     print("無法取得用量資訊，無法判定單次 token 是否超標", file=sys.stderr)
@@ -662,7 +662,7 @@ def _子命令_問(參數: argparse.Namespace, *, 角色: str = "") -> int:
     except _單次超標 as 擋:
         print(str(擋), file=sys.stderr)
         超標判定 = _單次範圍的判定(
-            退出碼=護欄碼, 實際token=擋.答.用量.總token, 單次上限=擋.單次上限
+            退出碼=護欄碼, 實際token=擋.答.用量.新鮮token, 單次上限=擋.單次上限
         )
         _報這次的答(參數, 這次, 擋.答, 超標判定)
         return 超標判定.退出碼

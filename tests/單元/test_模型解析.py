@@ -19,6 +19,31 @@ def 讀(名: str) -> str:
     return (實錄 / 名).read_text(encoding="utf-8")
 
 
+def _codex的用量(原始: str) -> dict[str, int]:
+    """實錄裡 `turn.completed` 那則的 usage——測試要先釘前提，再釘行為。"""
+    for 行 in 原始.splitlines():
+        if not 行.lstrip().startswith("{"):
+            continue
+        事件 = json.loads(行)
+        if 事件.get("type") == "turn.completed":
+            return dict(事件["usage"])
+    pytest.fail("實錄裡沒有 turn.completed，測試要重寫")
+
+
+def _換掉codex的用量(原始: str, 用量: dict[str, int]) -> str:
+    """複製一份實錄，只換掉 usage——舊版 codex 不回快取欄的形狀。"""
+    行們: list[str] = []
+    for 行 in 原始.splitlines():
+        新行 = 行
+        if 行.lstrip().startswith("{"):
+            事件 = json.loads(行)
+            if 事件.get("type") == "turn.completed":
+                事件["usage"] = 用量
+                新行 = json.dumps(事件, ensure_ascii=False)
+        行們.append(新行)
+    return "\n".join(行們) + "\n"
+
+
 class Testclaude:
     def test_成功(self) -> None:
         答 = 解析claude(讀("claude_ok.json"), 0)
@@ -53,9 +78,63 @@ class Testcodex:
         答 = 解析codex(讀("codex_ok2.jsonl"), 0)
         assert 答.終局 == "success"
         assert 答.文字 == "ok"
-        assert 答.用量.輸入token == 13368
+        assert 答.用量.輸入token == 2360, "13,368 − 11,008：codex 的 input 含快取，要在解析器扣掉"
         assert 答.用量.快取讀取token == 11008
         assert 答.用量.成本美金 is None, "codex 不給成本，不准自己估"
+
+    def test_輸入token是非快取輸入_三家在解析器對齊(self) -> None:
+        """codex 的 `input_tokens` **含** `cached_input_tokens`，claude 的不含。
+
+        這個不對稱不准洩到解析器外面：單次上限、本輪累計、`_估下一階` 三處
+        比的是同一個量（新鮮 token），所以 `輸入token` 在每一家都要是
+        **非快取輸入**（Anthropic 語意），快取讀取另外一欄報。
+
+        codex 自己顯示給人看的也是扣掉快取的：
+        `non_cached_input = input_tokens − cached_input_tokens`
+        （codex-rs/protocol/src/protocol.rs）。
+        """
+        原始 = 讀("codex_ok.jsonl")
+        用了 = _codex的用量(原始)
+        assert 用了 == {
+            "input_tokens": 17972,
+            "cached_input_tokens": 11008,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 5,
+            "reasoning_output_tokens": 0,
+        }, "實錄前提變了，測試要重寫"
+
+        答 = 解析codex(原始, 0)
+        assert 答.用量.輸入token == 6964, "17,972 − 11,008 才是這次呼叫真的新鮮讀進去的量"
+        assert 答.用量.快取讀取token == 11008, "扣掉的那份要看得見，不是丟掉"
+        assert 答.用量.快取建立token is None, (
+            "codex 的 cache_write 沒有證據落在 input_tokens 之外，"
+            "驗完之前不准映射——猜出來的欄位比沒有欄位危險"
+        )
+
+    def test_快取欄缺值就當沒有快取_fail_closed(self) -> None:
+        """8/31 之前的 codex 不回快取欄。缺值時 input 全算新鮮（多算不是少算）。"""
+        原始 = _換掉codex的用量(
+            讀("codex_ok.jsonl"),
+            {"input_tokens": 17972, "output_tokens": 5},
+        )
+        答 = 解析codex(原始, 0)
+        assert 答.用量.輸入token == 17972
+        assert 答.用量.快取讀取token is None
+
+    def test_快取讀取比輸入還大時_新鮮輸入夾到零(self) -> None:
+        """`cached_input_tokens > input_tokens` 這種說不通的用量不准算出負數。
+
+        負的新鮮輸入會把整通呼叫的量往下拉，等於偷偷替單次上限鬆綁——
+        夾到 0 是往嚴格的那邊倒。扣掉的那份仍照原值報在快取讀取欄，
+        不准連著一起吞掉。
+        """
+        原始 = _換掉codex的用量(
+            讀("codex_ok.jsonl"),
+            {"input_tokens": 100, "cached_input_tokens": 150, "output_tokens": 5},
+        )
+        答 = 解析codex(原始, 0)
+        assert 答.用量.輸入token == 0, "100 − 150 是 −50，夾到 0；負數會替護欄減量"
+        assert 答.用量.快取讀取token == 150, "原值照報，不因為對不起來就被抹掉"
 
     def test_忽略認不得的行與事件(self) -> None:
         """認不得的行與事件都要被跳過。

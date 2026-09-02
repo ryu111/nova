@@ -128,7 +128,8 @@ def _加總用量(花過: Sequence[用量]) -> 用量:
     把「claude 那顆的成本」當成「整條鏈的成本」是低報，
     而**低報的成本比沒有成本更危險，它看起來像個數字**。
 
-    token 數三家都給，所以直接加。
+    token 數三家都給，所以直接加。`快取建立token` 是唯一的例外，
+    它為什麼不套這條規則寫在 `_快取建立加總` 裡。
     """
     if len(花過) == 1:
         return 花過[0]
@@ -142,7 +143,19 @@ def _加總用量(花過: Sequence[用量]) -> 用量:
         輸入token=sum(用.輸入token for 用 in 花過),
         輸出token=sum(用.輸出token for 用 in 花過),
         快取讀取token=全有才加("快取讀取token"),
-        快取建立token=全有才加("快取建立token"),
+        快取建立token=_快取建立加總(花過),
         思考token=全有才加("思考token"),
         成本美金=None if any(本 is None for 本 in 成本們) else sum(成本們),  # type: ignore[arg-type]
     )
+
+
+def _快取建立加總(花過: Sequence[用量]) -> int | None:
+    """快取建立的 `None` 是「這家沒有這種東西」，不是「不知道」——當 0 加。
+
+    整條鏈都沒有才留白；只要有一顆給了，就不准被別顆的 `None` 吃掉，
+    否則 `新鮮token` 少報那一顆真的燒掉的量。
+    """
+    建們 = [用.快取建立token for 用 in 花過]
+    if all(建 is None for 建 in 建們):
+        return None
+    return sum(建 or 0 for 建 in 建們)

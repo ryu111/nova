@@ -350,7 +350,7 @@ def 逾時看得出來(答: 回應, 實際耗時秒: float, 請求逾時秒: flo
     """
     if 答.文字.strip():
         return 答
-    if 答.用量.總token <= 0:
+    if 答.用量.新鮮token <= 0:
         return 答
     if 實際耗時秒 < 請求逾時秒:
         return 答
