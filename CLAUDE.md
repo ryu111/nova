@@ -25,8 +25,6 @@ uv run pytest -m 真cli            # 真的打三家 CLI，燒 token，兩個閘
 
 **一律走 `uv run`，不要先 activate venv**——忘了 activate 會靜默跑到系統 Python 3.9。
 
-其餘子命令問 `uv run nova --help`；對外 API 的形狀看 `src/nova/__init__.py` 的 `__all__`。
-
 ## 這個 repo 的坑
 
 ### 分層是時間預算，不是分類學
@@ -144,6 +142,7 @@ nova 現在的工作目錄就是自己，所以它在完善自己——**這是�
 | 載體六個面 | [`docs/設計/04-載體要長什麼樣.md`](docs/設計/04-載體要長什麼樣.md) |
 | 測試怎麼跑最快 | [`docs/設計/05-測試怎麼跑最快.md`](docs/設計/05-測試怎麼跑最快.md) |
 | IHarness 還缺什麼、哪些已經是殼 | [`docs/設計/06-IHarness要補什麼.md`](docs/設計/06-IHarness要補什麼.md) |
+| 怎麼做才又快又穩：規範表與把關器 | [`docs/設計/15-製作規範.md`](docs/設計/15-製作規範.md) |
 
 **各家自帶的載體一律關到最小**（工具、session、家目錄設定），由
 `tests/整合/test_模型轉接.py::Test把各家載體關到最小` 背書。
