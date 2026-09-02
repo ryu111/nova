@@ -47,7 +47,9 @@ import sys
 with pathlib.Path(os.environ['NOVA_收尾紀錄']).open('a', encoding='utf-8') as 檔:
     json.dump({{'程式': 名稱, 'argv': 參數}}, 檔, ensure_ascii=False)
     檔.write("\\n")
-if 名稱 == 'git' and 參數[:2] == ['branch', '--show-current']:
+if 名稱 == 'git' and 參數[:1] == ['symbolic-ref']:
+    print(分支)
+elif 名稱 == 'git' and 參數[:2] == ['branch', '--show-current']:
     print(分支)
 elif 名稱 == 'git' and 參數[:2] == ['branch', '--list']:
     print("  " + 分支)
