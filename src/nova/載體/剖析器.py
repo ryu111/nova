@@ -440,8 +440,17 @@ def _加觀測類(
 
     收剖析 = 子.add_parser("收", help="跑閘、提交、推送、等 CI，通過後合併並刪分支")
     收剖析.set_defaults(執行=處理們["收"])
-    收剖析.add_argument("提交訊息", nargs="*", help="commit 與 PR 標題；不給就用預設訊息")
-    收剖析.add_argument("-m", "--訊息", default=None, help="commit 與 PR 標題")
+    收剖析.add_argument(
+        "提交訊息",
+        nargs="*",
+        help="commit 訊息；PR 標題取第一行、本文取其餘；不給就用預設訊息",
+    )
+    收剖析.add_argument(
+        "-m",
+        "--訊息",
+        default=None,
+        help="commit 訊息；PR 標題取第一行、本文取其餘",
+    )
     收剖析.add_argument("--工作目錄", default=None, help="要收尾的專案；預設是現在這個目錄")
     收剖析.add_argument(
         "--等CI秒", type=float, default=1800.0, help="最多等 required checks 幾秒（預設 1800）"
