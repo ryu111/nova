@@ -79,6 +79,16 @@ def test_池子有十二個token第十三條才要排隊(tmp_path: Path) -> None
             pytest.fail("池子已經滿了，第十三條不該拿得到")
 
 
+def test_池目錄建立完整額度的token檔(tmp_path: Path) -> None:
+    """池子的容量要落成固定數量的獨立檔案鎖，讓每個額度都有可競爭的名額。"""
+    with 佔住("閘", 要幾個token=1, 鎖目錄=tmp_path, 核心數=_假核心數):
+        token目錄 = tmp_path / "閘.slots"
+        實際檔名 = sorted(檔.name for 檔 in token目錄.iterdir())
+        期望檔名 = [f"{編號:03d}" for 編號 in range(池大小(核心數=_假核心數))]
+
+    assert 實際檔名 == 期望檔名
+
+
 def test_取四的跟取一的算同一份額度(tmp_path: Path) -> None:
     """token 數 ＝ 這條指令實際會開的 worker 數，不是「一條指令一格」。
 

@@ -141,6 +141,11 @@ def _池目錄(落點: Path) -> Path:
     return _同一層的(落點, "slots")
 
 
+def _token檔路徑(池: Path, 編號: int) -> Path:
+    """回傳池中指定編號的 token 檔。"""
+    return 池 / f"{編號:03d}"
+
+
 #: **這一條執行緒**手上每一次 `佔住` 各拿走幾個 token，按池子分開記。
 #: 只給死鎖判斷用（見 `抽乾池子時不准握著token`）：跨程序的真相在檔案系統上。
 #:
@@ -328,16 +333,18 @@ def _抓幾個token(落點: Path, *, 要幾個: int, 全部: int) -> list[TextIO
     而擋著別人的等待就是死鎖的另一個名字。
     """
     池 = _池目錄(落點)
+    for 第幾個 in range(全部):
+        _token檔路徑(池, 第幾個).touch(exist_ok=True)
     抓到: list[TextIO] = []
     for 第幾個 in range(全部):
         # **不用 `w`**：截斷會在還沒拿到鎖的時候就動到檔案內容。
-        handle = (池 / f"{第幾個:03d}").open("a+")
+        token檔 = _token檔路徑(池, 第幾個).open("a+")
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(token檔.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            handle.close()
+            token檔.close()
             continue
-        抓到.append(handle)
+        抓到.append(token檔)
         if len(抓到) == 要幾個:
             return 抓到
     for 還回去 in 抓到:
@@ -360,14 +367,16 @@ def _等到拿得到(
     前面那個程序卡住的話這裡會等到天荒地老，而且看不出來在等什麼。
 
     但輪詢自己沒有順序：鎖一放開誰先醒誰先拿，跟等了多久無關。
-    所以先抽一張號碼牌，**輪到自己才去搶**——等最久的那條不會再一輪一輪輸掉。
+    有實際等待上限的呼叫先抽一張號碼牌，**輪到自己才去搶**——等最久的那條不會再
+    一輪一輪輸掉。`最多等幾秒=0` 是即時快照，只試一次，不因前面的號碼牌停住。
     """
     起 = time.monotonic()
     被擋住秒 = 0.0
     序號, 牌 = _抽號碼牌(落點)
     try:
         while True:
-            if _輪到我了(落點, 序號):
+            # 零秒是快照，不該因為前一條剛拿到號碼牌就看不到池裡仍可用的 token。
+            if 最多等幾秒 == 0 or _輪到我了(落點, 序號):
                 抓到 = _抓幾個token(落點, 要幾個=要幾個, 全部=全部)
                 if 抓到 is not None:
                     return 抓到, round(被擋住秒 * 1000)
