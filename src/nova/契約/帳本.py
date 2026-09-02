@@ -114,6 +114,9 @@ class 事件:
     #: 從發出去到回來多久。逾時的診斷靠它——沒有耗時就分不出
     #: 「一秒就掛」與「跑滿 30 分鐘被殺」。
     耗時毫秒: int | None = None
+    #: 這一條規則開跑前排了多久隊。**沒等就不落盤**（不是落 0）：
+    #: 落 0 的話「沒等」跟「沒量」長得一樣，而事後算不出比例的欄位等於沒有。
+    等待毫秒: int | None = None
     判準綠: bool | None = None
     審查結論: str | None = None
     #: 形狀：長度與雜湊。**長度永遠是原始長度**，截斷之後也一樣——
@@ -161,6 +164,7 @@ class 事件:
     "快取建立token": "cache_creation_tokens",
     "成本美金": "cost_usd",
     "耗時毫秒": "duration_ms",
+    "等待毫秒": "lock_wait_ms",
     "判準綠": "gate_green",
     "審查結論": "verdict",
     "文字長度": "text_len",
