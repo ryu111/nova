@@ -369,6 +369,38 @@ def 判準指令(文字: str | None) -> tuple[str, ...]:
     return tuple(shlex.split(文字))
 
 
+def 建測試檔整理器(*, 工作目錄: Path | None = None) -> Callable[[Sequence[str]], None]:
+    """建出對指定測試檔跑 ruff check --fix 與 ruff format 的整理器。
+
+    只對動過的測試檔跑，不跑整個 repo（硬規則 2：不准自寫自評，也不准動到別人的檔）。
+    不加 `--unsafe-fixes`：只套 safe fix。
+    先 check --fix-only 再 format，避免 safe fix 產生未格式化排版。
+    """
+    ruff = str(Path(sys.executable).parent / "ruff")
+
+    def 整理(檔們: Sequence[str]) -> None:
+        if not 檔們:
+            return
+        步驟們 = (
+            ("ruff check --fix", [ruff, "check", "--fix-only", "--no-cache", *檔們]),
+            ("ruff format", [ruff, "format", "--no-cache", *檔們]),
+        )
+        for 名稱, 指令 in 步驟們:
+            結果 = subprocess.run(  # noqa: S603 —— 測試檔整理指令由內部固定組出
+                指令,
+                cwd=工作目錄,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if 結果.returncode != 0:
+                訊息 = (結果.stderr or 結果.stdout).strip() or f"退出碼 {結果.returncode}"
+                失敗原因 = f"{名稱} 失敗：{訊息}"
+                raise RuntimeError(失敗原因)
+
+    return 整理
+
+
 def 在哪跑(工作目錄: str | None) -> Path:
     """判準與角色共用的工作目錄。沒給就是現在這個目錄。"""
     return Path(工作目錄).resolve() if 工作目錄 else Path.cwd()

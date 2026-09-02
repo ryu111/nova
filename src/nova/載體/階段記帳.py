@@ -62,6 +62,7 @@ def 記帳執行器(
             )
         return 結果
 
+    setattr(執行一步, "__wrapped__", 內層)  # noqa: B010 —— 保留內層執行器供解包
     return 執行一步
 
 

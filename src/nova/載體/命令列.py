@@ -52,7 +52,14 @@ from nova.契約.退出碼 import (
 )
 from nova.載體.git查詢 import 目前commit
 from nova.載體.儀表板.命令 import 執行儀表板
-from nova.載體.判準 import 判準指令, 可作指定pytest目標, 建判準, 建重構判準, 建預設判準
+from nova.載體.判準 import (
+    判準指令,
+    可作指定pytest目標,
+    建判準,
+    建測試檔整理器,
+    建重構判準,
+    建預設判準,
+)
 from nova.載體.剖析器 import 建剖析器, 處理型
 from nova.載體.命令 import 收
 from nova.載體.單例 import 只准一個, 拿不到鎖
@@ -1086,6 +1093,7 @@ def _邊跑邊印(內層: 執行器) -> 執行器:
             print(f"    {結果.證據.splitlines()[0][:160]}", file=sys.stderr, flush=True)
         return 結果
 
+    setattr(執行一步, "__wrapped__", 內層)  # noqa: B010 —— 保留內層執行器供解包
     return 執行一步
 
 
@@ -1593,6 +1601,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                 # 整套 suite 的非零退出證明不了「新測試會紅」——那個紅可能是別人的。
                 建指定測試判準=lambda 檔們: 建判準((*這次的判準指令, *檔們)),
                 篩選指定測試=可作指定pytest目標,
+                整理測試檔=建測試檔整理器(工作目錄=工作目錄),
             )
             # **同一個旗標做兩件事**：讀上一輪當前情、寫這一輪。
             # 拆成兩個旗標的話，一定有人只給其中一個，然後以為自己接上了。
