@@ -1234,6 +1234,19 @@ def _派工該擋的理由(參數: argparse.Namespace) -> str | None:
     return None
 
 
+def _這條線的分支名(線名: str) -> str:
+    """`nova/<UTC時戳>-<票末六碼>`——兩個鍵都取自收件檔名，全 ASCII。
+
+    線名的形狀是 `<UTC時戳>-<標題那幾段>-<票末六碼>`，這裡只取頭尾兩段。
+    repo 是 public，分支名會進 URL，所以票標題那段中文不進來；也不用流水號，
+    分散式環境裡「下一號」本來就撞。相同分支名會撞在 `worktree add -b` 上，
+    那是該擋下來的地方，不是要繞過的東西。
+    """
+    各段 = 線名.split("-")
+    時戳, 票末六碼 = 各段[0], 各段[-1]
+    return f"nova/{時戳}-{票末六碼}"
+
+
 def _子命令_派工(參數: argparse.Namespace) -> int:
     """派一條線：**落票 → 搶下來 → 開工作樹 → 背景起一條 `工作流 --從收件匣`。**
 
@@ -1281,6 +1294,7 @@ def _子命令_派工(參數: argparse.Namespace) -> int:
             脈絡.根目錄,
             落點=脈絡.根目錄.parent / f"nova-wt-{單.名稱}",
             起點commit=目前commit(脈絡.根目錄) or "HEAD",
+            分支=_這條線的分支名(單.名稱),
         )
         丟一件(單.任務, 來源=你敲, 目錄=收件目錄(樹))
     except (ValueError, OSError) as 錯:

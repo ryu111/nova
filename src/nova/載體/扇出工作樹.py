@@ -61,8 +61,9 @@ def _開這顆的樹[輸入, 依賴](
     **不准退回共用工作目錄**，那是假隔離。
     """
     落點 = 樹根 / str(工作項.分支)
+    分支名 = f"nova/扇出-{樹根.name}-{工作項.分支}"
     try:
-        開一個工作樹(專案, 落點=落點, 起點commit=起點commit)
+        開一個工作樹(專案, 落點=落點, 起點commit=起點commit, 分支=分支名)
     except OSError as 出事:
         return replace(工作項, 工作樹=開不出工作樹(原因=str(出事)))
     return replace(工作項, 工作樹=落點)
@@ -76,6 +77,10 @@ def _收掉這批的樹[輸入, 依賴](工作: tuple[分支工作[輸入, 依�
     留現場的那些這裡只負責讓它出聲、並指去 `nova 線`（`載體/線.py` 的
     `git worktree list --porcelain`，帶未提交檔案數與最後改動時間）——
     查殘骸是那條指令的事。
+
+    `收掉工作樹` 有兩個失敗階段，出的聲要分開：樹還在（`worktree remove` 沒過）
+    才指去 `nova 線`；樹已經收掉、只剩那條本地分支刪不掉的話，`nova 線` 那邊是
+    空的，指過去人會以為 nova 記錯，真正殘留的分支反而沒人收。
     """
     for 工作項 in 工作:
         開出來的那棵 = 工作項.工作樹
@@ -85,4 +90,10 @@ def _收掉這批的樹[輸入, 依賴](工作: tuple[分支工作[輸入, 依�
         try:
             收掉工作樹(開出來的那棵)
         except OSError as 出事:
-            warnings.warn(f"扇出留下一棵有產出的工作樹，用 `nova 線` 找它：{出事}", stacklevel=2)
+            # 樹在不在就是階段的分界：`worktree remove` 過了那個目錄才會不見。
+            殘骸 = (
+                f"扇出留下一棵有產出的工作樹，用 `nova 線` 找它：{出事}"
+                if 開出來的那棵.exists()
+                else f"扇出留下一條刪不掉的分支：{出事}"
+            )
+            warnings.warn(殘骸, stacklevel=2)
