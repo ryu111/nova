@@ -12,6 +12,8 @@
 
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +121,73 @@ def test_文件提到的測試都真的存在(測試名們: set[str]) -> None:
         if 名 not in 測試名們
     ]
     assert not 缺的, "文件宣稱存在但找不到的測試：\n  " + "\n  ".join(缺的)
+
+
+def _pytest收集的測試名(收集條件: str) -> set[str]:
+    """收集一條測試閘實際會收到的測試函式名。"""
+    結果 = subprocess.run(  # noqa: S603 —— 指令固定，只在本專案收集測試
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:cacheprovider",
+            "--collect-only",
+            "-q",
+            "-m",
+            收集條件,
+        ],
+        cwd=專案根目錄,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert 結果.returncode == 0, f"收集測試閘失敗（{收集條件}）：\n{結果.stdout}\n{結果.stderr}"
+    return set(re.findall(rf"::(test_[\w{_中文}]+)", 結果.stdout))
+
+
+def _兩個自動閘收集的測試名() -> set[str]:
+    """收集 CI 兩條測試閘實際會收到的測試函式名。"""
+    收集到的: set[str] = set()
+    for 收集條件 in (
+        "not serial and not 真cli and not 真端點",
+        "serial and not 真cli and not 真端點",
+    ):
+        收集到的 |= _pytest收集的測試名(收集條件)
+    return 收集到的
+
+
+def _未進閘背書宣稱(行: str, 收集到的: set[str]) -> list[str]:
+    """抓出行內宣稱背書或釘住、但未進自動閘且未標記手動跑的測試名。"""
+    if "由" not in 行 or not any(詞 in 行 for 詞 in ("背書", "釘住", "守")):
+        return []
+    if "手動跑" in 行:
+        return []
+    return [名 for 名 in _宣稱的測試名(行) if 名 not in 收集到的]
+
+
+def test_文件宣稱的測試要在閘收集或明示手動() -> None:
+    """文件宣稱有測試背書或釘住時，測試必須進自動閘或明示手動執行。"""
+    收集到的 = _兩個自動閘收集的測試名()
+    缺的 = [
+        f"{文件.name}:{行號} 宣稱由 {名} 背書或釘住但兩個自動閘都未收集"
+        for 文件 in _要檢查的文件()
+        for 行號, 行 in enumerate(文件.read_text(encoding="utf-8").splitlines(), 1)
+        for 名 in _未進閘背書宣稱(行, 收集到的)
+    ]
+    assert not 缺的, "文件宣稱有測試背書或釘住，但測試沒有進閘也沒有手動標記：\n  " + "\n  ".join(
+        缺的
+    )
+
+
+def test_未進閘真端點測試未標記手動時抓出() -> None:
+    """掛真端點且未進兩閘的測試若被宣稱背書且未標手動跑，必須判定為未進閘宣稱。"""
+    原文 = "本機推論由 `test_真端點列得出模型清單` 背書。"
+    收集到的 = _兩個自動閘收集的測試名()
+    assert _未進閘背書宣稱(原文, 收集到的) == ["test_真端點列得出模型清單"]
 
 
 def test_標記過的舊測試名不算宣稱() -> None:
