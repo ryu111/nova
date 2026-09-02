@@ -480,6 +480,11 @@ def _加觀測類(
         metavar="秒",
         help="節流：快取比這麼多秒新就什麼都不做。不給就一律重新去問",
     )
+    額度剖析.add_argument(
+        "--從狀態列",
+        action="store_true",
+        help="從 stdin 讀 claude 狀態列 JSON，把它的 rate_limits 併進快取（不查 codex／agy）",
+    )
 
     儀剖析 = 子.add_parser("儀表板", help="把派工現況生成一頁 HTML 寫到狀態目錄；--json 只吐資料")
     儀剖析.set_defaults(執行=處理們["儀表板"])
