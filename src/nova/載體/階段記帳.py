@@ -14,6 +14,7 @@
 `契約/`，這一層包住它，所以 import 方向是對的。
 """
 
+from collections.abc import Callable
 from hashlib import sha256
 from time import monotonic
 
@@ -21,6 +22,7 @@ from nova.契約.工作流 import (
     任務,
     執行器,
     步驟結果,
+    階段代碼,
     階段定義,
     預設單次最多token,
 )
@@ -64,6 +66,20 @@ def 記帳執行器(
 
     setattr(執行一步, "__wrapped__", 內層)  # noqa: B010 —— 保留內層執行器供解包
     return 執行一步
+
+
+def 建記跳過(帳: 帳本) -> Callable[[階段代碼], None]:
+    """做一支「這一階這一次跳過了」的記帳函式，交給 `跑工作流` 的 `記跳過`。
+
+    迴圈不准 import 載體，所以帳那一筆由這一層做好再注入進去（高層宣告形狀、低層符合）。
+
+    **不帶 `呼叫編號`**：跳過不成對，帶了編號 `帳本讀取` 的配對會 pop 掉別人的開著事件。
+    """
+
+    def 記跳過(代碼: 階段代碼) -> None:
+        帳.記一筆(事件(種類=事件種類.階段跳過, 階段=代碼.value))
+
+    return 記跳過
 
 
 def _結束事件(
