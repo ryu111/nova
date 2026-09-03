@@ -140,7 +140,7 @@ from nova.載體.重構護欄 import (
 from nova.載體.閘 import 跑閘
 from nova.載體.閘紅成票 import 落成閘紅票們
 from nova.載體.閘鎖 import 佔不到, 等鎖說明
-from nova.載體.階段記帳 import 記帳執行器
+from nova.載體.階段記帳 import 建記跳過, 記帳執行器
 from nova.載體.預算 import 上限, 花了多少, 花費, 超支了嗎
 from nova.載體.額度 import 只讀快取的額度, 記下狀態列額度
 from nova.載體.顧問 import 一輪的帳, 盤一輪
@@ -1751,6 +1751,7 @@ def _工作流跑一輪(參數: argparse.Namespace, 這次: _醒來) -> int:
                 動到測試了嗎=動到測試了嗎,
                 測試檔快照能力=建立測試檔快照能力(),
                 判定工作區=判定工作區,
+                記跳過=建記跳過(帳),
             )
     except (ValueError, FileNotFoundError) as 錯:
         print(str(錯), file=sys.stderr)

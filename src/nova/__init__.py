@@ -48,7 +48,7 @@ from nova.載體.模型.轉接 import 家族, 建立或缺席
 from nova.載體.派工表 import 怎麼派
 from nova.載體.角色 import 固定提示角色
 from nova.載體.重構護欄 import 動到測試了嗎, 建立測試檔快照能力
-from nova.載體.階段記帳 import 記帳執行器
+from nova.載體.階段記帳 import 建記跳過, 記帳執行器
 from nova.載體.額度 import 查詢額度
 from nova.迴圈.工作流 import 建TDD執行器, 設定舊式測試檔快照能力, 跑工作流
 from nova.迴圈.工作流 import 工作流結果 as 工作流結果
@@ -323,6 +323,7 @@ def _跑一輪(  # noqa: PLR0913 —— 全部是 派工 的參數，收成物�
         動到測試了嗎=動到測試了嗎,
         測試檔快照能力=測試檔快照能力,
         判定工作區=判定工作區,
+        記跳過=建記跳過(帳),
     )
 
 
