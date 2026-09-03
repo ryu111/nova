@@ -12,6 +12,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import NamedTuple
 
 #: 單次審查回覆中最多擷取的問題數量上限。
 問題數量上限: int = 10
@@ -48,11 +49,13 @@ class 審查問題:
     編號: int = 0
 
 
-#: 冒號可有可無：印給模型看的清單行長 `ISSUE-1 [impl] 證據`，
-#: 模型照抄回來的就是那一行，讀不回來的話下一輪一條都撈不到。
-_問題樣式 = re.compile(
-    r"^ISSUE(?:-(?P<編號>\d+))?:?\s*\[(?P<種類>test-design|impl)\]\s*(?P<證據>.+)$",
-    re.MULTILINE | re.IGNORECASE,
+#: 不帶編號的舊行：`ISSUE: [impl] <證據>`。編號用它在文字裡的位置補。
+_問題樣式 = re.compile(r"^ISSUE:\s*\[(test-design|impl)\]\s*(.+)$", re.MULTILINE | re.IGNORECASE)
+
+#: 帶編號的行：`ISSUE-3: [impl] <證據>`。冒號可有可無——印給模型看的清單行長
+#: `ISSUE-1 [impl] 證據`，模型照抄回來的就是那一行，讀不回來的話下一輪一條都撈不到。
+_帶編號問題樣式 = re.compile(
+    r"^ISSUE-(\d+):?\s*\[(test-design|impl)\]\s*(.+)$", re.MULTILINE | re.IGNORECASE
 )
 
 
@@ -82,6 +85,32 @@ def _穩定識別碼(前綴: str, 內文: str) -> str:
     return f"{前綴}-{hashlib.sha256(內文.encode()).hexdigest()[:8]}"
 
 
+class _問題行(NamedTuple):
+    """審查文字裡剖出來的一行 ISSUE，還沒洗成 `審查問題`。"""
+
+    起始位置: int
+    #: 行上寫的編號；舊行沒寫就是 `None`，由 `讀審查問題列` 用位置補。
+    寫在行上的編號: int | None
+    種類原字: str
+    證據原字: str
+
+
+def _每一條的行(文字: str) -> list[_問題行]:
+    """兩種樣式各掃一遍，照它們在文字裡出現的先後排好。
+
+    帶編號的行與舊行互斥（`ISSUE-3:` 不是 `ISSUE:`），不會有一行被讀兩次。
+    """
+    行們 = [
+        _問題行(命中.start(), None, 命中.group(1), 命中.group(2))
+        for 命中 in _問題樣式.finditer(文字)
+    ]
+    行們 += [
+        _問題行(命中.start(), int(命中.group(1)), 命中.group(2), 命中.group(3))
+        for 命中 in _帶編號問題樣式.finditer(文字)
+    ]
+    return sorted(行們, key=lambda 一行: 一行.起始位置)
+
+
 def 讀審查問題列(文字: str) -> tuple[審查問題, ...]:
     """從審查文字中讀出結構化審查問題列，帶編號的行與不帶編號的舊行都認得。
 
@@ -92,12 +121,10 @@ def 讀審查問題列(文字: str) -> tuple[審查問題, ...]:
     「這條沒有編號」不是一種可以拿去講話的狀態。
     """
     問題列: list[審查問題] = []
-    for 位置, 命中 in enumerate(_問題樣式.finditer(文字), start=1):
-        種類字串 = 命中["種類"].lower()
-        種類 = 問題種類.測試設計 if 種類字串 == "test-design" else 問題種類.實作
-        證據 = _正典證據(命中["證據"])
-        寫在行上的編號 = 命中["編號"]
-        編號 = int(寫在行上的編號) if 寫在行上的編號 is not None else 位置
+    for 位置, 一行 in enumerate(_每一條的行(文字), start=1):
+        種類 = 問題種類.測試設計 if 一行.種類原字.lower() == "test-design" else 問題種類.實作
+        證據 = _正典證據(一行.證據原字)
+        編號 = 一行.寫在行上的編號 if 一行.寫在行上的編號 is not None else 位置
         識別碼 = _穩定識別碼("issue", f"{種類.value}:{證據}")
         問題列.append(審查問題(識別碼=識別碼, 種類=種類, 證據=證據, 編號=編號))
         if len(問題列) >= 問題數量上限:
