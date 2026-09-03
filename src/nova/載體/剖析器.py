@@ -110,7 +110,7 @@ def _加檢查類(
     """閘、檢查指令、檢查提交訊息——**不叫模型**的那些。"""
     閘剖析 = 子.add_parser("閘", help="在某個執行點上跑規則")
     閘剖析.set_defaults(執行=處理們["閘"])
-    閘剖析.add_argument("閘點", help="提交 或 ci")
+    閘剖析.add_argument("閘點", help="提交、ci 或 本線")
     閘剖析.add_argument(
         "--喚醒來源",
         choices=[來源.value for 來源 in 喚醒來源],

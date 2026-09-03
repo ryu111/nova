@@ -70,6 +70,9 @@ def test_每條規則自己宣告要幾個token(tmp_path: Path) -> None:
     宣告 = {條.代碼: 條.要幾個token for 條 in 建規則表(tmp_path)}
 
     assert 宣告["registered-mutation"] is 抽乾整池
+    #: 本線那幾把刀跑得少，要的機器一樣多：`最多秒` 是牆鐘，鄰居線同時跑測試
+    #: 就會把好刀殺成假紅，而假紅會退掉一整輪。留預設值 1 的症狀正是那個。
+    assert 宣告["registered-mutation-diff"] is 抽乾整池
     assert 宣告["pytest-parallel"] == 平行度()
     assert 宣告["ruff-check"] == 1
     assert 宣告["ruff-format"] == 1

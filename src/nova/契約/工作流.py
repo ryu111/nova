@@ -47,15 +47,25 @@ class 工作區狀態(StrEnum):
 
 type 規則代碼 = str
 
-#: `驗證綠` 紅在這幾條閘規則、而且紅到的路徑**全在 `tests/` 底下**時，那一輪退回測試員。
+#: `驗證綠` 紅在這幾條閘規則時，那一輪退回測試員。
 #:
-#: 只有這三條是測試員一個 `ruff format`／改一行就修得掉的。`ruff-exemptions` 只掛 ci；
-#: `pytest-unit`、`docs-facts`、`test-count`、`lang-traditional`、`no-secrets`、
-#: `layer-boundaries` 一律不分流——那些不是排版問題。
+#: 前三條是測試員一個 `ruff format`／改一行就修得掉的，而且要**紅到的路徑全在 `tests/` 底下**
+#: 才分流。`ruff-exemptions` 只掛 ci；`pytest-unit`、`docs-facts`、`test-count`、
+#: `lang-traditional`、`no-secrets`、`layer-boundaries` 一律不分流——那些不是排版問題。
+#: `registered-mutation-diff` 是第四條，走的是下面那組 code-level 的例外。
 #:
 #: 住契約是因為讀證據的 `迴圈` 不准 import 建規則表的 `載體`（`layer-boundaries` 那條閘擋著），
 #: 共用點只能在這裡。代碼改名要當場紅，靠 `載體` 那側的對帳測試盯著。
-測試員修得掉的規則代碼: frozenset[規則代碼] = frozenset({"ruff-check", "ruff-format", "mypy"})
+測試員修得掉的規則代碼: frozenset[規則代碼] = frozenset(
+    {"ruff-check", "ruff-format", "mypy", "registered-mutation-diff"}
+)
+
+#: 這幾條**只認代碼、不套「路徑全在 `tests/` 底下」那格**。
+#:
+#: 負控刀紅的修法依定義就在 `tests/` 底下（改該紅測試，或改 `登記們/` 那把刀的錨點），
+#: 但它的證據同時帶著目標檔——`WRONG_TEST` 會一起印出 `src/nova/…:行`，
+#: 套路徑檢查就會把這條分流整個擋掉。
+不套路徑檢查的規則代碼: frozenset[規則代碼] = frozenset({"registered-mutation-diff"})
 
 
 @dataclass(frozen=True, slots=True)
