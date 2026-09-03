@@ -150,7 +150,11 @@ def 開樹與發射都當場炸(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.fail("護欄沒擋住：派工已經在背景發射一條線了")
 
     monkeypatch.setattr(命令列, "開一個工作樹", 不准開樹)
-    monkeypatch.setattr(命令列, "_發射背景程序", 不准發射)
+    monkeypatch.setattr(命令列, "發射背景程序", 不准發射)
+    # 舊名字 `_發射背景程序` 目前只是轉呼叫公開那一份，攔上面那個就夠。
+    # 這裡連舊名字一起攔，是為了哪天轉呼叫被拆掉時，這條安全帶不會靜靜漏過去
+    # 真的生一個子程序；舊名字被刪掉時 `raising=False` 讓它安靜退場。
+    monkeypatch.setattr(命令列, "_發射背景程序", 不准發射, raising=False)
 
 
 class Test派工起點護欄:

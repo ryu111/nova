@@ -201,7 +201,7 @@ def test_派收件匣裡的票直接搶原票且張數守恆(
 
     monkeypatch.setenv("XDG_STATE_HOME", str(狀態))
     monkeypatch.chdir(專案)
-    monkeypatch.setattr(命令列, "_發射背景程序", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(命令列, "發射背景程序", lambda *_args, **_kwargs: None)
     參數 = [
         "派工",
         str(原票),
