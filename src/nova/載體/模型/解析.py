@@ -214,8 +214,12 @@ def _codex的錯誤訊息(事件們: list[dict[str, Any]]) -> str:
 def _codex的非快取輸入(用了: dict[str, Any]) -> int:
     """codex 的 `input_tokens` **含** `cached_input_tokens`，要扣掉才跟另外兩家同語意。
 
-    codex 自己也是這樣算的（`non_cached_input = input − cached`）。快取欄缺值
-    （8/31 前的 codex 沒這欄）就當 0 扣，整份算新鮮。
+    codex 自己也是這樣算的（`non_cached_input = input − cached`），實測也是這個形狀
+    （`input 12827 / cached 9984`）。快取欄缺值（8/31 前的 codex 沒這欄）就當 0 扣，
+    整份算新鮮。
+
+    **這個減法的出處是設計文件 02「三家用量欄位語意」那張表的 codex 那一列。**
+    三家不是同一個形狀，改這裡之前先去看那張表——agy 那一列就**不扣**。
     """
     整份輸入 = int(用了.get("input_tokens", 0))
     其中的快取讀取 = int(用了.get("cached_input_tokens") or 0)
@@ -242,9 +246,10 @@ def _解析codex(標準輸出: str, 結束碼: int) -> 回應:
             輸入token=_codex的非快取輸入(用了),
             輸出token=int(用了.get("output_tokens", 0)),
             快取讀取token=用了.get("cached_input_tokens"),
-            # `快取建立token` 刻意留白：codex 有 `cache_write_input_tokens`，但沒有證據
-            # 說它在 `input_tokens` 之外（codex 的 `non_cached_input` 也沒扣它）。
-            # 猜錯就會重複計進 `新鮮token`，要接之前先拿實錄把語意釘死。
+            # `快取建立token` 刻意留白：`cache_write_input_tokens` 是真的有的量、也真的計費
+            # （1.25×），但本專案實測到的每一筆都是 0，而 0 在 `input_tokens` 裡面或外面長得
+            # 一樣——含不含關係判不出來，接上去等於在帳本裡猜一個語意。證據與解鎖條件
+            # （一筆非 0 的實錄）在設計文件 02「三家用量欄位語意」的 codex 那一列。
             思考token=用了.get("reasoning_output_tokens"),
         ),
         原始輸出=tuple(事件們),
@@ -267,6 +272,20 @@ def _agy的信封(標準輸出: str) -> tuple[dict[str, Any] | None, list[dict[s
     return (末筆 if isinstance(末筆, dict) else None), 物件們
 
 
+def _agy的非快取輸入(用了: dict[str, Any]) -> int:
+    """agy 的 `input_tokens` **不含** `cache_read_tokens`，原值就是非快取輸入，**不扣**。
+
+    跟 codex 的形狀不同：實測每一個 API 回合都是 `total = input + output`，而
+    `cache_read` 是 `input` 的四五倍（信封 in 88,160 / cr 251,977）——比 input 還大，
+    子集在算術上不可能。Gemini 官方那句「promptTokenCount includes cached content」
+    對 agy 落盤的數字不適用，不要照它加減。
+
+    **這個「不扣」的出處是設計文件 02「三家用量欄位語意」那張表的 agy 那一列**
+    （指令與逐步 usage 也在那）。改這裡之前先去看那張表。
+    """
+    return int(用了.get("input_tokens", 0))
+
+
 def _解析agy(標準輸出: str, 結束碼: int) -> 回應:
     """`agy -p --output-format json`（單一物件）或 `stream-json`（NDJSON）。"""
     信封, 原始 = _agy的信封(標準輸出)
@@ -282,9 +301,10 @@ def _解析agy(標準輸出: str, 結束碼: int) -> 回應:
         原始結束碼=結束碼,
         對話識別碼=信封.get("conversation_id") or None,
         用量=用量(
-            輸入token=int(用了.get("input_tokens", 0)),
+            輸入token=_agy的非快取輸入(用了),
             輸出token=int(用了.get("output_tokens", 0)),
             快取讀取token=用了.get("cache_read_tokens"),
+            # `thinking_tokens` **含在** `output_tokens` 裡（同一張表），別再加一次。
             思考token=用了.get("thinking_tokens"),
         ),
         結構化輸出=信封.get("structured_output"),

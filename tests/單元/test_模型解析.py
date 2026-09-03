@@ -169,6 +169,37 @@ class Testagy:
         assert 答.終局 != "success"
         assert 答.失敗代碼 == "model-not-found"
 
+    def test_輸入token就是非快取輸入_不扣(self) -> None:
+        """agy 的 `input_tokens` 本身就是非快取輸入：`cache_read_tokens` 在它之外，不准扣。
+
+        守的是**三家不是同一個形狀**這件事。codex 的 `input_tokens` 含快取讀取，要扣
+        才跟另兩家同語意；照著對稱抄到 agy 身上，新鮮 token 會被算成負數
+        （實錄裡 cache_read 154,454 比 input 69,186 還大）。
+
+        這支今天是綠的，而它綠的**理由是實測不是假設**：設計文件 02「三家用量欄位語意」
+        的 agy 那一列量到每一個 API 回合都是 `total == input + output`、cache_read
+        不在 total 裡。誰要把這裡改成扣減，先推翻那一列的數字。
+        """
+        原始 = 讀("agy_cached.json")
+        用了 = dict(json.loads(原始)["usage"])
+        # 先釘前提：這一筆之所以判得出「不是子集」，靠的是這兩個算術事實。
+        assert 用了["cache_read_tokens"] > 用了["input_tokens"], (
+            "換實錄要換成 cache_read 比 input 大的那種，否則這支測試分不出扣不扣"
+        )
+        assert 用了["total_tokens"] == 用了["input_tokens"] + 用了["output_tokens"], (
+            "total 等於 in+out，cache_read 不在 total 裡——這是 02 那張表 agy 那一列的量法"
+        )
+
+        答 = 解析agy(原始, 0)
+        assert 答.用量.輸入token == 用了["input_tokens"] == 69186, "原值照報，不扣快取讀取"
+        assert 答.用量.快取讀取token == 154454
+        assert 答.用量.輸出token == 3811
+        assert 答.用量.思考token == 1343, "思考含在 output 裡，只是照報，不另外加總"
+        # 照 codex 的形狀扣下去會是 69186 − 154454 = −85268（夾到 0 也一樣不對）。
+        assert 答.用量.輸入token > 0
+        # agy 沒有快取建立這一欄，不准拿別家的欄位補。
+        assert 答.用量.快取建立token is None
+
     def test_串流格式(self) -> None:
         """stream-json 的鍵是 `event` 不是 `type`，最後一則是 `result`。"""
         答 = 解析agy(讀("agy_stream.jsonl"), 0)

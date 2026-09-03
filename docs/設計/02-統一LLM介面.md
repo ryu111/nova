@@ -639,6 +639,82 @@ input 差不到 40 token（就是規則本身的長度），cached 完全相同�
 沒測到的：規則類型換一種（例如格式約束或禁止事項）、
 長規則（這裡的規則只有 158 字元，角色提示是它的好幾倍）。
 
+## 三家用量欄位語意：哪一欄含哪一欄，按幾倍計價
+
+解析器裡每一個減法都是在宣告「哪一欄含哪一欄」。這種宣告不寫下來就會退化成
+註解裡的猜測，下一個人照著猜再改一次，帳本的數字沒人敢信。所以三家各一列，
+**每一格都要有出處**——官方那一句，或本專案打過的那一行指令。
+
+| 家 | 非快取輸入 | 快取讀取 | 快取建立 | 輸出 | 思考 | total | 含不含關係 | 計價倍率 | 出處 |
+|---|---|---|---|---|---|---|---|---|---|
+| claude | `input_tokens` | `cache_read_input_tokens` | `cache_creation_input_tokens` | `output_tokens` | `output_tokens_details.thinking_tokens` | 沒有這欄，官方給的是 `total_input = 三欄相加` | **三欄互斥**：`input_tokens` 已經是非快取那部分，讀與建立都在它之外 | 讀 0.1×、寫 1.25×（5 分鐘）／2×（1 小時） | 官方明文 https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching |
+| codex | `input_tokens − cached_input_tokens` | `cached_input_tokens` | `cache_write_input_tokens`（真的有這個量，**本專案尚未映射**，見下） | `output_tokens` | `reasoning_output_tokens` | 沒有這欄，要自己加 | **`cached_input_tokens` 是 `input_tokens` 的子集**，要扣才跟另兩家同語意；`cache_write_input_tokens` 的含不含關係**未定**——本專案兩趟實測都拿到 0，那只證明這條路徑沒回報非 0 值，證不出它恆 0 | 快取讀取 0.1×；快取寫入 **1.25×**（OpenAI 對 GPT-5.6+ 明載隱式與顯式快取寫入都計 1.25×），**不是免費** | 實測 `codex exec --json --skip-git-repo-check --ignore-user-config --ignore-rules --model gpt-5.6-luna --sandbox read-only "只回覆兩個字：可以"` → `input 12827、cached 9984、cache_write 0`；換成全新 16k 隨機前綴仍是 `input 28866、cached 9984、cache_write 0`。子集另有 codex 原始碼 `non_cached_input = input − cached` 佐證；寫入欄由 API 的 `cache_write_tokens` 映過來（codex 0.151.0 `codex-rs/codex-api/src/sse/responses.rs` L121-151，測例 L832-856 就有非 0 值） |
+| agy | `input_tokens` **原值，不扣** | `cache_read_tokens` | 沒有這欄 | `output_tokens` | `thinking_tokens` | `total_tokens`，實測恆等於 `input + output` | **`cache_read_tokens` 與 `input_tokens` 互斥**：`input_tokens` 已經是非快取那部分。`thinking_tokens` 則**含在** `output_tokens` 裡 | 快取讀取 0.1×（Gemini 快取價），非快取輸入 1× | 實測 `agy --output-format stream-json --mode plan --add-dir <目錄> --model gemini-3.7-flash-high --conversation <sid> --print "只回覆兩個字：可以"`，見下方原始 usage |
+
+### agy 這一列是量出來的，不是從 Gemini 官方推的
+
+Gemini API 的 `usageMetadata.promptTokenCount` 明寫「includes the number of tokens in
+the cached content」（https://ai.google.dev/api/generate-content ），照這句推，
+`cache_read` 應該是 `input` 的子集。**agy 落盤的數字不是那個形狀，這句不適用。**
+
+2026-09-03 實測。先用 `--output-format json` 跑一次會用到工具的多輪任務（讓快取真的被讀到；
+單輪短提示三次跑下來 `cache_read` 都是 0，看不出關係）：
+
+```
+agy --output-format json --mode plan --add-dir /tmp/nova17c/料 \
+    --model gemini-3.7-flash-high \
+    --print "逐一讀取這個目錄下的六個 .txt 檔…"
+→ {"input_tokens": 69186, "output_tokens": 3811, "thinking_tokens": 1343,
+   "cache_read_tokens": 154454, "total_tokens": 72997}
+```
+
+`in + out = 72997 = total`；`in + out + cache_read = 227451 ≠ total`。
+而且 **`cache_read` (154454) 比 `input` (69186) 還大——子集在算術上就不可能**。
+
+再用 `--output-format stream-json` 續接同一個對話，看**單一 API 回合**的 usage
+（信封是整段累加，單步才排除得掉「累加造成的假象」）：
+
+| step | input | output | thinking | cache_read | total | in+out |
+|---|---|---|---|---|---|---|
+| 24 | 4,003 | 584 | 349 | 24,389 | 4,587 | **4,587** |
+| 26 | 4,752 | 95 | 12 | 24,386 | 4,847 | **4,847** |
+| 28 | 4,922 | 208 | 56 | 24,377 | 5,130 | **5,130** |
+| 30 | 5,297 | 10 | 9 | 24,371 | 5,307 | **5,307** |
+| 信封 | 88,160 | 4,708 | 1,769 | 251,977 | 92,868 | **92,868** |
+
+每一步都是 `total = input + output`，每一步 `cache_read` 都是 `input` 的四五倍。
+結論：**分開，不是子集。** agy 的 `input_tokens` 本來就已經是非快取輸入，
+`解析.py` 的 agy 段**不扣**，跟 codex 的形狀不同。
+
+這條同時把 17a 那個「驗完之前 agy input 全算新鮮」從暫定決定變成**有出處的決定**：
+不是保守估計，是量出來就該這樣算。
+
+### codex 的 `cache_write_input_tokens` 為什麼還是留 None
+
+實測兩次都是 0，第二次還特地餵了一份全新的 16k 隨機前綴——**還是 0**。
+
+**這兩筆 0 能證的只有「這條路徑（`gpt-5.6-luna` + 這兩個提示）沒回報非 0 值」。**
+它證不出「這欄恆為 0」，更證不出「是 schema 佔位」或「寫入不計費」——這三句都是
+從兩筆零值推出去的，前一版寫錯了，這裡改掉：
+
+- codex 0.151.0 把 API 回來的 `cache_write_tokens` **明確映射**到這欄
+  （`codex-rs/codex-api/src/sse/responses.rs` L121-151），它的測例裡就有非 0 的寫入量
+  （同檔 L832-856）。這是一個真的量，不是佔位。
+- OpenAI 對 GPT-5.6+ **明載隱式與顯式快取寫入都按 1.25× 計費**。寫入不是免費的，
+  漏掉它是**少算**成本。
+
+那為什麼還是留 None？因為**含不含關係仍然沒有證據**：手上每一筆都是 0，
+0 在 `input_tokens` 裡面或外面看起來一模一樣，接上去就得在帳本裡二選一地猜。
+`快取建立token=None` 的語意是「這家的這個量本專案量不到」，不是「這家沒有這個量」，
+先誠實停在這裡。**要解鎖只差一筆非 0 的實錄**：拿到之後對照 `input_tokens` 是否隨之
+變大，就能定含不含，再把 `解析.py` 那一格接上——這是一張還沒開的票，不是已結案。
+
+### 那條「agy cache_read 26.8M」的預算鎖是真超支還是重複計
+
+**是真的量，不是重複計。** `cache_read_tokens` 與 `input_tokens` 互斥，
+帳本沒有把同一批 token 記兩次。但它**不該按 1× 讀**——快取讀取是 0.1× 計價，
+拿 cache_read 的原始張數去跟輸入的預算門檻比，等於把成本放大十倍。
+
 ## 已知缺口
 
 1. **真 CLI 的 contract test 不接進 CI。** agy 的 CI 認證環境變數查不到（用 Google OAuth，
