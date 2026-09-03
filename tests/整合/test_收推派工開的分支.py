@@ -398,7 +398,7 @@ def test_派工真的把樹開在ASCII分支上(
     def 記下來不發射(參: list[str], **其餘: object) -> None:
         發射過.append((list(參), dict(其餘)))
 
-    monkeypatch.setattr(命令列, "_發射背景程序", 記下來不發射)
+    monkeypatch.setattr(命令列, "發射背景程序", 記下來不發射)
     參數 = [
         "派工",
         str(票檔),

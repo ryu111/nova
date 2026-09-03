@@ -111,12 +111,7 @@ def _加檢查類(
     閘剖析 = 子.add_parser("閘", help="在某個執行點上跑規則")
     閘剖析.set_defaults(執行=處理們["閘"])
     閘剖析.add_argument("閘點", help="提交、ci 或 本線")
-    閘剖析.add_argument(
-        "--喚醒來源",
-        choices=[來源.value for 來源 in 喚醒來源],
-        default=喚醒來源.人手動敲.value,
-        help="誰讓這次閘醒來；排程必須明傳 schedule",
-    )
+    _加喚醒來源(閘剖析, 說明="誰讓這次閘醒來；排程必須明傳 schedule")
     閘剖析.add_argument(
         "--全部跑完", action="store_true", help="不提前停止，一次看到所有紅的（CI 用）"
     )
@@ -292,11 +287,11 @@ def _加委派類(
         help="題目從收件匣拿最前面那一件，不從命令列給。做完會把原始請求搬到成果旁邊",
     )
     流剖析.add_argument(
-        "--喚醒來源",
-        choices=[來源.value for 來源 in 喚醒來源],
-        default=喚醒來源.人手動敲.value,
-        help="誰讓這一輪醒來；排程必須明傳 schedule",
+        "--收件檔",
+        metavar="路徑",
+        help="跟 --從收件匣 一起用：指名接這一張，不拿收件匣裡最前面那一件",
     )
+    _加喚醒來源(流剖析, 說明="誰讓這一輪醒來；排程必須明傳 schedule")
     _一輪的旗標(流剖析)
 
     跑剖析 = 子.add_parser("跑", help="敲一句話就開始做：先落成收件檔，再走 工作流 --從收件匣")
@@ -310,6 +305,29 @@ def _加委派類(
     派工剖析.add_argument("票檔", help="要派出去的那張票（markdown 檔）")
     # 跟 `跑` 一樣不給 `--從收件匣`：派工一定是從收件匣走。
     _一輪的旗標(派工剖析)
+
+    巡剖析 = 子.add_parser("巡", help="定期醒來：把到期的接續票在它們自己的樹上叫醒")
+    巡剖析.set_defaults(執行=處理們["巡"])
+    巡剖析.add_argument("--專案", required=True, help="要巡哪個主工作區（巡自己不准站在它底下）")
+    巡剖析.add_argument("--演練", action="store_true", help="只印這一輪會叫誰，一條都不發射")
+    # 喚醒時 `--喚醒來源` 與一輪的旗標整組原樣轉給那條線，所以巡也要認得它們。
+    _加喚醒來源(巡剖析, 說明="誰讓這一輪醒來；排程必須明傳 schedule")
+    _一輪的旗標(巡剖析)
+
+
+def _加喚醒來源(剖析: argparse.ArgumentParser, *, 說明: str) -> None:
+    """`--喚醒來源`：`閘`、`工作流`、`巡` 各掛一份，**但只准有一份 choices／default**。
+
+    它不在 `_一輪的旗標` 那組（那組是一輪工作流的旗標，這個是「誰讓我醒的」），
+    所以三邊各自 `add_argument`。抄三份的話，之後多一個來源時漏掉的那一邊會在
+    命令列上安靜地拒收一個合法的值。說明各邊不同，所以那一格留給呼叫端給。
+    """
+    剖析.add_argument(
+        "--喚醒來源",
+        choices=[來源.value for 來源 in 喚醒來源],
+        default=喚醒來源.人手動敲.value,
+        help=說明,
+    )
 
 
 def _一輪的旗標(剖析: argparse.ArgumentParser) -> None:
