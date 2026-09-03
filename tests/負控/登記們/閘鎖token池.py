@@ -12,6 +12,18 @@ from pathlib import Path
 
 from tests.負控.登記 import 替換一次, 變異
 
+_專案根 = Path(__file__).resolve().parents[3]
+
+#: **錨點從原始碼切出來，不寫死那一行。** `要幾個token=抽乾整池,` 現在有兩條規則
+#: 各寫一次（全量的 `registered-mutation` 與本線的 `registered-mutation-diff`），
+#: 單獨一行不再唯一，`替換一次` 會當場 `RUN_ERROR`。切片從 `代碼="registered-mutation",`
+#: 一路帶到那一行，天然只命中全量那一條；中間那兩行註解改字也不會讓刀過期。
+_規則表原始碼 = (_專案根 / "src/nova/載體/規則表.py").read_text(encoding="utf-8")
+_全量那條起 = _規則表原始碼[_規則表原始碼.index('            代碼="registered-mutation",') :]
+_宣告整池那一行 = "要幾個token=抽乾整池,"
+_全量那條到池子 = _全量那條起[: _全量那條起.index(_宣告整池那一行) + len(_宣告整池那一行)]
+_全量那條改成只取一個 = _全量那條到池子.replace(_宣告整池那一行, "要幾個token=1,")
+
 #: 測試識別碼太長，切出來才排得下一行。
 _等鎖住在檢查結果上 = (
     "tests/整合/test_等鎖等多久要看得見.py::test_等鎖的毫秒數要住在檢查結果上而且帳本讀的是同一個值"
@@ -34,7 +46,7 @@ _判準宣告幾個就握幾個 = (
     變異(
         識別="負控刀不抽乾池子只取一個token",
         目標檔=Path("src/nova/載體/規則表.py"),
-        操作=替換一次("要幾個token=抽乾整池,", "要幾個token=1,"),
+        操作=替換一次(_全量那條到池子, _全量那條改成只取一個),
         該紅=("tests/整合/test_閘鎖接規則表.py::test_每條規則自己宣告要幾個token",),
         最多秒=60.0,
     ),

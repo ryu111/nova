@@ -13,7 +13,7 @@ import importlib.util
 import os
 import sys
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -159,6 +159,9 @@ class 變異:
     必須覆蓋: frozenset[int] | None = None
     平台: str = "任何平台"
     預期掛住: bool = False
+    #: 這把刀住哪個登記模組（以 repo 根為基準的相對路徑）。**收集當下填，宣告時不寫**：
+    #: 手寫的話搬檔就會忘了改，而「來源標錯」的症狀是本線負控靜靜選不到刀（假綠）。
+    來源: str = ""
 
     @property
     def 目標(self) -> Path:
@@ -1444,6 +1447,11 @@ _這個檔裡的 = (
 _登記們目錄 = Path(__file__).resolve().parent / "登記們"
 _登記們模組前綴 = "tests.負控.登記們"
 
+#: 來源一律寫成 repo 相對路徑：`registered-mutation-diff` 那邊從 git 拿到的就是這種路徑，
+#: 兩邊對不起來的話篩選會選到 0 把——而那是本票唯一一種看起來完美的假綠。
+_登記檔相對路徑 = "tests/負控/登記.py"
+_登記們相對目錄 = "tests/負控/登記們"
+
 
 def _載入登記模組(檔: Path) -> tuple[變異, ...]:
     """載入一個 `登記們/` 底下的模組，取出它的 `登記`。"""
@@ -1463,14 +1471,19 @@ def _載入登記模組(檔: Path) -> tuple[變異, ...]:
 
 
 def _擋掉重複識別(每一筆帶來源: Iterable[tuple[變異, str]]) -> tuple[變異, ...]:
-    """照原順序收下每一筆，遇到重複的識別就當場炸。
+    """照原順序收下每一筆並把來源蓋回那一筆，遇到重複的識別就當場炸。
 
     執行器只認識別：兩把同名的刀它分不出來，所以重複要在收集當下擋，
     不是跑到一半才發現。
+
+    來源在這裡蓋回去，不要求宣告的人自己寫：收集本來就知道這一筆是從哪個檔讀來的，
+    再叫人手抄一次就多一個會過期的地方。有了來源，「只跑這條 diff 動過的登記檔」
+    才有東西可篩（見 `tests/conftest.py` 的 `--登記檔`）。
     """
     收到: list[變異] = []
     來源: dict[str, str] = {}
-    for 一筆, 這筆的來源 in 每一筆帶來源:
+    for 原本那筆, 這筆的來源 in 每一筆帶來源:
+        一筆 = replace(原本那筆, 來源=這筆的來源)
         先前的來源 = 來源.get(一筆.識別)
         if 先前的來源 is not None:
             訊息 = (
@@ -1499,7 +1512,7 @@ def _收集(目錄: Path) -> tuple[變異, ...]:
     if not 目錄.is_dir():
         return ()
     return _擋掉重複識別(
-        (一筆, 檔.name)
+        (一筆, f"{_登記們相對目錄}/{檔.name}")
         for 檔 in sorted(目錄.glob("*.py"), key=lambda 檔: 檔.name)
         if 檔.name not in _不是登記模組
         for 一筆 in _載入登記模組(檔)
@@ -1509,5 +1522,7 @@ def _收集(目錄: Path) -> tuple[變異, ...]:
 #: 收集只能擺在檔尾：`登記們/` 底下的模組會反過來 `from tests.負控.登記 import 變異`，
 #: 那時這個模組還在初始化中，只有已經執行到的名字拿得到——`變異` 與 `替換一次` 都在上面。
 登記 = _擋掉重複識別(
-    [(一筆, "登記.py") for 一筆 in _這個檔裡的] + [(一筆, "登記們/") for 一筆 in _收集(_登記們目錄)]
+    [(一筆, _登記檔相對路徑) for 一筆 in _這個檔裡的]
+    #: `_收集` 已經把每一筆的來源蓋成自己那個模組的路徑了，這裡照抄回去別再蓋一次。
+    + [(一筆, 一筆.來源) for 一筆 in _收集(_登記們目錄)]
 )

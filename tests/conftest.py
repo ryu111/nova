@@ -169,6 +169,65 @@ def 做假CLI(
     return 做
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """`--登記檔 <相對路徑>`（可重複）：只跑這幾個登記模組登記的負控刀。
+
+    **只能寫在這一份 conftest**：`addoption` 只認 initial conftest，
+    寫在 `tests/負控/conftest.py` 的話在別的呼叫路徑上會靜靜失效。
+
+    走 pytest 選項不走 nodeid、也不走 `-k`：pytest 會把非 ASCII 的參數 id
+    轉義成十六進位，點名等於要載體自己複製一份 pytest 的轉義規則。
+    """
+    parser.addoption(
+        "--登記檔",
+        action="append",
+        default=[],
+        metavar="路徑",
+        help="只跑這個登記模組（tests/負控/登記們/<主題>.py）登記的負控刀；可重複",
+    )
+
+
+def _這一項掛的刀(項: pytest.Item) -> object | None:
+    """這個 test item 是不是一把登記負控刀？是的話回那一筆 `變異`。
+
+    用參數上的屬性認，不 import `tests.負控.登記`：那個模組一載入就會把
+    `登記們/` 底下每個模組跟著載進來，而 conftest 是每個 pytest 行程都會執行的。
+    """
+    參數們 = getattr(getattr(項, "callspec", None), "params", {})
+    一筆 = 參數們.get("一筆")
+    return 一筆 if hasattr(一筆, "識別") and hasattr(一筆, "來源") else None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """下了 `--登記檔` 時，只留下那幾個登記模組來的刀。
+
+    沒下選項就整個不作用——負控 runner 跑基線與該紅測試時不會下這個選項，
+    所以下面那行 `nova` 的 import 在刀的行程裡走不到（conftest 一 import 就載入
+    半個 nova 會毀掉覆蓋率判定，見本檔開頭）。
+    """
+    指名 = tuple(config.getoption("登記檔") or ())
+    if not 指名:
+        return
+
+    from nova.載體.本線負控 import 判定選到的刀, 挑出本線動過的刀
+
+    帶刀的 = [(項, 刀) for 項 in items if (刀 := _這一項掛的刀(項)) is not None]
+    選到 = 挑出本線動過的刀([刀 for _, 刀 in 帶刀的], 指名)
+    留下的 = {id(刀) for 刀 in 選到}
+    丟掉 = [項 for 項, 刀 in 帶刀的 if id(刀) not in 留下的]
+    if 丟掉:
+        config.hook.pytest_deselected(items=丟掉)
+        items[:] = [項 for 項 in items if 項 not in 丟掉]
+
+    通過, 摘要 = 判定選到的刀(指名, 選到)
+    報告器 = config.pluginmanager.get_plugin("terminalreporter")
+    if 報告器 is not None:
+        報告器.write_line(摘要)
+    if not 通過:
+        # 指名了檔卻一把都選不到＝fail-closed 的紅，不是「沒事做」的綠。
+        raise pytest.UsageError(摘要)
+
+
 @pytest.fixture
 def 翻牌判準(tmp_path: Path) -> Path:
     """第一次紅、之後綠的判準。讓 驗證紅 與 驗證綠 都能走到。
