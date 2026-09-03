@@ -1049,17 +1049,46 @@ def _階段的派法(階段: 階段代碼) -> 派法:
     return 怎麼派(這階算哪種工作(階段))
 
 
+def _換腦後的型號(
+    藍圖: 角色藍圖,
+    換去的腦們: tuple[str, ...],
+    *,
+    是審查: bool,
+    這次的模型: str | None,
+) -> str | None:
+    """被 `--用`／`--審查用` 換過腦的那一階，改用哪顆型號。
+
+    `--模型` 只套在 `--用` 指到的那幾階，所以審查那階拿不到它。
+
+    審查那階換去的還是派工表原本那一家，就留著派工表的型號
+    （`--審查用 codex` 照樣拿 `codex高階模型`）；換了家才清掉——別家不認得那顆。
+    """
+    if not 是審查:
+        return 這次的模型
+    換的是同一家 = 換去的腦們[:1] == 藍圖.派法.腦們[:1]
+    return 藍圖.派法.模型 if 換的是同一家 else None
+
+
 def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖, ...]:
-    """把命令列的腦來源與逾時套到 TDD 藍圖，保留派工表的模型設定。"""
+    """把命令列的腦來源、型號與逾時套到 TDD 藍圖。
+
+    `--模型` **只套在 `--用` 指名的那幾階**，跟 `--用`／`--審查用` 一樣分階段。
+    不然 `--用 claude --模型 sonnet` 會把 sonnet 一起塞給審查那家 codex，
+    送出一個 codex 不認識的型號。換過腦那幾階的型號怎麼決定寫在 `_換腦後的型號`。
+    """
+    這次的模型 = getattr(參數, "模型", None) or None
     結果: list[角色藍圖] = []
     for 藍圖 in 建TDD角色藍圖(怎麼派):
-        指名 = 參數.審查用 if 藍圖.識別碼 == 階段代碼.審查.value else 參數.用
+        是審查 = 藍圖.識別碼 == 階段代碼.審查.value
+        指名 = 參數.審查用 if 是審查 else 參數.用
         if 指名:
+            換去的腦們 = _拆腦來源(指名)
+            型號 = _換腦後的型號(藍圖, 換去的腦們, 是審查=是審查, 這次的模型=這次的模型)
             結果.append(
                 dataclasses.replace(
                     藍圖,
-                    派法=dataclasses.replace(藍圖.派法, 腦們=_拆腦來源(指名)),
-                    模型=None,
+                    派法=dataclasses.replace(藍圖.派法, 腦們=換去的腦們),
+                    模型=型號,
                     思考深度=None,
                 )
             )
@@ -1067,8 +1096,6 @@ def _這次的TDD角色藍圖(參數: argparse.Namespace) -> tuple[角色藍圖,
         結果.append(dataclasses.replace(藍圖, 模型=藍圖.派法.模型, 思考深度=藍圖.派法.思考深度))
     if 參數.逾時 is not None:
         結果 = [dataclasses.replace(藍圖, 逾時秒=參數.逾時) for 藍圖 in 結果]
-    if getattr(參數, "模型", None):
-        結果 = [dataclasses.replace(藍圖, 模型=參數.模型) for 藍圖 in 結果]
     return tuple(結果)
 
 
