@@ -11,6 +11,7 @@
 
 import re
 from collections.abc import Callable, Mapping
+from itertools import pairwise
 from types import MappingProxyType
 
 from nova.契約.審查問題 import 問題種類, 審查問題, 讀審查問題列
@@ -579,8 +580,7 @@ def _條目數沒減少的連續輪數(問題列們: list[tuple[審查問題, ..
     if not 問題列們:
         return 0
     連續輪數 = 1
-    # 配的是相鄰兩輪，兩串長度天生差一，`strict` 只能是 False。
-    for 上輪, 這輪 in zip(問題列們, 問題列們[1:], strict=False):
+    for 上輪, 這輪 in pairwise(問題列們):
         連續輪數 = 1 if len(這輪) < len(上輪) else 連續輪數 + 1
     return 連續輪數
 
