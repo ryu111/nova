@@ -131,18 +131,25 @@ class Test活動監視器看得到是誰:
         assert "nova" in 跑完.stdout
 
 
-def test_那行指令整條真的跑得起來(佈景: tuple[Path, Path]) -> None:
+def test_那行指令整條真的跑得起來(佈景: tuple[Path, Path], tmp_path: Path) -> None:
     """**判準三：墊片證明的是轉遞形狀，不是可達性。**
 
     第一格換成硬連結的直譯器之後，後面那幾格也得跟著對
     （`-m nova` 要有 `__main__.py`）。整條拿出來跑一次才知道。
+
+    跑的地方是 **daemon 那份 checkout**，不是 `專案`：排程醒來站的就是那裡。
     """
     狀態, 專案 = 佈景
     指令 = _plist的指令(狀態, 專案)
+    站的地方 = tmp_path / "daemon那份"
+    站的地方.mkdir()
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], cwd=站的地方, check=True)
+    subprocess.run([*git, "commit", "-qm", "起點", "--allow-empty"], cwd=站的地方, check=True)
 
     跑完 = subprocess.run(
         指令,
-        cwd=專案,
+        cwd=站的地方,
         env={**os.environ, "XDG_STATE_HOME": str(狀態)},
         capture_output=True,
         text=True,
@@ -150,4 +157,4 @@ def test_那行指令整條真的跑得起來(佈景: tuple[Path, Path]) -> None
     )
 
     assert 跑完.returncode == 0, 跑完.stdout + 跑完.stderr
-    assert "收件匣是空的" in 跑完.stderr
+    assert "巡自己的 HEAD" in 跑完.stdout, f"跑起來的不是巡：{跑完.stdout}"
