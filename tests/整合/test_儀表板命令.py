@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 
 from nova.契約.儀表板 import 儀表板轉字典
+from nova.契約.模型回應 import 失敗代碼
 from nova.載體.儀表板 import 組儀表板
 from nova.載體.命令列 import 主程式
 from nova.載體.專案脈絡 import 建專案執行脈絡
@@ -38,7 +39,7 @@ from nova.載體.收件 import 收件目錄, 處理中目錄
 from nova.載體.狀態 import 狀態根目錄
 from tests.單元.test_儀表板契約 import _契約說的落盤鍵樹, _對不上的鍵層, _這份落盤的鍵樹
 from tests.單元.test_儀表板模板 import _沒釘好的格子
-from tests.整合.test_儀表板資料 import _git, _假憑證, _造狀態目錄
+from tests.整合.test_儀表板資料 import _git, _假憑證, _寫帳, _造狀態目錄
 
 #: 設計稿裡手拼寫死的數字與白話文。**一個都不准活到輸出裡。**
 #: 只挑不會跟 fixture 撞的字串——裸小整數當哨兵會變成假紅。
@@ -342,3 +343,79 @@ def test_相對根目錄下的工作目錄跟專案脈絡是同一份(
         assert json.loads(capsys.readouterr().out)["workdir"] == 脈絡的答案, (
             f"在 {站在} 敲 {參數們}：工作目錄跟 `專案脈絡.根目錄` 不是同一份"
         )
+
+
+def _多記幾筆失敗(識別: str, 代碼: str, 幾次: int) -> None:
+    """在跨專案帳本上再放一本帳：同一個失敗碼記 `幾次` 筆，用來決定誰是第一名。"""
+    事件們: list[dict[str, Any]] = []
+    for 第幾 in range(1, 幾次 + 1):
+        事件們.append(
+            {
+                "seq": 第幾 * 2 - 1,
+                "ts": f"t{第幾}",
+                "event": "call_started",
+                "call": 第幾,
+                "family": "codex",
+            }
+        )
+        事件們.append(
+            {
+                "seq": 第幾 * 2,
+                "ts": f"t{第幾}",
+                "event": "call_finished",
+                "call": 第幾,
+                "family": "codex",
+                "outcome": "failed",
+                "failure_code": 代碼,
+                "input_tokens": 1,
+                "output_tokens": 1,
+            }
+        )
+    _寫帳(狀態根目錄() / "專案" / f"nova-wt-{識別}" / "帳本", f"20260902T0940Z-{識別}", 事件們)
+
+
+def _出一頁(專案: Path, capsys: pytest.CaptureFixture[str]) -> str:
+    """跑一次 `nova 儀表板`，回出落在狀態目錄的那一頁。"""
+    assert 主程式(["--根目錄", str(專案), "儀表板"]) == 0
+    capsys.readouterr()
+    落點 = 狀態根目錄() / "專案" / 專案識別(專案) / "儀表板.html"
+    return 落點.read_text(encoding="utf-8")
+
+
+def test_第一名失敗碼的解釋句由種類決定_quota不准說成未知(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """失敗碼那一區的結論句要看第一名是**哪一種**碼，不是一句寫死的話。
+
+    `quota-exhausted` 是**確定失敗**：額度用完，等一下沒有用、換一家就好。
+    把它說成「不知道工作做了沒」，讀的人會照 at-most-once 的規矩不敢重跑，
+    於是一件**明明可以直接換一家重來**的事被擱在那裡等人。
+    那句話只對 `unknown` 成立——它成不成立由第一名那個碼決定，
+    而不是由設計稿當天第一名剛好是什麼決定。
+    """
+    專案 = _造現場(tmp_path)
+
+    _多記幾筆失敗("額度線-11111111", 失敗代碼.額度耗盡.value, 5)
+    額度頁 = _出一頁(專案, capsys)
+
+    assert 組儀表板(專案).失敗碼們[0].代碼 == 失敗代碼.額度耗盡.value, (
+        "第一名不是額度耗盡的話，下面幾個斷言什麼都沒驗到"
+    )
+    assert "不知道工作做了沒" not in 額度頁, (
+        "第一名是 quota-exhausted（確定失敗、換一家就好），"
+        "頁面卻說成「不知道工作做了沒」——那是 unknown 才有的處置"
+    )
+    assert "到底做了沒" not in 額度頁, (
+        "白話那一段也在把第一名說成結果未知：同一句結論寫兩次，也還是沒有資料背書"
+    )
+    assert "額度" in 額度頁, (
+        "第一名是額度耗盡，那一區要說得出這一種碼是什麼事（等不到、換一家就好）"
+    )
+
+    _多記幾筆失敗("未知線-22222222", 失敗代碼.未知.value, 9)
+    未知頁 = _出一頁(專案, capsys)
+
+    assert 組儀表板(專案).失敗碼們[0].代碼 == 失敗代碼.未知.value
+    assert "不知道工作做了沒" in 未知頁, (
+        "第一名換成 unknown 之後那句話才回來——回不來代表那句結論根本不看資料"
+    )
