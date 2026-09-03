@@ -56,6 +56,24 @@ if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['worktree']:
         sys.exit(128)
     print('worktree ' + os.environ['NOVA_收尾專案'])
     print('branch refs/heads/main')
+# `收` 在 push 之前會先問兩件事：這棵樹乾不乾淨、origin 上那條分支長什麼樣。
+# 這幾支釘的是「完整那條路上不准出現什麼」，所以這裡照最單純的那一列答：
+# 樹是髒的（有東西要提交）、origin 上還沒有這條分支（＝真的新分支，該推）。
+if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:3] == ['status', '--porcelain']:
+    print(' M 這一趟要提交的東西.txt')
+# 遠端沒有這條分支時，真的 git 的 `fetch <不存在的 ref>` 回 128；後面那道
+# `ls-remote` 印空才是「遠端真的沒有」的證據。兩道分開答，不讓「fetch 掛了」
+# 跟「遠端沒有」在測具裡糊成同一種答案。
+if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['fetch']:
+    sys.stderr.write("fatal: couldn't find remote ref\\n")
+    sys.exit(128)
+if pathlib.Path(sys.argv[0]).name == 'git' and sys.argv[1:2] == ['ls-remote']:
+    sys.exit(0)
+# 「這條分支上有沒有 PR」是用查的，不是拿 `gh pr create` 撞出來的：預設答**空清單**
+# ＝沒有 PR，這幾支才走得到既有那條「建 PR → 等 CI → 合併」的路。空 stdout 不是
+# 「沒有 PR」——那是「不知道」，`收` 會停在 3，紅的原因就不是這幾支要測的事。
+if pathlib.Path(sys.argv[0]).name == 'gh' and sys.argv[1:3] == ['pr', 'list']:
+    print('[]')
 if pathlib.Path(sys.argv[0]).name == 'gh' and sys.argv[1:3] == ['pr', 'checks']:
     模式 = os.environ.get('NOVA_收尾CI', '')
     if 模式 == '紅':
@@ -231,6 +249,10 @@ class Test收尾紅線:
 
         所以拓撲要在**第一個 git 寫入之前**問。這一支釘的就是那個順序：紅的時候
         現場乾淨得可以整趟重跑，不必有人去 GitHub 上收拾一個已經合併的 PR。
+
+        `git fetch` 也算在「一道都不准發」裡：它是 push 之前問遠端的那一道，只准排在
+        拓撲問清楚之後。順序倒過來的話，拓撲都還沒問，本地就已經多了一份
+        `refs/remotes/origin/<分支>`，而人以為現場一動也沒動。
         """
         專案, 紀錄 = _準備收尾(tmp_path, monkeypatch)
         monkeypatch.setenv("NOVA_收尾拓撲", "問不出")
@@ -241,7 +263,9 @@ class Test收尾紅線:
         呼叫紀錄 = _讀呼叫(紀錄)
         _斷言有指令(呼叫紀錄, "git", "worktree", "list")
         _斷言沒有指令(呼叫紀錄, "git", "commit")
+        _斷言沒有指令(呼叫紀錄, "git", "fetch")
         _斷言沒有指令(呼叫紀錄, "git", "push")
+        _斷言沒有指令(呼叫紀錄, "gh", "pr", "list")
         _斷言沒有指令(呼叫紀錄, "gh", "pr", "create")
         _斷言沒有指令(呼叫紀錄, "gh", "pr", "merge")
         錯誤 = capsys.readouterr().err
@@ -268,7 +292,11 @@ class Test收尾紅線:
     def test_閘紅時後續提交推送開PR都不發生(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """閘是紅的時候，commit、push、開 PR 都不得啟動。"""
+        """閘是紅的時候，commit、問遠端、push、開 PR 一道都不得啟動。
+
+        斷言是「紀錄整份是空的」，所以問遠端那幾道（`git fetch`、`gh pr list`）
+        天生也被它蓋住：閘紅時連「先問清楚遠端」都不准開始。
+        """
         專案, 紀錄 = _準備收尾(tmp_path, monkeypatch)
         monkeypatch.setattr(命令列, "_收尾閘", lambda *_: 閘紅)
 

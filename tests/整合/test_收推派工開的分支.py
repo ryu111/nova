@@ -36,7 +36,7 @@ from typing import cast
 
 import pytest
 
-from nova.契約.退出碼 import 放行, 閘紅
+from nova.契約.退出碼 import 放行, 未知, 閘紅
 from nova.載體 import 命令列
 from nova.載體.命令 import 收 as 收模組
 from nova.載體.命令列 import 主程式
@@ -51,9 +51,64 @@ from nova.載體.收件 import 收件目錄, 處理中目錄
 #: 這裡刻意換成一句認得出來的字：測試要釘的是**這句話有沒有被端到人面前**。
 問不出時git的抱怨 = "fatal: 假 git 今天答不出 HEAD 是哪條 ref"
 
+#: 提交閘在指令紀錄裡的「程式名」。閘不是 PATH 上的執行檔，是 `閘放行` fixture 記
+#: 進同一份紀錄的一筆——這樣「閘跑在哪兩道 git 指令之間」才有辦法比。
+閘的程式名 = "nova閘"
+
 #: 假 git 在「收不掉樹」模式下吐的那句話。真的 git 這時吐的是英文（樹髒、被佔用
 #: 之類），這裡同樣換成認得出來的字。
 收不掉樹時git的抱怨 = "fatal: 假 git 今天收不掉這棵樹"
+
+#: 假 gh 在「PR 已經存在」模式（`NOVA_收推已有PR`）下要交出來的那一筆。欄位照
+#: `收尾現場._要的欄位` 給齊：少任何一欄，`查收尾現場` 就落未知碼 3，紅的原因
+#: 就不是那一支要測的那件事。`headRefOid` 是固定值——這一階問的是「PR 在不在」，
+#: 「PR 指著哪顆 SHA」歸鎖 SHA 那張票。
+已存在的PR: dict[str, object] = {
+    "number": 260,
+    "url": "https://example.invalid/nova/pull/260",
+    "headRefName": 分支名,
+    "headRefOid": "0" * 40,
+    "baseRefName": "main",
+    "mergeStateStatus": "CLEAN",
+}
+
+#: 真的 `gh pr list` 不帶 `--limit` 時只吐 30 筆。假 gh 照這個數字截，測試才問得出
+#: 「查詢有沒有指名分支」——這個 repo 上隨時有幾十個開著的 PR，目標那一筆排在別人
+#: 後面時，一份不篩分支的清單根本比不到它。
+gh清單預設上限 = 30
+
+#: 清單上那些**不是目標**的 PR：欄位齊、分支名各不相同，所以它們每一筆都讀得成，
+#: 只是都不掛在 `分支名` 上。滿 30 筆是刻意的——目標那一筆接在它們後面，查詢少了
+#: `--head <分支>` 就會落在截斷線外，被讀成「這條分支沒有 PR」而去 `gh pr create`。
+清單上的雜訊PR們: list[dict[str, object]] = [
+    {
+        "number": 100 + 序,
+        "url": f"https://example.invalid/nova/pull/{100 + 序}",
+        "headRefName": f"nova/20260902T0415{序:02d}Z-aaa{序:03d}",
+        "headRefOid": f"{序:040d}",
+        "baseRefName": "main",
+        "mergeStateStatus": "CLEAN",
+    }
+    for 序 in range(gh清單預設上限)
+]
+
+#: 「這條分支上有沒有 PR」答不出來的那幾種原樣輸出（掛 `NOVA_收推PR清單原樣` 開）。
+#: 每一種都**不是**「零筆」：拿它們冒充「沒有 PR」就會多開一個 PR，或在遠端已經
+#: 動過的現場上再撞一次 already exists。
+沒有PR的空清單 = "[]"
+答不出PR的原樣輸出 = {
+    # gh 掛掉／被 401 擋下來時就是這副樣子：一個字都沒有。**空輸出不是空清單。**
+    "空輸出": "",
+    # 半截 JSON（連線中途斷、輸出被截）：讀不成就是讀不成，不准當零筆。
+    "壞JSON": '[{"number": 260,',
+    # 清單非空，但那一筆讀不成 PR（缺 `headRefName`）：這份清單裡有什麼分支根本
+    # 比不出來，所以「這條分支沒有 PR」也證明不了。
+    "清單裡混著讀不成PR的項目": '[{"number": 260, "url": "https://example.invalid/260"}]',
+    # 同一條分支上比到兩筆：指不出唯一目標，不猜要跟哪一個。
+    "同一條分支比到兩筆": json.dumps(
+        [已存在的PR, {**已存在的PR, "number": 261}], ensure_ascii=False
+    ),
+}
 
 
 def _跑git(工作目錄: Path, *參數: str) -> subprocess.CompletedProcess[str]:
@@ -109,7 +164,46 @@ with open(os.environ['NOVA_收推分支紀錄'], 'a', encoding='utf-8') as 檔:
         f"{共同開頭}{答不出分支}{收不掉樹}os.execv({真git!r}, [{真git!r}, *sys.argv[1:]])\n",
         encoding="utf-8",
     )
-    (執行檔目錄 / "gh").write_text(共同開頭, encoding="utf-8")
+    # 「PR 在不在」是用查的，所以假 gh 一定要答得出 `pr list`／`pr view`：預設答
+    # **空清單**（＝沒有 PR，維持既有那條「新建」路徑），掛上 `NOVA_收推已有PR`
+    # 才答恰好一筆。空 stdout 不是這裡的預設值——空輸出的語意是「不知道」，
+    # 拿它冒充「沒有 PR」正是要被擋掉的那種 fail-open。
+    # 「答不出來」那幾種現場：`gh pr list` 原樣吐環境變數裡那串（可以是空字串）並
+    # 回 0——真的 gh 掛在 401／輸出被截時就是這樣，退出碼不會替人把話講清楚。
+    答不出PR = (
+        "if sys.argv[1:3] == ['pr', 'list'] and 'NOVA_收推PR清單原樣' in os.environ:\n"
+        "    sys.stdout.write(os.environ['NOVA_收推PR清單原樣'])\n"
+        "    sys.exit(0)\n"
+    )
+    # `pr list` 這一道照真的 gh 的兩個行為走：**吃 `--head` 篩分支**、**不指名
+    # `--limit` 就只吐前 30 筆**。清單上永遠先擺滿 30 筆別條分支的 PR，目標那一筆
+    # 排在最後——查詢沒篩分支就比不到它。少了這兩個行為，「查詢有沒有指名分支」
+    # 這件事在測試裡看不出差別，拿掉篩選照樣全綠。
+    查PR = (
+        "if sys.argv[1:3] in (['pr', 'list'], ['pr', 'view']):\n"
+        f"    雜訊 = {json.dumps(清單上的雜訊PR們, ensure_ascii=False)}\n"
+        f"    那筆PR = {json.dumps(已存在的PR, ensure_ascii=False)}\n"
+        "    if not os.environ.get('NOVA_收推已有PR'):\n"
+        "        那筆PR = None\n"
+        "    def 旗標(名稱):\n"
+        "        for 序, 段 in enumerate(sys.argv):\n"
+        "            if 段 == 名稱 and 序 + 1 < len(sys.argv):\n"
+        "                return sys.argv[序 + 1]\n"
+        "            if 段.startswith(名稱 + '='):\n"
+        "                return 段.split('=', 1)[1]\n"
+        "        return None\n"
+        "    if sys.argv[2] == 'list':\n"
+        "        清單 = [*雜訊, *([那筆PR] if 那筆PR else [])]\n"
+        "        要哪條 = 旗標('--head')\n"
+        "        if 要哪條 is not None:\n"
+        "            清單 = [pr for pr in 清單 if pr['headRefName'] == 要哪條]\n"
+        f"        上限 = int(旗標('--limit') or {gh清單預設上限})\n"
+        "        json.dump(清單[:上限], sys.stdout, ensure_ascii=False)\n"
+        "    elif 那筆PR and sys.argv[3:4] == [str(那筆PR['number'])]:\n"
+        "        json.dump(那筆PR, sys.stdout, ensure_ascii=False)\n"
+        "    sys.exit(0)\n"
+    )
+    (執行檔目錄 / "gh").write_text(f"{共同開頭}{答不出PR}{查PR}", encoding="utf-8")
     for 名稱 in ("git", "gh"):
         路徑 = 執行檔目錄 / 名稱
         路徑.chmod(路徑.stat().st_mode | stat.S_IEXEC)
@@ -176,6 +270,55 @@ def _推的那幾次(紀錄: Path) -> list[list[str]]:
     return [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "git" and 參數[:1] == ["push"]]
 
 
+def _第一次出現(紀錄: Path, 程式: str, *開頭: str) -> int | None:
+    """回傳這道指令**第一次**出現在紀錄裡的序號；沒出現過回 None。
+
+    序號拿來比先後：「fetch 在 push 之前」這種順序關係，只有序號說得出來。
+    """
+    for 序, (名稱, 參數) in enumerate(_讀呼叫(紀錄)):
+        if 名稱 == 程式 and 參數[: len(開頭)] == list(開頭):
+            return 序
+    return None
+
+
+def _斷言fetch在push之前(紀錄: Path) -> None:
+    """`git fetch` 要在第一次 push 之前發過：先問清楚遠端，再決定推不推。"""
+    fetch在 = _第一次出現(紀錄, "git", "fetch")
+    push在 = _第一次出現(紀錄, "git", "push")
+    assert fetch在 is not None, (
+        f"整趟一次 `git fetch` 都沒發，遠端長什麼樣是用猜的：{_讀呼叫(紀錄)}"
+    )
+    assert push在 is not None, f"一次 push 都沒發：{_讀呼叫(紀錄)}"
+    assert fetch在 < push在, (
+        f"fetch 排在 push 後面，等於推出去之後才問遠端：fetch 第 {fetch在} 筆、push 第 {push在} 筆"
+    )
+
+
+def _origin上的subject(origin: Path, 分支: str) -> list[str]:
+    輸出 = _跑git(origin, "log", "--format=%s", f"refs/heads/{分支}").stdout
+    return [行.strip() for 行 in 輸出.splitlines() if 行.strip()]
+
+
+def _從另一個clone往那條分支推一顆(暫存根: Path, origin: Path, 主題: str) -> None:
+    """在 origin 的那條分支上推一顆本地不知道的 commit（＝`gh pr update-branch` 的效果）。
+
+    一定要在裝上記錄用 git 之前跑：這是測試自己造現場，不是 `收` 發的指令。
+    """
+    另一個 = 暫存根 / "另一個clone"
+    assert _跑git(暫存根, "clone", "-q", str(origin), str(另一個)).returncode == 0
+    for 指令 in (
+        ("config", "user.email", "測試@例子"),
+        ("config", "user.name", "測試"),
+        ("config", "commit.gpgsign", "false"),
+        ("checkout", "-q", "-b", 分支名),
+    ):
+        assert _跑git(另一個, *指令).returncode == 0
+    (另一個 / "遠端那顆的產出.txt").write_text("別人在遠端那條分支上加的\n", encoding="utf-8")
+    assert _跑git(另一個, "add", "-A").returncode == 0
+    assert _跑git(另一個, "commit", "-q", "-m", 主題).returncode == 0
+    assert _跑git(另一個, "push", "-q", "origin", f"HEAD:refs/heads/{分支名}").returncode == 0
+
+
 def _斷言有gh指令(紀錄: Path, *開頭: str) -> list[str]:
     """斷言假 `gh` 收到過以 `開頭` 起首的一道指令，並回傳那次的 argv。"""
     for 名稱, 參數 in _讀呼叫(紀錄):
@@ -183,6 +326,16 @@ def _斷言有gh指令(紀錄: Path, *開頭: str) -> list[str]:
             return 參數
     訊息 = f"找不到 gh {' '.join(開頭)}：{_讀呼叫(紀錄)}"
     raise AssertionError(訊息)
+
+
+def _旗標值(參數: list[str], 旗標: str) -> str | None:
+    """回傳 argv 裡這個旗標帶的值（`--x 值` 與 `--x=值` 兩種寫法都認）；沒帶回 None。"""
+    for 序, 段 in enumerate(參數):
+        if 段 == 旗標 and 序 + 1 < len(參數):
+            return 參數[序 + 1]
+        if 段.startswith(f"{旗標}="):
+            return 段.split("=", 1)[1]
+    return None
 
 
 def _origin上的分支(origin: Path) -> set[str]:
@@ -196,10 +349,29 @@ def _收尾參數(工作目錄: Path) -> list[str]:
 
 @pytest.fixture
 def 閘放行(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
-    """把提交閘設成放行：這一支釘的是閘之後的那一步，不是閘本身。"""
+    """把提交閘設成放行，並把**每一次**跑閘記進同一份指令紀錄裡。
+
+    這一支釘的是閘之後的那一步，不是閘本身——但「閘跑過幾次、第幾次跑在哪一道
+    git 指令之間」是要斷言的事實：併回動過樹之後不重跑閘就 push，等於把沒驗過的
+    那棵樹推出去。只答 `放行` 的閘樁記不得自己被叫過，這件事在紀錄上就完全看不見。
+    閘跟 git／gh 記在同一份紀錄裡，先後關係才比得出來。
+    """
 
     def 設定() -> None:
-        monkeypatch.setattr(收模組, "_收尾閘", lambda *_: 放行)
+        def 記一筆放行(*參數: object) -> int:
+            紀錄路徑 = os.environ.get("NOVA_收推分支紀錄")
+            if 紀錄路徑:
+                目標 = str(參數[-1]) if 參數 else ""
+                with Path(紀錄路徑).open("a", encoding="utf-8") as 檔:
+                    json.dump(
+                        {"程式": 閘的程式名, "argv": [目標], "cwd": str(Path.cwd())},
+                        檔,
+                        ensure_ascii=False,
+                    )
+                    檔.write("\n")
+            return 放行
+
+        monkeypatch.setattr(收模組, "_收尾閘", 記一筆放行)
 
     return 設定
 
@@ -556,6 +728,254 @@ def test_問不出分支時不准謊報也不准推(
     assert 問不出時git的抱怨 in 訊息, (
         f"git 自己說了原因，`收` 把它吞了——人手上沒有任何線索可以查：{訊息!r}"
     )
+
+
+def test_遠端分支比本地多一顆時收要先併回再推(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """origin 上那條分支跟本地分岔時，`收` 要先併回遠端再推：兩邊那兩顆都要留在 origin 上。
+
+    這是 `gh pr update-branch` 之後的常態現場：遠端那條分支比本地多一顆 merge
+    commit，本地又還有沒推上去的工作。收尾能不能走完，看的是它有沒有先問過遠端；
+    「推之前先 fetch，照 `origin/<分支>` 與 HEAD 的關係決定要不要併回」是這一格
+    唯一能同時保住兩邊工作的走法——推不上去就換人手工接完，那正是這條線要消滅的。
+
+    併回只准用 merge：rebase 會把遠端那顆的雜湊重寫掉，PR 上原本的那顆就成了孤兒，
+    而下一次 push 非得 force 不可。併回之後那棵樹已經不是閘綠過的那一棵了，所以
+    push 之前**一定要再跑一次提交閘**——閘對 A 樹綠，推出去的是 B 樹，中間那一格
+    沒人驗過。
+    """
+    專案, origin, 起點commit = _造專案與origin(tmp_path)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    遠端那顆 = "遠端先落地的那顆"
+    _從另一個clone往那條分支推一顆(tmp_path, origin, 遠端那顆)
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    assert 碼 == 放行, (
+        f"遠端那條分支比本地多一顆是 update-branch 之後的常態，不是失敗：收到 {碼}\n"
+        f"{輸出.out}\n{輸出.err}"
+    )
+    _斷言fetch在push之前(紀錄)
+    subject們 = _origin上的subject(origin, 分支名)
+    assert 遠端那顆 in subject們, (
+        f"origin 上那條分支的歷史裡沒有遠端先落地那一顆——它被蓋掉了：{subject們}"
+    )
+    assert "測試收尾" in subject們, (
+        f"這棵樹這一趟做的工作沒推上去，origin 還停在遠端那一顆：{subject們}"
+    )
+    呼叫 = _讀呼叫(紀錄)
+    重寫歷史的 = [
+        參數 for 名稱, 參數 in 呼叫 if 名稱 == "git" and 參數[:1] in (["rebase"], ["cherry-pick"])
+    ]
+    assert 重寫歷史的 == [], (
+        f"併回遠端只准 merge：{重寫歷史的} 會把遠端那顆的雜湊重寫掉，"
+        "PR 上原本那顆變孤兒，而且下一次 push 非 force 不可"
+    )
+    併回在 = _第一次出現(紀錄, "git", "merge")
+    assert 併回在 is not None, f"分岔了卻一次 merge 都沒發，這一趟是怎麼推上去的：{呼叫}"
+    assert any("origin" in 段 for 段 in 呼叫[併回在][1]), (
+        f"merge 併的不是 origin 上那條分支：{呼叫[併回在][1]}"
+    )
+    push在 = _第一次出現(紀錄, "git", "push")
+    assert push在 is not None
+    閘跑在 = [序 for 序, (名稱, _參數) in enumerate(呼叫) if 名稱 == 閘的程式名]
+    assert any(併回在 < 序 < push在 for 序 in 閘跑在), (
+        f"併回動了樹卻沒重跑提交閘就推出去：閘跑在第 {閘跑在} 筆、"
+        f"merge 第 {併回在} 筆、push 第 {push在} 筆。"
+        "閘是對併回前那棵樹綠的，推出去的是併回後那棵"
+    )
+
+
+def test_PR已經存在時收不呼叫create(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """這條分支上已經有一個開著的 PR 時，`收` 走更新路徑：不建 PR，照樣等 CI、照樣合併。
+
+    「PR 在不在」要用查的（`收尾現場.查收尾現場` 依分支名唯一比對），不是拿
+    `gh pr create` 去撞——撞到的是一句 `a pull request … already exists` 加非零，
+    而那時 push 已經做完，收尾就停在一個「遠端動過、PR 沒合併」的半截現場。
+    查到恰好一筆就是「有」：跳過建立、直接往等 CI 與合併走。
+
+    「有」的門檻不是「`pr list` 比到了一行」，是**那一筆的身分欄位齊了**：清單只
+    比得到分支名，編號、網址、head SHA 要 `gh pr view` 那一道才拿得到。所以這裡
+    連 `pr list → pr view` 這條查詢路徑一起釘住——它就是 `收尾現場.查收尾現場`
+    對外的形狀。少了 view 那一道，`收.py` 等於自己重寫了一份只看分支名的查詢，
+    欄位不齊的那筆就會被當成「有 PR」直接往合併走。
+
+    查詢還得**指名這條分支**（`--head <分支>`）：真的 `gh pr list` 不帶 `--limit`
+    只吐前 30 筆，而這個 repo 上隨時有幾十個開著的 PR。一份不篩分支的清單比不到
+    排在後面的目標，於是「有」被讀成「沒有」，`gh pr create` 照發。
+
+    「PR 已經存在」不等於「這一趟沒事做」：PR 在，這條分支早就在遠端上，而這棵樹
+    這一趟的工作還在本地。跳過建立的是 `gh pr create` 那一道，不是 commit／push——
+    先查 PR 再整段跳過推送，PR 上看到的就是一份沒有這一趟工作的 diff。
+    """
+    專案, origin, 起點commit = _造專案與origin(tmp_path)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    # PR 已經存在，代表這條分支早就推上去過：origin 上先有它，停在起點那一顆。
+    assert _跑git(樹, "push", "-q", "origin", f"HEAD:refs/heads/{分支名}").returncode == 0
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    monkeypatch.setenv("NOVA_收推已有PR", "1")
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    建過PR = [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "gh" and 參數[:2] == ["pr", "create"]]
+    assert 建過PR == [], (
+        f"這條分支上的 PR 已經存在，`收` 還是去建了一個：{建過PR}。"
+        "撞出來的 already exists 會把收尾停在 push 之後、合併之前"
+    )
+    查清單 = _斷言有gh指令(紀錄, "pr", "list")
+    assert "--json" in 查清單, f"`gh pr list` 沒指名要哪些欄位，回來的東西沒法比對：{查清單}"
+    assert _旗標值(查清單, "--head") == 分支名, (
+        f"`gh pr list` 沒指名要哪條分支：{查清單}。不帶 --limit 的清單只有前 30 筆，"
+        f"目標排在別人後面就比不到，於是「有」被讀成「沒有」"
+    )
+    查那筆 = _斷言有gh指令(紀錄, "pr", "view")
+    assert "--json" in 查那筆 and str(已存在的PR["number"]) in 查那筆, (
+        f"沒有拿比到的那個編號去 `gh pr view` 把身分欄位取齊：{查那筆}。"
+        "只憑清單上的分支名就宣稱「有 PR」，欄位不齊的那筆也會被讀成有"
+    )
+    查那筆在 = _第一次出現(紀錄, "gh", "pr", "view")
+    合併在 = _第一次出現(紀錄, "gh", "pr", "merge")
+    assert 查那筆在 is not None and 合併在 is not None and 查那筆在 < 合併在, (
+        f"查在合併後面等於先合了再問：view 第 {查那筆在} 筆、merge 第 {合併在} 筆"
+    )
+    等CI = _斷言有gh指令(紀錄, "pr", "checks")
+    assert 等CI[:5] == ["pr", "checks", "--required", "--watch"], (
+        f"沒有 PR 要建不代表可以少等 CI：{等CI}"
+    )
+    合併 = _斷言有gh指令(紀錄, "pr", "merge")
+    assert "--squash" in 合併, f"合併政策沒變：一律 squash：{合併}"
+    _斷言fetch在push之前(紀錄)
+    assert "測試收尾" in _origin上的subject(origin, 分支名), (
+        f"PR 在不在只決定建不建 PR，這一趟的 commit 照樣要推上去："
+        f"origin 上那條分支還停在舊 SHA：{_origin上的subject(origin, 分支名)}"
+    )
+    產出 = _跑git(origin, "show", f"refs/heads/{分支名}:分支的產出.txt")
+    assert 產出.returncode == 0 and "這一條線做完的事" in 產出.stdout, (
+        "origin 上那條分支的樹裡沒有這一趟做的東西——查到 PR 之後就把 commit／push "
+        f"整段跳過了，PR 上是一份沒有這一趟工作的 diff：{產出.returncode} {產出.stderr}"
+    )
+    assert 碼 == 放行, f"PR 早就在了、CI 過了、也合併了，這一趟該收 0：收到 {碼}\n{輸出.err}"
+
+
+@pytest.mark.parametrize("現場", sorted(答不出PR的原樣輸出))
+def test_問不出這條分支有沒有PR時收停在未知不建也不合併(
+    現場: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """「PR 在不在」問不出唯一答案時，`收` 停在未知碼 3：不建 PR、不合併、講明不要重跑。
+
+    「有幾筆」有三種答案，不是兩種：零筆是「沒有」、身分欄位齊的恰好一筆是「有」，
+    其餘全是「不知道」。空輸出、讀不成的 JSON、清單裡混著讀不成 PR 的項目、同一條
+    分支比到兩筆——這幾種都證明不了「沒有 PR」，把它們讀成零筆就是 fail-open：
+    `收` 會去 `gh pr create`，撞出 already exists 而停在「遠端動過、PR 沒合併」的
+    半截現場，或者更糟，在別人已經開好的 PR 旁邊再開一個。
+
+    未知不是失敗：碼是 3 而不是 1，因為外圈不准拿它去重跑——遠端這時可能已經被
+    push 動過了。現場原封留給人，訊息要自己說得出「不要重跑」。
+    """
+    專案, _origin, 起點commit = _造專案與origin(tmp_path)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    monkeypatch.setenv("NOVA_收推PR清單原樣", 答不出PR的原樣輸出[現場])
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    建過PR = [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "gh" and 參數[:2] == ["pr", "create"]]
+    assert 建過PR == [], (
+        f"「{現場}」證明不了這條分支上沒有 PR，`收` 還是拿它當零筆去建了一個：{建過PR}"
+    )
+    合併過 = [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "gh" and 參數[:2] == ["pr", "merge"]]
+    assert 合併過 == [], f"連 PR 在不在都問不出來，卻走到了合併：{合併過}"
+    assert 碼 == 未知, (
+        f"「{現場}」是「不知道」，不是「沒有 PR」也不是確定失敗，該收 3：收到 {碼}\n"
+        f"{輸出.out}\n{輸出.err}"
+    )
+    assert "重跑" in 輸出.err, f"收在 3 卻沒告訴人不要重跑，外圈只會再跑一次同一趟：{輸出.err!r}"
+
+
+def test_乾淨樹且遠端落後時收照樣把本地HEAD推上去(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    閘放行: Callable[[], None],
+) -> None:
+    """線自己已經 commit 過、樹是乾淨的：`收` 不發 commit，但要把本地 HEAD 推上去。
+
+    乾淨樹不是「沒事做」——它只代表沒有新東西要提交，不代表遠端跟本地同一顆。
+    這一格的收場只有一個能算數：收完之後 origin 上那條分支的 SHA 就是本地 HEAD。
+    把乾淨樹當成失敗（commit 回非零就停）或當成完成（不 push），遠端都會停在舊
+    SHA，而 PR 上看到的是一份沒有這一趟工作的 diff。
+    """
+    專案, origin, 起點commit = _造專案與origin(tmp_path)
+    樹 = 開一個工作樹(
+        專案,
+        落點=tmp_path / f"nova-wt-{分支名.rsplit('/', maxsplit=1)[-1]}",
+        起點commit=起點commit,
+        分支=分支名,
+    )
+    # 先把這棵樹推一次，origin 上那條分支才會**存在但停在父 commit**；少了這一步，
+    # 收走的是「遠端沒這條分支」那一列，SHA 比對就測不到東西。
+    assert _跑git(樹, "push", "-q", "origin", f"HEAD:refs/heads/{分支名}").returncode == 0
+    (樹 / "分支的產出.txt").write_text("這一條線做完的事\n", encoding="utf-8")
+    assert _跑git(樹, "add", "-A").returncode == 0
+    assert _跑git(樹, "commit", "-q", "-m", "線自己先提交的那顆").returncode == 0
+    本地HEAD = _跑git(樹, "rev-parse", "HEAD").stdout.strip()
+    assert _跑git(樹, "status", "--porcelain").stdout.strip() == "", (
+        "這一支要的現場是**乾淨樹**，樹裡還有沒提交的東西就走成別條路了"
+    )
+    紀錄 = _造假gh與記錄用git(tmp_path / "測具", monkeypatch)
+    閘放行()
+
+    碼 = 主程式(_收尾參數(樹))
+
+    輸出 = capsys.readouterr()
+    提交過的 = [參數 for 名稱, 參數 in _讀呼叫(紀錄) if 名稱 == "git" and 參數[:1] == ["commit"]]
+    assert 提交過的 == [], (
+        f"樹是乾淨的，`收` 還是發了 commit——那一道只會回非零，收尾就停在這裡：{提交過的}"
+    )
+    _斷言fetch在push之前(紀錄)
+    assert _跑git(origin, "rev-parse", f"refs/heads/{分支名}").stdout.strip() == 本地HEAD, (
+        "收完了，origin 上那條分支還停在舊 SHA：這一趟的 commit 沒推上去，"
+        "PR 上看到的是一份沒有這些工作的 diff"
+    )
+    assert 碼 == 放行, f"沒東西可提交不是失敗，這一趟該收 0：收到 {碼}\n{輸出.out}\n{輸出.err}"
 
 
 def test_相同分支名開第二棵樹要撞名且第一棵不受影響(tmp_path: Path) -> None:

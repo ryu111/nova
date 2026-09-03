@@ -27,8 +27,8 @@ from tests.負控.登記 import 替換一次, 變異
         識別="push退回裸HEAD",
         目標檔=Path("src/nova/載體/命令/收.py"),
         操作=替換一次(
-            '        ("git", "push", "--set-upstream", "origin", f"HEAD:refs/heads/{分支}"),',
-            '        ("git", "push", "--set-upstream", "origin", "HEAD"),',
+            '"git", "push", "--set-upstream", "origin", f"HEAD:refs/heads/{分支}"',
+            '"git", "push", "--set-upstream", "origin", "HEAD"',
         ),
         該紅=("tests/整合/test_收推派工開的分支.py::test_收把派工開的分支推成完整refspec",),
         最多秒=60.0,
@@ -93,8 +93,8 @@ from tests.負控.登記 import 替換一次, 變異
         識別="PR標題退回整段訊息",
         目標檔=Path("src/nova/載體/命令/收.py"),
         操作=替換一次(
-            '        ("gh", "pr", "create", "--title", 收尾訊息.標題, "--body", 收尾訊息.本文),',
-            '        ("gh", "pr", "create", "--title", 收尾訊息.全文, "--body", 收尾訊息.全文),',
+            '"gh", "pr", "create", "--title", 收尾訊息.標題, "--body", 收尾訊息.本文',
+            '"gh", "pr", "create", "--title", 收尾訊息.全文, "--body", 收尾訊息.全文',
         ),
         該紅=(
             "tests/整合/test_收建PR標題只取第一行.py::test_多行訊息建PR時標題是第一行本文是其餘",
@@ -109,5 +109,34 @@ from tests.負控.登記 import 替換一次, 變異
         操作=替換一次("    if 是派工樹:\n", "    if True:\n"),
         該紅=("tests/整合/test_收尾紅線.py::Test收尾紅線::test_主工作區那條路收完不准去收樹",),
         最多秒=10.0,
+    ),
+    #: 「PR 在不在」退回「不查，一律建」：`gh pr create` 撞到 `already exists` 的那一刻
+    #: push 已經做完，收尾停在「遠端動過、PR 沒合併」的半截現場（08:56 那一格）。
+    #: 這把刀釘的是**有沒有去查**，不是查完怎麼判——怎麼判由讀不成清單那一格另外守。
+    變異(
+        識別="PR在不在退回不查一律建",
+        目標檔=Path("src/nova/載體/命令/收.py"),
+        操作=替換一次(
+            "    有PR, 原因 = _這條分支有沒有PR(根目錄, 分支)",
+            '    有PR, 原因 = False, ""',
+        ),
+        該紅=("tests/整合/test_收推派工開的分支.py::test_PR已經存在時收不呼叫create",),
+        最多秒=60.0,
+    ),
+    #: 查完怎麼判的那一把：把「不知道」摺進「沒有 PR」。查是查了，答案讀不出來時
+    #: 卻當成零筆——`gh pr create` 照發，於是在別人已經開好的 PR 旁邊再開一個，
+    #: 或在遠端已經被 push 動過的現場上撞一次 already exists。三態要真的是三態。
+    變異(
+        識別="PR查不出來摺成沒有PR",
+        目標檔=Path("src/nova/載體/命令/收.py"),
+        操作=替換一次("    if 有PR is None:\n", "    if 有PR is None and False:\n"),
+        該紅=(
+            (
+                "tests/整合/test_收推派工開的分支.py"
+                "::test_問不出這條分支有沒有PR時收停在未知不建也不合併"
+                "[\\u7a7a\\u8f38\\u51fa]"
+            ),
+        ),
+        最多秒=60.0,
     ),
 )
