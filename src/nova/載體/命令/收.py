@@ -241,6 +241,16 @@ def _切收尾訊息(全文: str) -> _收尾訊息:
     return _收尾訊息(全文=全文, 標題=標題, 本文=本文 or 標題)
 
 
+def _停在未知(原因: str, 後果: str) -> int:
+    """答不出來就停在未知碼 3 的共用出口：講清楚「為什麼答不出來」與「停在哪一步」。
+
+    收尾前半段三道查詢（樹乾不乾淨、遠端與 HEAD 的關係、PR 在不在）共用這條
+    fail-closed 出口：問不出來一律不猜，現場原封留著，訊息自己說得出不准重跑。
+    """
+    sys.stderr.write(f"{原因}\n{後果}\n")
+    return 未知
+
+
 def _樹是不是乾淨的(根目錄: Path) -> tuple[bool | None, str]:
     """問 `git status --porcelain` 這棵樹乾不乾淨；問不出來回 (None, 原因)，不准當成乾淨。"""
     結果 = 收尾現場.跑收尾指令(根目錄, "git", "status", "--porcelain")
@@ -254,8 +264,7 @@ def _有東西才提交(根目錄: Path, *, 收尾訊息: _收尾訊息) -> int:
     """樹乾淨就不發 commit（乾淨不是紅，是「沒東西可提交」）；問不出乾不乾淨回 3。"""
     乾淨, 原因 = _樹是不是乾淨的(根目錄)
     if 乾淨 is None:
-        sys.stderr.write(f"{原因}\n沒有 commit、沒有 push；不要重跑。\n")
-        return 未知
+        return _停在未知(原因, "沒有 commit、沒有 push；不要重跑。")
     if 乾淨:
         return 放行
     if (碼 := _跑並印收尾指令(根目錄, "git", "add", "-A")) != 放行:
@@ -263,9 +272,20 @@ def _有東西才提交(根目錄: Path, *, 收尾訊息: _收尾訊息) -> int:
     return _跑並印收尾指令(根目錄, "git", "commit", "-m", 收尾訊息.全文)
 
 
-def _遠端分支ref(分支: str) -> str:
+def _遠端追蹤ref(分支: str) -> str:
     """fetch 落地之後，origin 上那條分支在本地叫什麼 ref。"""
     return f"refs/remotes/origin/{分支}"
+
+
+def _問一道git查詢(根目錄: Path, *指令: str) -> tuple[str | None, str]:
+    """跑一道唯讀的 git 查詢，回 (輸出去頭尾空白, "")；查詢自己非零就回 (None, git 的抱怨)。
+
+    只分辨「問到了」與「問不出來」：輸出是空字串對誰是什麼意思，由呼叫端自己講。
+    """
+    結果 = 收尾現場.跑收尾指令(根目錄, *指令)
+    if 結果.退出碼 != 放行:
+        return None, 結果.stderr.strip()
+    return 結果.stdout.strip(), ""
 
 
 def _fetch失敗之後再問一次(根目錄: Path, 分支: str, fetch抱怨: str) -> tuple[str | None, str]:
@@ -274,29 +294,29 @@ def _fetch失敗之後再問一次(根目錄: Path, 分支: str, fetch抱怨: st
     回傳沿用 `_問origin上那條分支` 的三態：空字串是「遠端真的沒有這條分支」、
     None 是「問不出來」（原因寫在第二格）；這一格答不出 SHA。
     """
-    列出 = 收尾現場.跑收尾指令(根目錄, "git", "ls-remote", "origin", f"refs/heads/{分支}")
-    if 列出.退出碼 != 放行:
-        return None, f"fetch 失敗，也問不出 origin 上有沒有 {分支}：{列出.stderr.strip()}"
-    if 列出.stdout.strip():
+    列出, 抱怨 = _問一道git查詢(根目錄, "git", "ls-remote", "origin", f"refs/heads/{分支}")
+    if 列出 is None:
+        return None, f"fetch 失敗，也問不出 origin 上有沒有 {分支}：{抱怨}"
+    if 列出:
         return None, f"origin 上有 {分支}，fetch 卻失敗：{fetch抱怨}"
     return "", ""
 
 
 def _問origin上那條分支(根目錄: Path, 分支: str) -> tuple[str | None, str]:
-    """fetch 之後回 origin 上那條分支的 SHA。
+    """先 `git fetch` 把 origin 上那條分支抓下來，再回它的 SHA。
 
     三態：SHA 是「遠端有這條分支」、空字串是「遠端真的沒有這條分支」、None 是
     「問不出來」——問不出來的那一格不准猜成新分支，猜錯就是拿 push 去撞遠端。
     """
     抓 = 收尾現場.跑收尾指令(
-        根目錄, "git", "fetch", "origin", f"+refs/heads/{分支}:{_遠端分支ref(分支)}"
+        根目錄, "git", "fetch", "origin", f"+refs/heads/{分支}:{_遠端追蹤ref(分支)}"
     )
     if 抓.退出碼 != 放行:
         return _fetch失敗之後再問一次(根目錄, 分支, 抓.stderr.strip())
-    指到 = 收尾現場.跑收尾指令(根目錄, "git", "rev-parse", _遠端分支ref(分支))
-    if 指到.退出碼 != 放行:
-        return None, f"fetch 成功卻讀不到 origin/{分支}：{指到.stderr.strip()}"
-    return 指到.stdout.strip(), ""
+    指到, 抱怨 = _問一道git查詢(根目錄, "git", "rev-parse", _遠端追蹤ref(分支))
+    if 指到 is None:
+        return None, f"fetch 成功卻讀不到 origin/{分支}：{抱怨}"
+    return 指到, ""
 
 
 class _遠端關係(enum.Enum):
@@ -342,10 +362,10 @@ def _問遠端關係(根目錄: Path, 分支: str) -> tuple[_遠端關係 | None
         return None, 原因
     if not 遠端sha:
         return _遠端關係.沒有, ""
-    本地 = 收尾現場.跑收尾指令(根目錄, "git", "rev-parse", "HEAD")
-    if 本地.退出碼 != 放行:
-        return None, f"問不出本地 HEAD 是哪一顆：{本地.stderr.strip()}"
-    關係 = _比祖先關係(根目錄, 本地.stdout.strip(), 遠端sha)
+    本地sha, 抱怨 = _問一道git查詢(根目錄, "git", "rev-parse", "HEAD")
+    if 本地sha is None:
+        return None, f"問不出本地 HEAD 是哪一顆：{抱怨}"
+    關係 = _比祖先關係(根目錄, 本地sha, 遠端sha)
     if 關係 is None:
         return None, f"判不出 origin/{分支} 與 HEAD 的關係"
     return 關係, ""
@@ -355,8 +375,13 @@ def _併回遠端那條分支(參數: argparse.Namespace, 根目錄: Path, *, �
     """分岔時併回遠端（merge，不 rebase——rebase 歸 DIRTY/BEHIND 修復交易那張票）。
 
     併回動過樹就重跑提交閘：閘是對併回前那棵樹綠的，推出去的是併回後那棵。
+
+    fast-forward 政策自己講明（`--no-ff`）：使用者的 `merge.ff=only` 等同替每一道
+    merge 補上 `--ff-only`，分岔的兩顆一碰就被拒，收尾會停在併回、push 一步都不發。
+    收尾走不走得完不准由誰的 `~/.gitconfig` 決定。
     """
-    if (碼 := _跑並印收尾指令(根目錄, "git", "merge", "--no-edit", _遠端分支ref(分支))) != 放行:
+    併回 = ("git", "merge", "--no-ff", "--no-edit", _遠端追蹤ref(分支))
+    if (碼 := _跑並印收尾指令(根目錄, *併回)) != 放行:
         sys.stderr.write(
             f"併回 origin/{分支} 撞了衝突，收尾停在這裡：沒有 push、沒有建 PR。\n"
             "現場原封留著給人解：不要 merge --abort 之後重試，也不要改推 rebase。\n"
@@ -373,15 +398,14 @@ def _併回遠端那條分支(參數: argparse.Namespace, 根目錄: Path, *, �
 
 def _快轉到遠端(根目錄: Path, *, 分支: str) -> int:
     """本地落後、自己沒有新東西：把遠端快轉進來就好，推上去也是空推。"""
-    return _跑並印收尾指令(根目錄, "git", "merge", "--ff-only", _遠端分支ref(分支))
+    return _跑並印收尾指令(根目錄, "git", "merge", "--ff-only", _遠端追蹤ref(分支))
 
 
 def _推之前先對齊遠端(參數: argparse.Namespace, 根目錄: Path, *, 分支: str) -> tuple[int, bool]:
     """fetch 之後照 `origin/<分支>` 與 HEAD 的關係決定推不推；回 (碼, 要不要 push)。"""
     關係, 原因 = _問遠端關係(根目錄, 分支)
     if 關係 is None:
-        sys.stderr.write(f"{原因}\n沒有 push、沒有建 PR，現場留著；不要重跑。\n")
-        return 未知, False
+        return _停在未知(原因, "沒有 push、沒有建 PR，現場留著；不要重跑。"), False
     match 關係:
         case _遠端關係.沒有 | _遠端關係.領先:
             # 遠端真的沒這條分支，或本地領先：都是乾淨的 fast-forward。
@@ -454,21 +478,27 @@ def _讀出PR清單(根目錄: Path, 分支: str) -> tuple[list[dict[str, object
 
 
 def _這條分支有沒有PR(根目錄: Path, 分支: str) -> tuple[bool | None, str]:
-    """問 gh 這條分支上有沒有開著的 PR：空清單是「沒有」、身分欄位齊的一筆才是「有」。
+    """問 gh 這條分支上有沒有開著的 PR：**原樣的空清單**是「沒有」、身分欄位齊的一筆才是「有」。
 
     「有」的門檻不是清單上比到一行——清單只比得到分支名，編號、網址、head SHA 要
     `收尾現場.查收尾現場`（pr list → pr view）那一道才取得齊。清單讀不出來（見
     `_讀出PR清單`）、比到兩筆以上、身分欄位取不齊，一律回 None＝「不知道」——空輸出
     不准當成「沒有 PR」，那是拿 fail-open 去換一次 `gh pr create`，撞出來的是半截現場。
+
+    「零筆匹配」也不是「沒有」：清單合法非空、卻一筆都不掛在這條分支上，證明的是
+    `--head` 沒生效——答的不是我們問的問題，一樣回 None。
     """
     清單, 原因 = _讀出PR清單(根目錄, 分支)
     if 清單 is None:
         return None, 原因
-    匹配 = [pr for pr in 清單 if pr.get("headRefName") == 分支]
-    if len(匹配) > 1:
-        return None, f"比到 {len(匹配)} 個掛在 {分支} 上的 PR，不猜"
-    if not 匹配:
+    if not 清單:
         return False, ""
+    匹配 = [pr for pr in 清單 if pr.get("headRefName") == 分支]
+    if len(匹配) != 1:
+        return None, (
+            f"gh pr list 回了 {len(清單)} 筆，其中比到 {len(匹配)} 個掛在 {分支} 上的 PR，"
+            f"不猜：{清單!r}"
+        )
     編號 = 匹配[0].get("number")
     if not isinstance(編號, int):
         # 清單只比得到分支名。沒有編號就指不出目標，這是「不知道」，不是「有 PR」。
@@ -484,8 +514,7 @@ def _沒有PR才建(根目錄: Path, *, 收尾訊息: _收尾訊息, 分支: str
     """PR 在不在用查的，不用 `gh pr create` 撞；查不出來回 3，不建也不合併。"""
     有PR, 原因 = _這條分支有沒有PR(根目錄, 分支)
     if 有PR is None:
-        sys.stderr.write(f"{原因}\n不知道這條分支上有沒有 PR，不建也不合併；不要重跑。\n")
-        return 未知
+        return _停在未知(原因, "不知道這條分支上有沒有 PR，不建也不合併；不要重跑。")
     if 有PR:
         sys.stdout.write(f"{分支} 上已經有開著的 PR，跳過建立，直接往等 CI 走。\n")
         return 放行
