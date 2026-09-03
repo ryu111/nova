@@ -69,6 +69,11 @@ elif 名稱 == 'git' and 參數[:1] == ['worktree']:
     print("branch refs/heads/" + 分支)
 elif 名稱 == 'git' and 參數[:1] == ['rev-parse']:
     print("1111111111111111111111111111111111111111")
+elif 名稱 == 'gh' and 參數[:2] == ['pr', 'list']:
+    # 「這條分支上有沒有 PR」是用查的：印**空清單**＝沒有 PR，`收` 才走得到建 PR
+    # 那一步。印空 stdout 的話語意是「不知道」，收尾會停在 3，這一支要測的合併後
+    # 查證就一次都跑不到。
+    print("[]")
 elif 名稱 == 'gh' and 參數[:2] == ['pr', 'view']:
     print(json.dumps({{
         'state': 'MERGED',
