@@ -22,7 +22,7 @@ from typing import TypedDict, Unpack
 from nova.契約.檢查結果 import 檢查結果
 from nova.契約.觸發 import 喚醒來源 as 喚醒來源契約
 from nova.載體.git查詢 import 跑git
-from nova.載體.收件 import 丟一件, 待處理, 收件目錄, 時鐘, 處理中目錄
+from nova.載體.收件 import 丟一件, 收件匣與處理中的票, 收件目錄, 時鐘
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,9 +142,7 @@ def _符合落票條件(現場: 閘紅現場) -> bool:
 
 def _已有同一張閘紅票(目錄: Path, 機器鍵: str) -> bool:
     """收件匣或處理中的同一條閘紅票存在，就不重複落成。"""
-    票們 = _收集現有票(目錄)
-
-    for 票 in 票們:
+    for 票 in 收件匣與處理中的票(目錄):
         try:
             內容 = 票.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -152,21 +150,6 @@ def _已有同一張閘紅票(目錄: Path, 機器鍵: str) -> bool:
         if 內容.startswith(機器鍵):
             return True
     return False
-
-
-def _收集現有票(目錄: Path) -> list[Path]:
-    """收集收件匣與處理中的票；目錄讀不到就略過。"""
-    try:
-        票們 = 待處理(目錄)
-    except OSError:
-        票們 = []
-    try:
-        處理中 = 處理中目錄(目錄)
-        if 處理中.is_dir():
-            票們.extend(路 for 路 in 處理中.iterdir() if 路.is_file())
-    except OSError:
-        pass
-    return 票們
 
 
 def _git輸出(專案: Path, *參數: str) -> str | None:
