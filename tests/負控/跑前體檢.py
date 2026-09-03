@@ -25,7 +25,7 @@ from typing import NamedTuple
 import coverage
 
 from .執行器 import _環境, _錯, 要求覆蓋的行, 負控錯誤
-from .登記 import 變異
+from .登記 import 變異, 錨點失效訊息
 
 #: coverage 跑起來比裸 pytest 慢，登記上的 `最多秒` 是給裸 pytest 的。
 _覆蓋額外秒 = 30.0
@@ -105,10 +105,9 @@ def _驗錨點(一筆: 變異, 目標: Path) -> tuple[str | None, frozenset[int]
     """驗一筆的錨點，順便算出它要求的覆蓋行。訊息 `None` ＝ 這一關過了。"""
     if not 目標.is_file():
         return f"RUN_ERROR：{一筆.識別}：目標不存在：{一筆.目標檔}", frozenset()
-    錨點 = 一筆.操作.錨點
-    次數 = 目標.read_text(encoding="utf-8").count(錨點)
+    次數 = 目標.read_text(encoding="utf-8").count(一筆.操作.錨點)
     if 次數 != 1:
-        return f"RUN_ERROR：{一筆.識別}：錨點應恰好一次，實際 {次數}：{錨點!r}", frozenset()
+        return 錨點失效訊息(一筆, 次數), frozenset()
     # 目標不是 Python 就沒有「執行行」可談，跟 runner 同一個理由跳過覆蓋這一關。
     if 目標.suffix != ".py":
         return None, frozenset()
