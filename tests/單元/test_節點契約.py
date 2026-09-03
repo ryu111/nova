@@ -141,9 +141,10 @@ def test_護欄原因只有這幾種() -> None:
         護欄原因.重構改壞行為: "refactor-broke-behavior",
         護欄原因.沒有紅可看: "no-red-to-see",
         護欄原因.驗收紅: "acceptance-failed",
+        護欄原因.審查不收斂: "review-not-converging",
     }
 
-    assert len(護欄原因) == 10
+    assert len(護欄原因) == 11
     assert {原因: 原因.value for 原因 in 護欄原因} == 預期
     assert all(原因.value.isascii() for 原因 in 護欄原因)
 
