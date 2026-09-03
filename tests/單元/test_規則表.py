@@ -96,6 +96,24 @@ def test_登記的負控runner只接在ci閘() -> None:
     assert 負控.閘點 == frozenset({"ci"}), f"負控 runner 閘點錯了：{負控.閘點}"
 
 
+def test_本線負控只掛在本線閘() -> None:
+    """本線那幾把刀掛的是 `本線` 這個閘點，只有它，而且 CI 的全量那條不准跟著變窄。
+
+    掛錯閘點的症狀全是綠：掛去 `ci` 的話判準第三步（`nova 閘 本線`）跑到零條規則、
+    當場放行，線內還是等到 CI 才紅；掛去 `提交` 的話每次 commit 都付整台機器的錢。
+    """
+    表 = _規則表()
+    本線 = next((條 for 條 in 表 if 條.代碼 == "registered-mutation-diff"), None)
+    全量 = next((條 for 條 in 表 if 條.代碼 == "registered-mutation"), None)
+
+    assert 本線 is not None, "規則表上沒有 registered-mutation-diff，判準第三步會跑到零條規則"
+    assert 本線.閘點 == frozenset({"本線"}), f"本線負控掛錯閘點：{本線.閘點}"
+    assert 本線.負責層 == "測試", f"刀紅了是測試員的事，負責層不對：{本線.負責層}"
+    assert 全量 is not None and 全量.閘點 == frozenset({"ci"}), (
+        "CI 的全量 220 把不准跟著變窄：本票只是把本線那幾把往前挪一次"
+    )
+
+
 def test_serial佔比規則已登記且只掛在ci閘() -> None:
     """serial 佔比規則只掛在 CI 閘，不掛提交閘避免 collect 拖垮預算。"""
     表 = _規則表()

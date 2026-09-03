@@ -10,12 +10,13 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from nova.載體 import 機器額度
 from nova.載體.serial佔比 import 檢查serial佔比
+from nova.載體.本線負控 import 判定選到的刀
 from nova.載體.架構閘 import 檢查架構落點
 from nova.載體.機密 import 檢查機密
 from nova.載體.測試數 import 檢查測試數
@@ -49,6 +50,63 @@ from nova.載體.閘 import 型別, 抽乾整池, 測試, 規則, 靜態
 #: 實測拿掉 `pytest-parallel` 那次重複，61.97 → 17.62 秒。
 #: 標成 `serial` 不能代替——那只是把重複的帳從平行換到序列，重複本身還在。
 負控檔排除參數 = tuple(f"--ignore={檔}" for 檔 in 負控檔們)
+
+#: 每把登記負控刀住的目錄。`registered-mutation-diff` 只跑這條 diff 動過的那幾個模組。
+登記們目錄 = "tests/負控/登記們"
+
+
+class 查不出動過哪些登記檔(Exception):
+    """算清單用的 git 指令自己失敗了，所以「動過哪幾個登記檔」這個問題沒有答案。
+
+    **不准退化成空清單**：`origin/main` 還沒 fetch、淺 clone、遠端不叫 origin 時
+    stdout 一樣是空的，跟「本線真的沒動過登記檔」長得一模一樣。當成後者的話閘會綠、
+    而一把刀都沒跑——比原本那個 CI 紅更難看出來。
+    """
+
+
+def _是登記模組(檔: str) -> bool:
+    """`登記們/` 底下真的登記了刀的模組。`__init__.py` 只是 package 標記，不登記任何刀。
+
+    比的是**精確檔名**，跟收集那側（`tests/負控/登記.py` 的 `_不是登記模組`）同一套認法：
+    用子字串排 `__init__` 的話，`主題__init__檢查.py` 這種合法檔名 CI 收得到、本線卻漏掉。
+    """
+    return 檔.endswith(".py") and PurePosixPath(檔).name != "__init__.py"
+
+
+def _git吐出的路徑們(根目錄: Path, *參數: str) -> tuple[str, ...]:
+    """跑一條唸路徑的 git 指令，把非空的每一行當一個路徑收回來。指令失敗就丟例外。"""
+    # `-c core.quotepath=false`：預設 git 會把非 ASCII 路徑印成 `"tests/\350..."`，
+    # 而這個 repo 的路徑全是中文——不關掉的話每一行都對不上任何檔名，清單靜靜變空。
+    結果 = subprocess.run(  # noqa: S603 —— 指令由本表寫死，不吃外部輸入
+        ("git", "-c", "core.quotepath=false", *參數),  # noqa: S607 —— git 就從 PATH 找
+        cwd=根目錄,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if 結果.returncode != 0:
+        壞消息 = f"`git {' '.join(參數)}` 退出碼 {結果.returncode}：{結果.stderr.strip()}"
+        raise 查不出動過哪些登記檔(壞消息)
+    return tuple(行.strip() for 行 in 結果.stdout.splitlines() if 行.strip())
+
+
+def 動過的登記檔們(根目錄: Path) -> tuple[str, ...]:
+    """這條 diff 動過的登記模組（相對 repo 根的路徑），排序去重。
+
+    **兩個來源缺一不可。** `git diff` 只看得到改過而且已提交的檔（`--diff-filter=d`
+    排掉刪掉的——刀刪了就不該再跑）；**新增而還沒 `git add` 的檔不在 diff 裡**，
+    而「新增一把刀」正是最常見的情形，漏掉它就會選到 0 把、一路綠到 CI。
+    本地 `origin/main` 落後只會讓集合變大（多跑幾把），是安全方向。
+
+    任何一條 git 失敗就丟 `查不出動過哪些登記檔`——沒有答案跟「答案是空的」不是同一件事。
+    """
+    改過又提交的 = _git吐出的路徑們(
+        根目錄, "diff", "--name-only", "--diff-filter=d", "origin/main", "--", 登記們目錄
+    )
+    新增還沒add的 = _git吐出的路徑們(
+        根目錄, "ls-files", "--others", "--exclude-standard", "--", 登記們目錄
+    )
+    return tuple(sorted({檔 for 檔 in (*改過又提交的, *新增還沒add的) if _是登記模組(檔)}))
 
 
 def 決定基準(環境: Mapping[str, str]) -> str:
@@ -152,6 +210,39 @@ def _外部指令(
         )
         原始輸出 = (結果.stdout + 結果.stderr).strip()
         return 結果.returncode == 0, _截斷證據(原始輸出, 上限=證據上限)
+
+    return 檢查
+
+
+def _指名這幾個登記檔(檔們: Sequence[str]) -> tuple[str, ...]:
+    """攤成 `--登記檔 甲 --登記檔 乙`：那個選項是可重複的，一個檔給一次。"""
+    return tuple(項 for 檔 in 檔們 for 項 in ("--登記檔", 檔))
+
+
+def _本線登記負控(根目錄: Path) -> Callable[[], tuple[bool, str]]:
+    """只跑這條 diff 動過的登記檔裡的那幾把刀。
+
+    篩選走 `--登記檔` 這個 pytest 選項（`tests/conftest.py`），不走 nodeid 也不走 `-k`：
+    pytest 會把非 ASCII 的參數 id 轉義成十六進位，點名要載體自己複製一份轉義規則。
+    載體只算得出「哪幾個檔案路徑」，「那些檔裡有哪幾把刀」是 `tests/` 自己的知識。
+
+    這條線沒動過登記檔就直接綠——沒有刀可跑不是紅。反過來，動過的檔非空卻一把都選不到
+    是 fail-closed 的紅，那一格由 conftest 在收集當下判定。
+    """
+
+    def 檢查() -> tuple[bool, str]:
+        try:
+            檔們 = 動過的登記檔們(根目錄)
+        except 查不出動過哪些登記檔 as 原因:
+            # 清單算不出來就 fail-closed：當成「沒動過」會讓閘綠而一把刀都沒跑。
+            # 證據帶著失敗的那條 git 指令，看到紅的人才知道要去 fetch 哪個基準。
+            return False, f"[本線負控] 算不出這條 diff 動過哪些登記檔：{原因}"
+        if not 檔們:
+            # 沒動過登記檔就沒有刀可跑，那是綠的。證據那句話跟 conftest 共用同一份判定，
+            # 兩邊各寫一份的話會慢慢對不起來，而症狀是假綠。
+            return 判定選到的刀(檔們, 選到=())
+        跑這幾個檔的刀 = _外部指令(根目錄, "pytest", *負控檔們, "-q", *_指名這幾個登記檔(檔們))
+        return 跑這幾個檔的刀()
 
     return 檢查
 
@@ -292,6 +383,17 @@ def 建規則表(根目錄: Path) -> list[規則]:
             階段=測試,
             # 每把刀的 `最多秒` 是**牆鐘**：機器上多一個鄰居就可能把好測試殺成
             # 假紅（見 `載體/閘鎖.py`）。只有這一條要整台機器。
+            要幾個token=抽乾整池,
+        ),
+        規則(
+            代碼="registered-mutation-diff",
+            名稱="本線登記負控（只跑這條 diff 動過的登記檔）",
+            閘點=frozenset({"本線"}),
+            負責層="測試",
+            檢查=_本線登記負控(根目錄),
+            階段=測試,
+            # 跟 `registered-mutation` 同一份知識：每把刀的 `最多秒` 是**牆鐘**，
+            # 鄰居線同時在跑測試就會把好刀殺成假紅。它跑的把數少，要的機器一樣多。
             要幾個token=抽乾整池,
         ),
         規則(
