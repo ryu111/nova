@@ -14,7 +14,7 @@ from typing import NoReturn
 
 import coverage
 
-from .登記 import 替換一次, 變異
+from .登記 import 替換一次, 變異, 錨點失效訊息
 
 
 class 負控錯誤(RuntimeError):
@@ -180,8 +180,11 @@ def _推導破壞行(目標: Path, 一筆: 變異) -> frozenset[int]:
     if not isinstance(錨點, str) or not 錨點:
         _錯(f"RUN_ERROR：操作沒有可推導的文字錨點：{一筆.識別}")
     文字 = 目標.read_text(encoding="utf-8")
-    if 文字.count(錨點) != 1:
-        _錯(f"RUN_ERROR：錨點應恰好一次，實際 {文字.count(錨點)}：{錨點!r}")
+    次數 = 文字.count(錨點)
+    if 次數 != 1:
+        # 正式跑刀時**這裡比 `_確認錨點` 早**（覆蓋率前置就會走到），錨點壞掉的人
+        # 先看到的是這一份。三處說法共用同一個函式，看到哪一份都照得著改。
+        _錯(錨點失效訊息(一筆, 次數))
     起點 = 文字.index(錨點)
     終點 = 起點 + len(錨點) - 1
     首行 = 文字.count("\n", 0, 起點) + 1
@@ -306,10 +309,9 @@ def _判定覆蓋(
 
 
 def _確認錨點(一筆: 變異, 目標: Path) -> None:
-    錨點 = 一筆.操作.錨點
-    次數 = 目標.read_text(encoding="utf-8").count(錨點)
+    次數 = 目標.read_text(encoding="utf-8").count(一筆.操作.錨點)
     if 次數 != 1:
-        _錯(f"RUN_ERROR：錨點應恰好一次，實際 {次數}：{錨點!r}")
+        _錯(錨點失效訊息(一筆, 次數))
 
 
 def _判定結果(
