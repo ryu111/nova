@@ -6,6 +6,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # merge queue 排進去的暫時分支要跑同一套閘，不然隊列裡的 PR 永遠拿不到 `gates`
+  merge_group:
 
 jobs:
   gates:
