@@ -12,7 +12,11 @@ from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
-from nova.契約.模型回應 import 用量, 終局
+from nova.契約.模型回應 import 用量
+
+# **明著再匯出**：`步驟結果.終局` 就是這個型別，建一個步驟結果的人一定要拿得到它。
+# 逼呼叫端多 import 一個模組只是把同一個概念拆成兩個進貨門。
+from nova.契約.模型回應 import 終局 as 終局  # noqa: PLC0414 —— strict 模式要這樣才算明著匯出
 
 # 取別名是因為 `結束` 有個同名欄位：不換名字，那一格就得寫成 `護欄原因: 護欄原因 | None`。
 from nova.契約.護欄 import 護欄原因 as 護欄種類
@@ -201,6 +205,13 @@ class 任務:
     #: 它本來就能寫測試檔。預設 `False`：不新增保證的票（純重構、純文件）
     #: 不該被要求補負控，否則每張票都多付一次成本。
     新增保證: bool = False
+    #: 這張票要做完的那件事有多大。**由開票的人填，不是模型自己判的。**
+    #:
+    #: 只接給審查員：審查員的視野是整份 diff，票的視野是這一格範圍。
+    #: 超出範圍的發現寫成 `FOLLOW-UP:`（落成後續票），不寫成 `ISSUE:`（退回）。
+    #: 接給測試員／實作員等於多發一份可以自我豁免的話，所以那兩階不帶。
+    #: 空的是正常狀態：沒宣告範圍的票照舊。
+    範圍: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
