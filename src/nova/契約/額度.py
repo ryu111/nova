@@ -1,8 +1,16 @@
-"""額度契約：限額視窗、家族額度與額度快照之資料結構。"""
+"""額度契約：限額視窗、家族額度與額度快照之資料結構，以及重置時間的解析。
 
+前半是資料結構（`限額視窗`／`家族額度`／`額度快照`＋快取轉換）；
+後半是純函式 `解析重置時間`——把上游那句 `resets 4:40pm (Asia/Taipei)`
+解成一個釘死的 UTC 時刻，讀不出來就回 `None`（不猜）。
+"""
+
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if TYPE_CHECKING:
     from nova.載體.額度 import 快取資料型
@@ -68,3 +76,101 @@ def 快取轉快照(快取: "快取資料型 | Mapping[str, Any]") -> 額度快�
             )
         )
     return 額度快照(時間=全域ts, 家族們=tuple(家族清單))
+
+
+_星期表: dict[str, int] = {
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+}
+
+#: 一小時最多幾分；`4:99pm` 這種讀不出來就不猜。
+_一小時的分鐘數 = 60
+
+#: 12 小時制的鐘面只有 1～12。`0:00pm`／`13:00pm`／`99:00pm` 都是**認不得的字**，
+#: 不是另一種寫法——拿 `% 12` 去湊會對一串沒看懂的文字回一個型別正確的時刻，
+#: 而上層（接續票的 `不早於`、收件匣的時間門）分辨不出它是猜的。
+_鐘面最小, _鐘面最大 = 1, 12
+
+#: 下午要往前挪的那半天。**跟 `_鐘面最大` 同值，但不是同一件事**：一個是
+#: 「鐘面認得的最大數字」，一個是「pm 要加幾小時」。共用一個名字的話，
+#: 讀的人得自己判斷這裡的 12 是哪一個 12。
+_半天的小時數 = 12
+
+#: claude 的講法：`resets 4:40pm (Asia/Taipei)`、`resets 3:45pm`、`resets Mon 12:00am`。
+#: 星期、時區都是選填；讀不出來的一律不猜（回 None），別家的寫法也不接。
+_重置樣式 = re.compile(
+    r"resets\s+(?:(mon|tue|wed|thu|fri|sat|sun)\b\s+)?"
+    r"(\d{1,2}):(\d{2})\s*(am|pm)"
+    r"(?:\s*\(([^)]+)\))?(?!\s*\()",
+    re.IGNORECASE,
+)
+
+
+def _讀時區(時區名: str | None, 本機時區: tzinfo) -> tzinfo | None:
+    """括號裡有時區名就照它，認不得就回 None（不猜）；沒括號才用本機時區。"""
+    if 時區名 is None:
+        return 本機時區
+    try:
+        return ZoneInfo(時區名.strip())
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def _讀時分(時字: str, 分字: str, 上下午: str) -> tuple[int, int] | None:
+    """12 小時制轉 24 小時制；時或分越界就回 None（**不拿餘數去湊**）。"""
+    分 = int(分字)
+    if 分 >= _一小時的分鐘數:
+        return None
+    時 = int(時字)
+    if not (_鐘面最小 <= 時 <= _鐘面最大):
+        return None
+    if 時 == _鐘面最大:  # 鐘面的 12 點是一天的 0 點；12pm 會在下面加回半天成 12
+        時 = 0
+    if 上下午.lower() == "pm":
+        時 += _半天的小時數
+    return 時, 分
+
+
+def _挪到未來(重置當地: datetime, 現在當地: datetime, 星期字: str | None) -> datetime:
+    """把當天那個時刻挪到 `現在當地` 之後：帶星期就挪到下一個那個星期幾，沒帶就頂多挪一天。
+
+    解出一個已經過去的時刻等於沒等——收件匣的時間門會當場放行、馬上再撞一次額度。
+    """
+    if 星期字 is None:
+        return 重置當地 if 重置當地 > 現在當地 else 重置當地 + timedelta(days=1)
+    差幾天 = (_星期表[星期字.lower()] - 重置當地.weekday()) % 7
+    if 差幾天 == 0 and 重置當地 <= 現在當地:
+        差幾天 = 7
+    return 重置當地 + timedelta(days=差幾天)
+
+
+def 解析重置時間(文字: str, *, 現在: datetime, 本機時區: tzinfo) -> datetime | None:
+    """把 claude 的 `resets …` 講法解成一個釘死的 aware UTC 時刻；讀不出來就回 None。
+
+    括號裡有時區就以它為準（本機時區完全不參與）；沒有括號才用 `本機時區`。
+    解出來的時刻**一定在 `現在` 之後**：今天那個時刻已經過了就推到隔天，
+    帶星期的就推到下一個那天。認不得的時區名、別家（agy／codex）的寫法一律回 None——
+    猜錯的代價是再撞一次額度或整條線白躺著，不猜才是安全的一邊。
+    """
+    命中 = _重置樣式.search(文字)
+    if 命中 is None:
+        return None
+    星期字, 時字, 分字, 上下午, 時區名 = 命中.groups()
+
+    時區 = _讀時區(時區名, 本機時區)
+    if 時區 is None:
+        return None
+
+    時分 = _讀時分(時字, 分字, 上下午)
+    if 時分 is None:
+        return None
+    時, 分 = 時分
+
+    現在當地 = 現在.astimezone(時區)
+    當天那個時刻 = 現在當地.replace(hour=時, minute=分, second=0, microsecond=0)
+    return _挪到未來(當天那個時刻, 現在當地, 星期字).astimezone(UTC)
